@@ -21,6 +21,7 @@ impl Default for Identity {
 
 static IDENTITY: OnceLock<Identity> = OnceLock::new();
 
+#[cfg(any(windows, target_os = "linux"))]
 pub(crate) fn current() -> &'static Identity {
     IDENTITY.get_or_init(Identity::default)
 }

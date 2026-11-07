@@ -1371,7 +1371,7 @@ impl<'a, A: Clone> Builder<'a, A> {
         &mut self,
         key: Key,
         rect: Rect,
-        /// Current slider value.
+        // Current slider value.
         value: f64,
         (min, max, step): (f64, f64, f64),
         value_text: &str,

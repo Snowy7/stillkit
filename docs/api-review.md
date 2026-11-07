@@ -1010,7 +1010,7 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 7: pub struct Identity {
 9: pub prefix: &'static str,
 13: pub desktop_classes: &'static [&'static str],
-31: pub fn set_identity(identity: Identity) -> Result<(), Identity> {
+32: pub fn set_identity(identity: Identity) -> Result<(), Identity> {
 ```
 
 
