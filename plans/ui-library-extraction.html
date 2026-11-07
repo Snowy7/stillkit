@@ -240,6 +240,30 @@ tx.set_theme(Theme::one_ui(..))                      // live switch; colours spr
   <li><strong>Docs and 0.1 (S).</strong> README, docs per layer, examples, then decide on crates.io.</li>
 </ol>
 
+<h2>Progress</h2>
+<ul>
+  <li><strong>Phase 0: done.</strong> <code>Snowy7/stillkit</code> is private, with 109 commits of history. mypaper branch <code>t3/0d9e3250</code> (<code>9ce3cd86</code>) builds on it under its old crate name, so no call site changed; <code>set_identity</code> keeps its window class names. Against untouched <code>main</code>, shell, Studio and Files fail the same tests (11 + 4, all already failing on <code>main</code>) with identical golden pixel diffs.</li>
+  <li><strong>Running:</strong> phase 1 (platform seam), phase 3 (element tree and agent tooling), and the looks as mixable parts, each on its own stillkit branch.</li>
+  <li><strong>macOS spike:</strong> waits for the MacBook.</li>
+</ul>
+
+<h3 id="linux">Linux spike (m6u, GNOME 50.1 Wayland)</h3>
+<p><span class="tag fact">Measured</span>Same Control Center panel, release builds, real GNOME session. Full report: <code>docs/research/linux-spike/report.md</code> in stillkit.</p>
+<table>
+  <tr><th></th><th>Private, 10 s / end</th><th>Full draw 1× / 2× (median)</th><th>One label</th><th>First commit</th></tr>
+  <tr><td>Blank wl_shm client</td><td>1.4 / 1.4 MiB</td><td>–</td><td>–</td><td>7 ms</td></tr>
+  <tr><td>tiny-skia + cosmic-text + swash</td><td>5.0 / 6.1 MiB</td><td>4.7 / 16.8 ms</td><td>0.02 ms</td><td>27 ms</td></tr>
+  <tr><td><strong>vello_cpu, atlas off</strong></td><td><strong>6.5 / 7.2 MiB</strong></td><td><strong>0.52 / 1.14 ms</strong></td><td>0.03 ms</td><td>25 ms</td></tr>
+  <tr><td>vello_cpu, stock atlas</td><td>71 / 135 MiB</td><td>0.49 / 1.13 ms</td><td>0.02 ms</td><td>51 ms</td></tr>
+</table>
+<ul>
+  <li>No GPU library loaded in any run. No commits and zero CPU ticks in steady idle. Damage was exactly the slider or the label.</li>
+  <li>vello_cpu's stock glyph atlas allocates 64 MiB pages: a CPU cache can rebuild the GPU memory problem. Off, it keeps nearly all its speed.</li>
+  <li>tiny-skia's full draw is dominated by the uncached soft shadow; at 2× it reached only half the frame rate.</li>
+  <li><strong>GNOME has no layer-shell:</strong> a real bar or overlay there needs a GNOME Shell extension. KDE and wlroots have wlr-layer-shell. X11 uses dock windows and struts.</li>
+  <li>IME: text-input-v3 in Mutter and KWin, IBus as fallback. Accessibility: AccessKit's AT-SPI adapter. Blur: KDE's blur protocol; newer Mutter has <code>ext-background-effect-v1</code>, not yet on this host.</li>
+</ul>
+
 <h2>Risks</h2>
 <ul>
   <li><strong>Scope.</strong> Cross-platform from day one is the biggest risk: IME and accessibility alone are large on each OS. Phases 7 and 8 can slip without blocking mypaper, which only needs Windows.</li>
@@ -255,7 +279,8 @@ tx.set_theme(Theme::one_ui(..))                      // live switch; colours spr
   <tr><td><span class="tag fact">Decided</span></td><td>GitHub owner and visibility</td><td><code>Snowy7/stillkit</code>, private until 0.1</td></tr>
   <tr><td><span class="tag fact">Decided</span></td><td>Linux test machine</td><td><code>m6u</code> (Ubuntu 26.04 GNOME, Radeon 760M)</td></tr>
   <tr><td><span class="tag fact">Decided</span></td><td>mypaper's <code>main</code></td><td>left alone for now; the switch-over is on branch <code>t3/0d9e3250</code></td></tr>
-  <tr><td><span class="tag open">After phase 2</span></td><td>Renderer on macOS and Linux</td><td>Native 2D (CoreGraphics; Cairo is not proposed) or tiny-skia, decided from the spike numbers</td></tr>
+  <tr><td><span class="tag open">Your OK</span></td><td>Renderer on Linux (spike done)</td><td>Recommended: <code>vello_cpu</code> 0.3 with its bitmap atlas off, cosmic-text + fontconfig, raw wayland-client + wl_shm. See <a href="#linux">Linux spike</a>.</td></tr>
+  <tr><td><span class="tag open">After its spike</span></td><td>Renderer on macOS</td><td>CoreGraphics + CoreText, or the Linux choice; waits for the MacBook</td></tr>
 </table>
 
 <h2>Next step</h2>
