@@ -57,9 +57,6 @@ TextFieldFrame is intentionally a frame, not an editor.
   API currently permits changing this. The kit leaves runtime ownership intact.
 - **Arc primitive:** an element arc/ring with themed stroke width, background track
   and fraction. Required for Ring without importing display-list/Frame painting.
-- **Anchored overlays:** anchor key, placement/edge flipping, lifecycle, focus return,
-  dismissal and accessible relationships. Needed for Tooltip (hover/focus lifecycle)
-  and later Select, Menu, Popover, Dialog, Toast. No overlay substitutes are shipped.
 - **Scroll viewport:** clipped content/hits, wheel/keyboard scrolling, focus reveal,
   offset and scrollbar; required before ScrollView and long menus.
 - **Text input:** native editing/IME, selection, caret, value/change semantics and
@@ -138,3 +135,84 @@ check first-frame/idle behavior, pill bounds, intermediate travel, reduced motio
 instant updates and slider drag snapping. Static sheets settle interaction input
 before capture. Ring, Tooltip and keyboard stepping remain deferred for the el
 capability work; no files under `crates/stillkit` were changed.
+
+
+## Overlays
+
+Implemented in separate modules: `Menu`, `MenuItem`, `ContextMenu`, `Select`,
+`Popover`, `Dialog`, `AlertDialog`, `Toast`, `Toaster`, and `Tooltip`.
+These supersede the older deferred-overlay notes above. All surfaces resolve theme
+values; no component inspects a look name. Existing public contrast helpers are
+reused without changes; overlay-specific surface/ink helpers live in a new module.
+
+`Menu::new().item(MenuItem::new("Copy").on_press(..)).on_dismiss(..).overlay()`
+returns an el overlay to attach to a trigger. Configure `open`, `side`, `align`,
+`anchor` and `offset` on that overlay. `Menu::build()` returns content for custom
+composition; its dismissal callback then runs on activation only. Rows support
+`icon`, `shortcut`, `checked` or `radio`, and `disabled`; menus support `section`
+and `separator`. Runtime's vertical focus group skips disabled rows, wraps with
+arrows and handles Home/End; Enter/Space activate. With `on_dismiss`, an action
+runs first and then closes. Use stable item keys when changing the menu contents.
+`ContextMenu::attach(target, point, menu, on_open)` wires window-space points from
+secondary clicks or the Menu key. The model stores `Option<(f32, f32)>`.
+
+`Select::new(label, options, selected_index, open, on_open, on_change).key(..)`
+combines a value-bearing ComboBox trigger with a match-width radio menu.
+Opening focuses the checked option, and selection calls `on_change` then closes
+through `on_open(false)`. Enter/Space toggle it; Down opens it (including Alt+Down
+when delivered as Down). el does not expose key modifiers or committed text yet,
+so precise Alt-only handling and character typeahead still need el support.
+An invalid selected index displays an empty value. Supply unique select keys when
+composing multiple selects.
+
+`Popover::new(body_el).title(..).actions(action_row).build()` returns elevated
+content to wrap in `el::popover(..)`. Title and actions are optional.
+`Dialog::new(title, body, on_dismiss).confirm(label, action).build()` returns a
+modal el overlay; apply `.open(model.open)` and attach it to the opening button.
+Cancel is selected for safe initial focus. Both buttons use the existing Button;
+confirmation runs its action and then dismisses, while Escape, Cancel and backdrop
+presses dismiss without confirmation. `destructive(true)` changes confirmation
+emphasis. `AlertDialog` uses AlertDialog semantics and destructive emphasis with
+the same safe focus. Runtime traps focus and restores the trigger on closure.
+
+`Toast::new(unique_key, message).icon(..).action(label, callback)` builds a Status
+node (the host maps Status to a polite live region). `.timeout(duration, dismiss)`
+returns the element with a one-shot `on_timeout`; the callback must remove the
+keyed toast from model state. A key represents one notification lifetime: do not
+reuse it for a replacement notification. `Toaster::new().child(toast_el).build()`
+returns the bottom-right stack overlay. No kit clock, thread or recurring timer
+is created. `Tooltip::attach(trigger, text)` delegates to `.tooltip(text)`;
+el supplies elevated fill, Footnote type, a small radius, shadow, delayed hover
+and focus opening, accessible description, and no tooltip hit target.
+
+Overlay panels use `MOTION_OPEN` and scale/fade presence; toasts slide/fade from
+the bottom. el owns reduced motion and idle disarming. **Still needed from el:**
+transition origins tied to the final anchor side after flips (the current scale
+primitive only scales about the centre), and tooltip style/motion overrides if
+custom type or presence beyond el's themed default is needed. Tooltips currently
+fade using el's open spring automatically. Popup surfaces and boundary flips are
+entirely runtime-owned; kit creates no native windows.
+
+`cargo run -p stillkit-kit --example kit_overlays` writes twelve
+`docs/media/kit/overlays-<look>-<scheme>.png` sheets: all five presets in light and
+dark plus One UI with Liquid material. Each sheet uses independent Runtime cells
+to show simultaneously open menus, select, popover, both dialog kinds, toast and
+an actual delayed tooltip. Golden comparisons and behaviour tests live in
+`tests/overlays.rs`. All twelve PNGs were opened and visually inspected.
+
+Compared with `docs/media/native/kit-liquid-dark.png`, menus retain the old
+32px rows, 6px padding, 30px leading gutter, 224px minimum width, 9px separator
+slots, Body typography, vector icons, check/radio marks and concentric row radius.
+The elevated theme fill replaces wallpaper-dependent native glass in headless
+sheets; elevation uses the theme shadow, and accessible ink is contrast-adjusted.
+Section headings and shortcut hints extend the old menu. Cascading submenus are
+outside this component's scope. One UI + Liquid material has the same opaque
+fallback in these snapshots; actual glass is supplied by the host.
+
+Overlay validation: `cargo test -p stillkit-kit` passes all 22 tests (ten overlay,
+three motion, nine existing runtime tests); `cargo clippy -p stillkit-kit
+--all-targets` is warning-free. `cargo check -p stillkit-kit --target
+x86_64-unknown-linux-gnu` passes with the existing core a11y dead-code warnings.
+All commands used `CARGO_TARGET_DIR=C:\mypaper-targets\stillkit\K\target`;
+tests and gallery used the documented LLVM override. The twelve-sheet final
+visual audit is also recorded in `docs/media/kit/overlays-overview.png`.
