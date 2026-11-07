@@ -1,7 +1,7 @@
 //! Theme-driven components built only from public elements. Model values are supplied by views.
 use std::sync::Arc;
 use stillkit::el::{
-    Align, El, Justify, Len, Paint, Transition, col, el, grid, icon, row, text, token,
+    Align, El, Justify, Len, Orientation, Paint, Transition, col, el, grid, icon, row, text, token,
 };
 pub use stillkit::icons::Icon;
 use stillkit::{Rgba, Role, TextRole, Theme};
@@ -426,6 +426,7 @@ impl<S: 'static> Slider<S> {
             .radius(token::RADIUS_CONTROL)
             .role(Role::Slider)
             .label(format!("{} {}%", self.label, (self.value * 100.).round()))
+            .range(0., 1., f64::from(self.step), f64::from(self.value))
             .child(track(
                 self.value,
                 if self.glyph.is_some() { 28. } else { 4. },
@@ -435,6 +436,14 @@ impl<S: 'static> Slider<S> {
             ));
         if let Some(f) = self.change {
             let step = self.step;
+            let change = f.clone();
+            let value = self.value;
+            let current = std::cell::Cell::new(f64::from(value));
+            n = n.on_step(move |s, delta| {
+                let next = (current.get() + delta).clamp(0., 1.);
+                current.set(next);
+                change(s, next as f32);
+            });
             n = n.on_drag(move |s, x, _| f(s, ((x / step).round() * step).clamp(0., 1.)));
         }
         if let Some(k) = self.key {
@@ -444,7 +453,7 @@ impl<S: 'static> Slider<S> {
             .opacity(if self.disabled { 0.45 } else { 1. })
     }
 }
-/// Radio group; keyboard activation works, arrow navigation needs an el key handler.
+/// Radio selection with one Tab stop and wrapping arrow navigation.
 pub struct RadioGroup<S> {
     label: Arc<str>,
     options: Vec<Arc<str>>,
@@ -493,7 +502,15 @@ impl<S: 'static> RadioGroup<S> {
         } else {
             col().gap(4.)
         };
-        root = root.role(Role::RadioGroup).label(self.label);
+        root = root
+            .role(Role::RadioGroup)
+            .label(self.label)
+            .focus_group(if self.segmented {
+                Orientation::Horizontal
+            } else {
+                Orientation::Vertical
+            })
+            .select_follows_focus();
         if self.segmented && count > 0 {
             // A zero-height rail shares the options' width and draws the plate behind them.
             // Keep the plate under this stable parent so selection retargets its position.
@@ -534,7 +551,8 @@ impl<S: 'static> RadioGroup<S> {
                 .radius(token::RADIUS_CONTROL)
                 .role(Role::RadioButton)
                 .label(label.clone())
-                .checked(i == self.selected);
+                .checked(i == self.selected)
+                .selected(i == self.selected);
             if self.segmented {
                 n = n.w(0.).min_w(0.).grow(1.);
             } else {
@@ -618,6 +636,7 @@ impl Progress {
         track(self.value, 4., None, &None, false)
             .role(Role::ProgressIndicator)
             .label(format!("{} {}%", self.label, (self.value * 100.).round()))
+            .range(0., 1., 0.01, f64::from(self.value))
     }
 }
 /// Small status label.
@@ -1122,3 +1141,15 @@ pub use popover::Popover;
 pub use dialog::{Dialog, AlertDialog};
 pub use toast::{Toast, Toaster};
 pub use tooltip::Tooltip;
+
+// Layout and data
+mod chart;
+mod data;
+mod feedback;
+mod navigation;
+mod stepper;
+pub use chart::{Chart, ChartSeries, QuotaBar};
+pub use data::{ScrollView, SortDirection, Table, Tree, TreeNode};
+pub use feedback::{Avatar, Ring, Skeleton, Spinner};
+pub use navigation::{Accordion, Disclosure, Sidebar, Tabs, Toolbar};
+pub use stepper::Stepper;
