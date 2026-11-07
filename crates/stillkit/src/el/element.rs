@@ -126,6 +126,7 @@ impl Transition {
 #[derive(Default)]
 pub struct Tx {
     pub(crate) instant: bool,
+    pub(crate) mods: Modifiers,
     pub(crate) theme: Option<Theme>,
     pub(crate) reveal: Vec<Key>,
 }
@@ -134,6 +135,12 @@ impl Tx {
     /// Applies this change with no motion: everything lands on its target at once.
     pub fn instant(&mut self) {
         self.instant = true;
+    }
+
+    /// The modifier keys held with the key an [`El::on_key`] handler is looking at (none for a
+    /// press or a timer).
+    pub fn modifiers(&self) -> Modifiers {
+        self.mods
     }
 
     /// A new look for the whole view; colours spring across where elements have motion.
@@ -167,12 +174,44 @@ impl KeyCode {
     pub const UP: Self = Self(0x26);
     pub const RIGHT: Self = Self(0x27);
     pub const DOWN: Self = Self(0x28);
+    pub const INSERT: Self = Self(0x2D);
     pub const DELETE: Self = Self(0x2E);
 
     /// A letter or digit key (`KeyCode::of('A')`): its virtual-key code is the upper-case
     /// ASCII character.
     pub const fn of(c: char) -> Self {
         Self(c.to_ascii_uppercase() as u16)
+    }
+}
+
+/// The modifier keys held with a key ([`Tx::modifiers`], [`super::Runtime::key_with`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Modifiers {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    /// The Windows or Super key.
+    pub meta: bool,
+}
+
+impl Modifiers {
+    pub const NONE: Self = Self { shift: false, ctrl: false, alt: false, meta: false };
+    pub const SHIFT: Self = Self { shift: true, ..Self::NONE };
+    pub const CTRL: Self = Self { ctrl: true, ..Self::NONE };
+    pub const ALT: Self = Self { alt: true, ..Self::NONE };
+}
+
+/// Both sets held: `Modifiers::CTRL | Modifiers::SHIFT`.
+impl std::ops::BitOr for Modifiers {
+    type Output = Self;
+
+    fn bitor(self, o: Self) -> Self {
+        Self {
+            shift: self.shift || o.shift,
+            ctrl: self.ctrl || o.ctrl,
+            alt: self.alt || o.alt,
+            meta: self.meta || o.meta,
+        }
     }
 }
 
@@ -272,6 +311,10 @@ pub(crate) type Drag<S> = Box<dyn Fn(&mut S, f32, f32)>;
 pub(crate) type OnKey<S> = Box<dyn Fn(&mut S, KeyCode, &mut Tx) -> Handled>;
 /// A range's step handler ([`El::on_step`]): the change in value.
 pub(crate) type OnStep<S> = Box<dyn Fn(&mut S, f64)>;
+/// A character handler ([`El::on_char`]).
+pub(crate) type OnChar<S> = Box<dyn Fn(&mut S, char, &mut Tx) -> Handled>;
+/// A text field's handler ([`El::on_input`], [`El::on_submit`]): the field's text.
+pub(crate) type OnText<S> = Box<dyn Fn(&mut S, &str)>;
 /// A context-menu handler ([`El::on_context_menu`]): where, in design px.
 pub(crate) type OnContext<S> = Box<dyn Fn(&mut S, f32, f32)>;
 /// A timeout handler ([`El::on_timeout`]).
@@ -299,9 +342,27 @@ pub(crate) struct ArcLook {
     pub track: Option<Paint>,
 }
 
+/// A text field's options ([`text_input`], [`text_area`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FieldSpec {
+    pub multiline: bool,
+    /// The text the view gives it (`None`: the field keeps its own).
+    pub value: Option<Arc<str>>,
+    pub placeholder: Option<Arc<str>>,
+    pub secure: bool,
+    pub max_len: Option<usize>,
+    pub read_only: bool,
+    pub select_all: bool,
+    pub role: TextRole,
+    /// A text area's height in lines when it is given none.
+    pub rows: usize,
+}
+
 pub(crate) enum What {
     /// `el()`, `row()`, `col()` and `grid(..)`: a container.
     Box(Flow),
+    /// [`text_input`] and [`text_area`].
+    Field(FieldSpec),
     Text {
         text: Arc<str>,
         role: TextRole,
@@ -390,6 +451,9 @@ pub struct El<S> {
     pub(crate) scroll: Option<Axis>,
     pub(crate) on_context: Option<OnContext<S>>,
     pub(crate) on_timeout: Option<OnTimeout<S>>,
+    pub(crate) on_char: Option<OnChar<S>>,
+    pub(crate) on_input: Option<OnText<S>>,
+    pub(crate) on_submit: Option<OnText<S>>,
     /// Overlays declared here ([`El::overlay`]); the runtime lifts them above the content
     /// after each view run.
     pub(crate) overlays: Vec<super::Overlay<S>>,
@@ -422,6 +486,9 @@ fn new<S>(what: What) -> El<S> {
         scroll: None,
         on_context: None,
         on_timeout: None,
+        on_char: None,
+        on_input: None,
+        on_submit: None,
         overlays: Vec::new(),
         popup: None,
         tip: None,
@@ -457,6 +524,41 @@ pub fn text<S>(text: impl Into<Arc<str>>) -> El<S> {
         role: TextRole::Body,
         wrap: None,
     })
+}
+
+fn field<S>(key: Key, multiline: bool) -> El<S> {
+    let mut el = new(What::Field(FieldSpec {
+        multiline,
+        value: None,
+        placeholder: None,
+        secure: false,
+        max_len: None,
+        read_only: false,
+        select_all: false,
+        role: TextRole::Body,
+        rows: 3,
+    }));
+    el.key = Some(key);
+    el
+}
+
+/// A one-line text field named `key`: caret, selection, mouse and keyboard editing, undo,
+/// the clipboard and IME. Give it its text with [`El::value`] and take edits with
+/// [`El::on_input`] (the view owns the string: a value the view doesn't take back stays as
+/// it was); Enter runs [`El::on_submit`]. It is one line of its type role tall plus its
+/// padding, and only as wide as it is given (`w`, `grow`, `w_full`). Long text scrolls
+/// sideways to keep the caret in sight. Caret moves, selection and the caret's blink never
+/// run the view.
+pub fn text_input<S>(key: impl Into<Key>) -> El<S> {
+    field(key.into(), false)
+}
+
+/// A text field of several lines named `key`, wrapping at word boundaries; Enter starts a new
+/// line (Ctrl+Enter submits). Text taller than the box scrolls in it like a scroll view (the
+/// wheel, the overlay scrollbar, the caret kept in sight). [`El::rows`] lines tall (3) unless
+/// sized. Otherwise as [`text_input`].
+pub fn text_area<S>(key: impl Into<Key>) -> El<S> {
+    field(key.into(), true)
 }
 
 /// A vector icon filling a square box, [`super::token::ICON`] across unless sized.
@@ -640,11 +742,77 @@ impl<S> El<S> {
         self
     }
 
-    /// A text element's role in the theme's type ramp.
+    /// A text element's (or field's) role in the theme's type ramp.
     pub fn font(mut self, role: TextRole) -> Self {
-        if let What::Text { role: r, .. } = &mut self.what {
-            *r = role;
+        match &mut self.what {
+            What::Text { role: r, .. } => *r = role,
+            What::Field(f) => f.role = role,
+            _ => {}
         }
+        self
+    }
+
+    // ---- Text fields ----------------------------------------------------------------------
+
+    fn spec(&mut self, set: impl FnOnce(&mut FieldSpec)) -> &mut Self {
+        if let What::Field(f) = &mut self.what {
+            set(f);
+        }
+        self
+    }
+
+    /// A field's hint while it is empty, in the theme's tertiary ink. Assistive technology
+    /// reads it as the name when the field has no [`label`](Self::label).
+    pub fn placeholder(mut self, text: impl Into<Arc<str>>) -> Self {
+        let text = text.into();
+        self.spec(|f| f.placeholder = Some(text));
+        self
+    }
+
+    /// A password field: bullets on screen, no copy or cut, and no text for assistive
+    /// technology.
+    pub fn secure(mut self) -> Self {
+        self.spec(|f| f.secure = true);
+        self
+    }
+
+    /// The most characters a field takes; typing and pasting stop there.
+    pub fn max_len(mut self, chars: usize) -> Self {
+        self.spec(|f| f.max_len = Some(chars));
+        self
+    }
+
+    /// A field that can be focused, selected and copied, but not changed.
+    pub fn read_only(mut self) -> Self {
+        self.spec(|f| f.read_only = true);
+        self
+    }
+
+    /// Selects a field's whole text whenever it gets focus (a search or rename field).
+    pub fn select_all_on_focus(mut self) -> Self {
+        self.spec(|f| f.select_all = true);
+        self
+    }
+
+    /// A [`text_area`]'s height in lines when it isn't sized (3 by default).
+    pub fn rows(mut self, rows: usize) -> Self {
+        self.spec(|f| f.rows = rows.max(1));
+        self
+    }
+
+    /// Runs on `&mut S` with a field's new text after each edit (typing, deleting, pasting,
+    /// undo, an IME commit): `on_input(|s, text| s.name = text.into())`. The view runs again,
+    /// and what it gives [`value`](Self::value) is what the field shows: give the old text
+    /// back to refuse the edit, or another to change it.
+    pub fn on_input(mut self, handler: impl Fn(&mut S, &str) + 'static) -> Self {
+        self.on_input = Some(Box::new(handler));
+        self
+    }
+
+    /// Runs on `&mut S` with a field's text when Enter goes down in a [`text_input`] (Ctrl+Enter
+    /// in a [`text_area`]). Without it, Enter goes on to the field's ancestors.
+    pub fn on_submit(mut self, handler: impl Fn(&mut S, &str) + 'static) -> Self {
+        self.on_submit = Some(Box::new(handler));
         self
     }
 
@@ -696,9 +864,14 @@ impl<S> El<S> {
     }
 
     /// The value as assistive technology reads it ("40%", "Medium"), for a range or any
-    /// control showing a value.
+    /// control showing a value. On a [`text_input`] or [`text_area`], its text (which is also
+    /// what assistive technology reads, unless it is [`secure`](Self::secure)).
     pub fn value(mut self, value: impl Into<Arc<str>>) -> Self {
-        self.sem.value = Some(value.into());
+        let value = value.into();
+        match &mut self.what {
+            What::Field(f) => f.value = Some(value),
+            _ => self.sem.value = Some(value),
+        }
         self
     }
 
@@ -871,6 +1044,15 @@ impl<S> El<S> {
         self
     }
 
+    /// Runs on `&mut S` when a character is typed while focus is on the element or inside it,
+    /// the innermost first, after a focused text field (which takes every character it can):
+    /// type-ahead in a list, `/` opening a search. Like [`on_key`](Self::on_key), a used
+    /// character re-runs the view and goes no further.
+    pub fn on_char(mut self, handler: impl Fn(&mut S, char, &mut Tx) -> Handled + 'static) -> Self {
+        self.on_char = Some(Box::new(handler));
+        self
+    }
+
     /// Runs on `&mut S` when the keyboard or assistive technology steps a
     /// [`range`](Self::range), with the change in value (the new value less the shown one,
     /// within `min..=max`): Right and Up add a step, Left and Down take one, Page Up and Page
@@ -931,6 +1113,15 @@ impl<S> El<S> {
             || self.on_step.is_some()
             || self.sem.focusable
             || self.scroll.is_some() && matches!(self.what, What::Box(_))
+            || self.field().is_some()
+    }
+
+    /// Its options, if it is a text field.
+    pub(crate) fn field(&self) -> Option<&FieldSpec> {
+        match &self.what {
+            What::Field(f) => Some(f),
+            _ => None,
+        }
     }
 
     /// Whether it is a scroll view (only boxes scroll).

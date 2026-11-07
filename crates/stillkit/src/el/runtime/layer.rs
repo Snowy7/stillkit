@@ -659,7 +659,7 @@ impl<S> Runtime<S> {
     /// When the runtime next needs a frame though nothing moves (a tooltip's delay, an
     /// [`El::on_timeout`]), on its clock ([`Runtime::now`]); `None` once nothing waits.
     pub fn wake_at(&self) -> Option<Duration> {
-        self.tip.due.into_iter().chain(self.timers.values().flatten().copied()).min()
+        self.tip.due.into_iter().chain(self.timers.values().flatten().copied()).chain(self.blink_due()).min()
     }
 
     /// The screen area overlays may use beyond the window (device px from the window's

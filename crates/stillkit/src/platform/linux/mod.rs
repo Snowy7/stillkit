@@ -5,6 +5,7 @@ pub mod glass;
 pub mod gpu;
 #[cfg(feature = "gpu")]
 mod gpu_glass;
+pub mod caret;
 pub mod host;
 mod keyboard;
 pub mod render;

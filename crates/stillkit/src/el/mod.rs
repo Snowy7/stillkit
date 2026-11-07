@@ -37,7 +37,10 @@
 //!   doesn't fit).
 
 mod animate;
+mod clipboard;
+mod edit;
 mod element;
+mod field;
 mod host;
 mod json;
 mod layout;
@@ -48,10 +51,11 @@ mod scroll;
 pub mod token;
 
 pub use element::{
-    Align, ArcStart, Axis, El, Handled, Justify, Key, KeyCode, Len, Motion, Orientation, Paint, Painter,
-    Transition, Tx, arc, col, el, grid, icon, image, paint, row, text,
+    Align, ArcStart, Axis, El, Handled, Justify, Key, KeyCode, Len, Modifiers, Motion, Orientation, Paint,
+    Painter, Transition, Tx, arc, col, el, grid, icon, image, paint, row, text, text_area, text_input,
 };
 pub use crate::platform::current::host::reduced_motion;
+pub use clipboard::{Clipboard, Memory as MemoryClipboard};
 pub use host::{App, Input, Script, run};
 /// What a trigger opens, as [`crate::Detail::popup`] tells assistive technology.
 pub use accesskit::HasPopup;

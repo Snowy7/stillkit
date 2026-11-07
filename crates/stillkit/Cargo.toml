@@ -12,6 +12,7 @@ anyhow.workspace = true
 log.workspace = true
 # Golden-image comparison (`golden` feature), for tests in this crate and the shell.
 png = { workspace = true, optional = true }
+unicode-segmentation = "1.12"
 taffy = { version = "0.15.1", default-features = false, features = ["std", "flexbox", "grid", "taffy_tree"] }
 
 serde = { version = "1", features = ["derive"], optional = true }
