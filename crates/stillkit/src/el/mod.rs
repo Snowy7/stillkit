@@ -50,5 +50,7 @@ pub use element::{
 };
 pub use crate::platform::current::host::reduced_motion;
 pub use host::{App, Input, Script, run};
+/// What a trigger opens, as [`crate::Detail::popup`] tells assistive technology.
+pub use accesskit::HasPopup;
 pub use overlay::{Overlay, Side, TOOLTIP_DELAY, dialog, menu, popover, toasts};
 pub use runtime::{Change, Popup, Runtime, Shown, Snapshot};

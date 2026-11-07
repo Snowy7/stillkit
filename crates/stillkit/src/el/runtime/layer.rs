@@ -65,8 +65,6 @@ pub(super) struct Tip {
     pub trigger: Option<u64>,
     pub due: Option<Duration>,
     pub shown: bool,
-    /// Pressed or Escaped: none until the pointer and focus move to another trigger.
-    pub quiet: bool,
 }
 
 /// How paint treats an overlay entry (by its place in `laid`).
@@ -502,10 +500,10 @@ impl<S> Runtime<S> {
         use crate::Event;
         match *event {
             Event::Press(p, _) | Event::DoubleClick(p, _) => {
-                if self.tip.trigger.is_some() {
-                    self.hide_tip();
-                    self.tip.quiet = true;
-                }
+                // A press closes a tooltip, and its trigger shows none until the pointer leaves.
+                self.hide_tip();
+                let under = self.list.hit_at(p.at).map(|h| h.id);
+                self.tip.trigger = under.and_then(|h| self.tips.iter().find(|(id, _)| hit_of(*id) == h)).map(|(id, _)| *id);
                 let mut dismiss = Vec::new();
                 let mut kept = false;
                 for layer in self.layers.iter().rev().filter(|l| l.kind.light()) {

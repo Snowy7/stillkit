@@ -695,17 +695,15 @@ impl<S> Runtime<S> {
             Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
             Event::Wheel(p, delta) => {
                 self.pointer = Some(p);
-                if self.tip.trigger.is_some() {
-                    self.hide_tip();
-                    self.tip.quiet = true;
-                }
+                // Scrolling closes a tooltip; its trigger shows none until the pointer leaves.
+                self.hide_tip();
                 return self.wheel(p.at, delta);
             }
             Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) => self.pointer = Some(p),
             Event::Leave => self.pointer = None,
             _ => {}
         }
-        if (!self.layers.is_empty() || self.tip.trigger.is_some()) && self.overlay_input(event) {
+        if (!self.layers.is_empty() || !self.tips.is_empty()) && self.overlay_input(event) {
             return;
         }
         if let Event::Release(p, Button::Right) = *event {
@@ -776,7 +774,6 @@ impl<S> Runtime<S> {
     fn key_down(&mut self, key: KeyCode) -> bool {
         if key == KeyCode::ESCAPE && self.tip.shown {
             self.hide_tip();
-            self.tip.quiet = true;
             return true;
         }
         let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit));

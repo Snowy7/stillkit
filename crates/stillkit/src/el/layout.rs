@@ -210,9 +210,12 @@ impl Layout {
         };
         let measure = measure_of(el, cx);
         let generation = self.generation;
-        // An element that starts or stops scrolling is built again.
-        if self.nodes.get(&id).is_some_and(|r| r.content.is_some() != content.is_some())
-            && let Some(r) = self.nodes.remove(&id)
+        // An element that starts or stops scrolling is built again. So is a box left with no
+        // children: Taffy lists a box's absolutely placed children apart, and only a layout
+        // with children clears that list, so it would still lay out a removed overlay.
+        if self.nodes.get(&id).is_some_and(|r| {
+            r.content.is_some() != content.is_some() || children.is_empty() && !r.children.is_empty()
+        }) && let Some(r) = self.nodes.remove(&id)
         {
             drop_nodes(&mut self.taffy, &r);
         }
@@ -514,6 +517,19 @@ mod tests {
         assert_eq!(layout.touched, 1, "only the changed text is re-measured");
         assert!(again[3].rect.width() > first[3].rect.width());
         assert_eq!(again[4].rect.left, again[3].rect.right, "its sibling moved along");
+    }
+
+    #[test]
+    fn a_box_losing_its_last_absolute_child_lays_out_again() {
+        let mut ui = Ui::new().unwrap();
+        let theme = theme();
+        let cx = Cx { theme: &theme, s: 1.0 };
+        let mut layout = Layout::new();
+        let with = col::<()>().child(col().key("pop").absolute(10.0, 10.0).w(20.0).h(20.0));
+        layout.update(&with, (100.0, 100.0), &cx, &mut ui.text);
+        // Taffy would still round the removed child's layout (a panic) without the rebuild.
+        let laid = layout.update(&col::<()>(), (100.0, 100.0), &cx, &mut ui.text);
+        assert_eq!(laid.len(), 1);
     }
 
     use crate::TextRole;
