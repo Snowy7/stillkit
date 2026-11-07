@@ -42,6 +42,7 @@ mod text;
 
 use super::animate::{Animator, Mode, Pose, Target};
 use super::element::{ArcLook, Axis, El, Handled, Key, KeyCode, Modifiers, Range, Transition, Tx, What};
+use super::feedback::Feedback;
 use super::field::Field;
 use super::layout::{Cx, Laid, Layout};
 use super::overlay::{Dismiss, Kind};
@@ -139,6 +140,10 @@ pub struct Shown {
     pub expanded: Option<bool>,
     /// A scroll view's offset now, device px along its axis.
     pub scroll: Option<f32>,
+    /// Its value fails validation ([`El::invalid`]).
+    pub invalid: bool,
+    /// The key of the descendant it shows as active ([`El::active_descendant`]).
+    pub active_descendant: Option<Key>,
 }
 
 /// An element that left the view and stays drawn, out of hit testing, until its exit settles.
@@ -262,6 +267,26 @@ pub struct Runtime<S> {
     active: bool,
     /// Whether the last paint drew the caret.
     caret_shown: bool,
+    /// Hover and press washes and focus rings easing in and out.
+    feedback: Feedback,
+    /// The latest list's hits as the pointer meets them, when some are gone through
+    /// (announced content inside a control); `None`: the list's own.
+    pointing: Option<DisplayList>,
+    // ---- Focus control --------------------------------------------------------------------
+    /// Where `Tx::focus`/`blur` (or `Runtime::focus`/`blur`) move focus once the view has run,
+    /// and whether a key asked.
+    focus_to: Option<(Option<Key>, bool)>,
+    /// Elements with a focus-within look, by identity.
+    withins: Vec<u64>,
+    /// Those of them holding focus now (innermost first).
+    within_on: Vec<u64>,
+    // ---- Spinning (`El::spin`) -------------------------------------------------------
+    /// Each spinner's turn when it last showed, by identity.
+    spins: HashMap<u64, f32>,
+    /// Whether the last paint had something visible spinning.
+    spinning: bool,
+    /// Whether the window shows ([`Runtime::set_visible`]).
+    visible: bool,
 }
 
 impl<S: 'static> Runtime<S> {
@@ -332,6 +357,14 @@ impl<S: 'static> Runtime<S> {
             mods: Modifiers::NONE,
             active: true,
             caret_shown: false,
+            feedback: Feedback::default(),
+            focus_to: None,
+            pointing: None,
+            withins: Vec::new(),
+            within_on: Vec::new(),
+            spins: HashMap::new(),
+            spinning: false,
+            visible: true,
         };
         runtime.frame(Duration::ZERO);
         Ok(runtime)
@@ -365,6 +398,12 @@ impl<S> Runtime<S> {
             });
             self.relayout(before, old);
         }
+        if let Some((to, keyed)) = self.focus_to.take() {
+            self.move_focus(to, keyed);
+        }
+        if !self.withins.is_empty() || !self.within_on.is_empty() {
+            self.follow_focus_within();
+        }
         if !self.reveal.is_empty() {
             for key in std::mem::take(&mut self.reveal) {
                 if let Some(index) = self.index_of_key(&key) {
@@ -384,7 +423,11 @@ impl<S> Runtime<S> {
             self.relayout(before, None);
         }
         self.sync_focus();
-        if moved || !left.is_empty() || scrolled || self.caret_on() != self.caret_shown {
+        // Feedback that started since the last frame shows one display frame in already, so
+        // the frame after a hover, press or Tab is never a still one.
+        let lead = f64::from(self.time_scale) / 60.0;
+        let glowing = self.sync_feedback(self.anim.t - lead);
+        if moved || glowing || self.spinning || !left.is_empty() || scrolled || self.caret_on() != self.caret_shown {
             self.stale_paint = true;
         }
         if !self.stale_paint {
@@ -394,12 +437,47 @@ impl<S> Runtime<S> {
         // Content scrolled under a still pointer: hover what is there now.
         if scrolled && let Some(p) = self.pointer {
             let hover = self.ix.hover;
-            self.ix.handle(&self.list, &Event::Move(p));
+            self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), &Event::Move(p));
             if self.ix.hover != hover {
                 self.paint();
             }
         }
         true
+    }
+
+    /// Restyles the elements with a [`El::focus_within`] look when focus moved in or out of
+    /// them: their targets change (springing along their motion); the view does not run.
+    fn follow_focus_within(&mut self) {
+        let mut on = Vec::new();
+        let mut at = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
+        while let Some(i) = at.filter(|&i| i < self.laid.len()) {
+            let id = self.laid[i].id;
+            if self.withins.contains(&id) {
+                on.push(id);
+            }
+            at = self.laid[i].parent;
+        }
+        if on == self.within_on {
+            return;
+        }
+        self.within_on = on;
+        let targets = targets(&self.root, &self.laid, &self.theme, self.scale, &self.within_on);
+        let all: HashSet<u64> = self.laid.iter().map(|l| l.id).collect();
+        self.anim.retarget(&self.laid, &targets, &all, Mode::Animate);
+        self.targets = targets;
+        self.stale_paint = true;
+    }
+
+    /// Heads washes and focus rings for the interaction state (from `start` on the clock) and
+    /// lands what settled; whether any of them shows something new.
+    fn sync_feedback(&mut self, start: f64) -> bool {
+        let field = self.typing.map(super::layout::hit_of);
+        let ring = self.ix.focus.filter(|&f| self.ix.focus_visible || field == Some(f));
+        let spring = (!self.anim.reduced).then_some(self.theme.motion.interactive);
+        let moving = self.feedback.moving();
+        let changed = self.feedback.sync(&self.ix, ring, spring, start);
+        self.feedback.settle(self.anim.t);
+        changed || moving
     }
 
     /// Settles the scroll views; whether what any of them shows changed since the last paint.
@@ -475,11 +553,12 @@ impl<S> Runtime<S> {
             }
             self.stale_view = true;
         }
-        self.apply(tx);
+        self.apply(tx, false);
     }
 
-    /// What a handler asked of its frame.
-    fn apply(&mut self, tx: Tx) {
+    /// What a handler asked of its frame; `keyed` when a key ran it (a focus it moves shows
+    /// its ring).
+    fn apply(&mut self, tx: Tx, keyed: bool) {
         if tx.instant {
             self.land_next();
         }
@@ -487,6 +566,46 @@ impl<S> Runtime<S> {
             self.set_theme(theme);
         }
         self.reveal.extend(tx.reveal);
+        if let Some(to) = tx.focus {
+            self.focus_to = Some((to, keyed));
+        }
+    }
+
+    /// Moves keyboard focus to the first focusable element keyed `key` (`None`: nowhere),
+    /// showing its ring if `keyed` or the ring already showed, and scrolls it into view.
+    fn move_focus(&mut self, to: Option<Key>, keyed: bool) {
+        let Some(key) = to else {
+            if self.ix.focus.is_some() {
+                (self.ix.focus, self.ix.focus_visible) = (None, false);
+                self.stale_paint = true;
+            }
+            return;
+        };
+        let mut found = None;
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if found.is_none() && el.key.as_deref() == Some(&*key) && el.interactive() && !el.sem.disabled {
+                found = Some(i);
+            }
+        });
+        let Some(index) = found else { return };
+        let visible = keyed || self.ix.focus_visible;
+        let hit = self.laid[index].hit;
+        if (self.ix.focus, self.ix.focus_visible) != (Some(hit), visible) {
+            (self.ix.focus, self.ix.focus_visible) = (Some(hit), visible);
+            self.stale_paint = true;
+        }
+        self.reveal_index(index);
+    }
+
+    /// Moves keyboard focus to the first focusable element keyed `key` once the view has run
+    /// (at the next frame), keeping whether its ring shows, and scrolls it into view.
+    pub fn focus(&mut self, key: &str) {
+        self.focus_to = Some((Some(key.into()), false));
+    }
+
+    /// Takes keyboard focus away at the next frame: nothing has it.
+    pub fn blur(&mut self) {
+        self.focus_to = Some((None, false));
     }
 
     /// The next re-layout lands with no motion (the first frame stays the first).
@@ -502,7 +621,13 @@ impl<S> Runtime<S> {
         if !self.layers.is_empty() {
             laid = self.place_layers(laid);
         }
-        let targets = targets(&self.root, &laid, &self.theme, self.scale);
+        self.withins.clear();
+        each(&self.root, &laid, &mut |el, i, _| {
+            if el.within.is_some() {
+                self.withins.push(laid[i].id);
+            }
+        });
+        let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.within_on);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
             && mode == Mode::Animate
@@ -513,6 +638,7 @@ impl<S> Runtime<S> {
         self.ghosts.retain(|g| ids.contains(&g.parent) && !ids.contains(&g.id));
         let ghosts: HashSet<u64> = self.ghosts.iter().map(|g| g.id).collect();
         self.anim.retain(|id| ids.contains(&id) || ghosts.contains(&id));
+        self.spins.retain(|id, _| ids.contains(id));
         let prev: HashSet<u64> = self.laid.iter().map(|l| l.id).collect();
         self.anim.retarget(&laid, &targets, &prev, mode);
         self.laid = laid;
@@ -719,6 +845,17 @@ impl<S> Runtime<S> {
             escaped: Vec::new(),
             fields: &self.fields,
             caret: self.caret_on().then_some(self.typing).flatten(),
+            feedback: &self.feedback,
+            t,
+            actives: Vec::new(),
+            pressable: 0,
+            through: Vec::new(),
+            clip: Rect::new(0.0, 0.0, self.size.0 as f32, self.size.1 as f32),
+            modal: self.layers.iter().find(|l| l.kind == Kind::Dialog).map(|l| l.at),
+            reduced: self.anim.reduced,
+            hidden: !self.visible,
+            spins: &mut self.spins,
+            spinning: false,
         };
         self.caret_shown = walk.caret.is_some();
         let mut f = Frame::new(&mut self.ui.text, &self.theme, self.scale, &self.ix);
@@ -729,7 +866,9 @@ impl<S> Runtime<S> {
         paint_el(&mut f, &mut walk, &self.laid, &self.poses, &self.root, &mut 0, true, None);
         let mut list = f.list;
         list.focus = self.ix.focus;
-        let (mut nav, semantics, mut escaped) = (walk.nav, walk.semantics, walk.escaped);
+        let (mut nav, mut semantics, mut escaped) = (walk.nav, walk.semantics, walk.escaped);
+        let (actives, through, spinning) = (walk.actives, walk.through, walk.spinning);
+        self.spinning = spinning;
         // A modal dialog is all there is to point at, focus and read.
         if let Some(n) = walk.inert {
             list.hits.drain(..n);
@@ -739,11 +878,26 @@ impl<S> Runtime<S> {
                 *hits = hits.start.saturating_sub(n)..hits.end.saturating_sub(n);
             }
         }
+        // Active descendants by key, among the hits the list ends with.
+        for (hit, key) in actives {
+            let active = self.index_of_key(&key).map(|i| self.laid[i].hit);
+            let Some(active) = active.filter(|a| list.hits.iter().any(|h| h.id == *a)) else { continue };
+            for (_, semantic) in semantics.iter_mut().filter(|(id, _)| *id == hit) {
+                if let Semantics::Detail(detail) = semantic {
+                    detail.active_descendant = Some(active);
+                }
+            }
+        }
         self.nav = nav;
         if semantics != self.semantics {
             self.semantics = semantics;
             self.semantics_sent = false;
         }
+        self.pointing = (!through.is_empty()).then(|| DisplayList {
+            ops: Vec::new(),
+            hits: list.hits.iter().filter(|h| !through.contains(&h.id)).cloned().collect(),
+            focus: list.focus,
+        });
         self.window_list = self.cut_popups(&list, &escaped);
         self.damage = list.damage(&self.list);
         self.list = list;
@@ -788,7 +942,7 @@ impl<S> Runtime<S> {
             self.context_at(p.at);
         }
         let before = self.ix.clone();
-        if let Response::Activate(hit) = self.ix.handle(&self.list, event) {
+        if let Response::Activate(hit) = self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), event) {
             self.queue.push(Action::Press(hit));
         }
         if !self.fields.is_empty()
@@ -887,7 +1041,7 @@ impl<S> Runtime<S> {
                 let mut tx = text::tx_with(self.mods);
                 if handler(&mut self.state, key, &mut tx) == Handled::Yes {
                     self.stale_view = true;
-                    self.apply(tx);
+                    self.apply(tx, true);
                     return true;
                 }
             }
@@ -974,7 +1128,7 @@ impl<S> Runtime<S> {
                 }
             }
             Intent::Focus(hit, press) => {
-                self.focus(hit);
+                self.focus_hit(hit);
                 if press {
                     self.queue.push(Action::Press(hit));
                 }
@@ -992,7 +1146,7 @@ impl<S> Runtime<S> {
     }
 
     /// Moves keyboard focus to `hit`, shows its ring and scrolls it into view.
-    fn focus(&mut self, hit: HitId) {
+    fn focus_hit(&mut self, hit: HitId) {
         if self.ix.focus != Some(hit) || !self.ix.focus_visible {
             self.ix.focus = Some(hit);
             self.ix.focus_visible = true;
@@ -1043,7 +1197,7 @@ impl<S> Runtime<S> {
             (Some(at), false) => (at + 1) % n,
             (Some(at), true) => (at + n - 1) % n,
         };
-        self.focus(stops[next].hit);
+        self.focus_hit(stops[next].hit);
     }
 
     /// Assistive technology's request on a hit item (a slider's increment, a new value):
@@ -1239,7 +1393,11 @@ impl<S> Runtime<S> {
     /// The system's reduced-motion setting ([`super::reduced_motion`]; the window host sets
     /// it): spatial travel snaps, while opacity, colour and presence take a short fade.
     pub fn set_reduced_motion(&mut self, reduced: bool) {
-        self.anim.reduced = reduced;
+        if reduced != self.anim.reduced {
+            self.anim.reduced = reduced;
+            // Spinners stop or start.
+            self.stale_paint = true;
+        }
     }
 
     /// Reduced motion.
@@ -1250,7 +1408,20 @@ impl<S> Runtime<S> {
     /// Whether anything is still moving, leaving or scrolling (a scrollbar waiting to fade
     /// counts): the host keeps frames coming while it is, and none once it settles.
     pub fn animating(&self) -> bool {
-        self.anim.moving() || !self.ghosts.is_empty() || self.scrolling
+        self.anim.moving() || !self.ghosts.is_empty() || self.scrolling || self.feedback.moving() || self.spinning
+    }
+
+    /// Whether the window shows (the host says when it is hidden or, where the platform tells,
+    /// occluded): spinners ([`El::spin`]) hold still while it doesn't, and ask for no frames.
+    pub fn set_visible(&mut self, visible: bool) {
+        if visible != self.visible {
+            self.visible = visible;
+            self.stale_paint = true;
+        }
+    }
+
+    pub fn visible(&self) -> bool {
+        self.visible
     }
 
     /// Theme.
@@ -1411,6 +1582,8 @@ impl<S> Runtime<S> {
                 selected: sem.selected,
                 expanded: sem.expanded.or(self.relations.get(&laid.id).and_then(|r| r.expanded)),
                 scroll: self.scrolls.get(&laid.id).map(|v| v.offset(self.anim.t)),
+                invalid: sem.invalid,
+                active_descendant: sem.active.clone(),
             });
         });
         out
@@ -1557,12 +1730,17 @@ fn keyed<S>(root: &El<S>, laid: &[Laid], theme: &Theme) -> HashMap<u64, (Key, Sn
 }
 
 /// Each laid-out element's targets, in the same order. Motion and `instant` reach down the
-/// subtree.
-fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target> {
-    fn walk<S>(el: &El<S>, cx: (&[Laid], &Theme, f32), i: &mut usize, motion: Option<crate::Spring>, instant: bool, out: &mut Vec<Target>) {
-        let (laid, theme, s) = cx;
+/// subtree. Elements in `within` (identities) take their focus-within look.
+fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]) -> Vec<Target> {
+    type Cx<'a> = (&'a [Laid], &'a Theme, f32, &'a [u64]);
+    fn walk<S>(el: &El<S>, cx: Cx, i: &mut usize, motion: Option<crate::Spring>, instant: bool, out: &mut Vec<Target>) {
+        let (laid, theme, s, within) = cx;
         let Some(&me) = laid.get(*i) else { return };
         *i += 1;
+        let look = match el.within {
+            Some(patch) if within.contains(&me.id) => el.look.with(patch),
+            _ => el.look,
+        };
         let instant = instant || el.anim.instant;
         let motion = if instant {
             None
@@ -1572,22 +1750,22 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
         let origin = me.parent.map_or(Point::new(0.0, 0.0), |p| Point::new(laid[p].rect.left, laid[p].rect.top));
         let r = me.rect;
         let (ink, value) = match &el.what {
-            What::Arc(a) => (el.look.color.unwrap_or(token::ACCENT), a.fraction),
-            _ => (el.look.color.unwrap_or(token::LABEL), 0.0),
+            What::Arc(a) => (look.color.unwrap_or(token::ACCENT), a.fraction),
+            _ => (look.color.unwrap_or(token::LABEL), 0.0),
         };
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
-            fill: el.look.fill.map(|p| p.resolve(theme)),
+            fill: look.fill.map(|p| p.resolve(theme)),
             ink: ink.resolve(theme),
-            opacity: el.look.opacity,
-            radius: el
-                .look
+            opacity: look.opacity,
+            radius: look
                 .radius
                 .map_or(0.0, |r| (r.resolve(theme) * s).round())
                 .min(r.width().min(r.height()) / 2.0)
                 .max(0.0),
-            shadow: if el.look.shadow.is_some() { 1.0 } else { 0.0 },
+            shadow: if look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
+            angle: el.anim.rotate,
             motion,
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
@@ -1600,7 +1778,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
         }
     }
     let mut out = Vec::with_capacity(laid.len());
-    walk(root, (laid, theme, s), &mut 0, None, false, &mut out);
+    walk(root, (laid, theme, s, within), &mut 0, None, false, &mut out);
     out
 }
 
@@ -1655,8 +1833,11 @@ fn semantics_of<S>(el: &El<S>, id: HitId, rel: Option<&Relation>, out: &mut Vec<
         popup: rel.popup,
         controls: rel.controls,
         modal: rel.modal,
+        invalid: s.invalid,
+        // Keys resolve once the whole list is painted (`Runtime::paint`).
+        active_descendant: None,
     };
-    if detail != Detail::default() {
+    if detail != Detail::default() || s.active.is_some() {
         out.push((id, Semantics::Detail(detail)));
     }
 }
@@ -1689,6 +1870,47 @@ struct Walk<'a, S> {
     fields: &'a HashMap<u64, Field>,
     /// The field whose caret is drawn now.
     caret: Option<u64>,
+    feedback: &'a Feedback,
+    /// The animation clock.
+    t: f64,
+    /// Elements naming an active descendant: their hit and its key.
+    actives: Vec<(HitId, Key)>,
+    /// How many enabled controls the walk is inside.
+    pressable: usize,
+    /// Hits the pointer goes through (announced content inside a control).
+    through: Vec<HitId>,
+    // ---- Spinning (`El::spin`) -------------------------------------------------------
+    /// What can show here: the window, cut to the scroll views around.
+    clip: Rect,
+    /// Elements before this place in `laid` are under an open dialog.
+    modal: Option<usize>,
+    /// Reduced motion: spinners rest at their own angle.
+    reduced: bool,
+    /// The window is hidden: spinners hold where they are.
+    hidden: bool,
+    /// Each spinner's turn when it last showed, by identity.
+    spins: &'a mut HashMap<u64, f32>,
+    /// Whether something visible spins (frames keep coming).
+    spinning: bool,
+}
+
+/// A spinner's turn now, radians: moving along the clock while it can be seen (live, inside
+/// the window and its scroll views, above any open dialog, the window shown, motion not
+/// reduced), else holding where it last showed (at rest under reduced motion).
+fn spin<S>(w: &mut Walk<S>, id: u64, index: usize, rect: Rect, live: bool, period: Duration) -> f32 {
+    if w.reduced {
+        return 0.0;
+    }
+    let seen = live && !w.hidden && w.modal.is_none_or(|m| index >= m) && !rect.is_empty() && rect.intersects(&w.clip);
+    if !seen {
+        return w.spins.get(&id).copied().unwrap_or(0.0);
+    }
+    w.spinning = true;
+    let turns = (w.t / period.as_secs_f64()).fract() as f32;
+    // To a thousandth of a radian: a still frame repaints nothing new.
+    let angle = (turns * TAU * 1000.0).round() / 1000.0;
+    w.spins.insert(id, angle);
+    angle
 }
 
 /// An entry painted for a popup surface: its identity, ops and hits in the list.
@@ -1742,11 +1964,17 @@ fn paint_el<S>(
     let scroll = el.scrolls();
     if live && el.hit() && !paints {
         f.list.hits.push(hit(el, me.hit, rect));
+        // Announced content inside a control (a table's cell in its row) has its own hit, but
+        // the pointer goes through it to the control.
+        if w.pressable > 0 && !el.interactive() {
+            w.through.push(me.hit);
+        }
     }
     // A shadowed box keeps its ops while they fade in (popups size themselves by them).
     if pose.shadow > 0.0 || el.look.shadow.is_some() {
         // A shadow fading out after its box dropped it fades the default level.
-        let cast = el.look.shadow.unwrap_or(super::element::Cast::Level(Default::default()));
+        let cast = el.look.shadow.or(el.within.and_then(|w| w.shadow));
+        let cast = cast.unwrap_or(super::element::Cast::Level(Default::default()));
         for layer in cast.layers(theme).iter().filter(|l| l.color.a > 0.0) {
             f.push(Op::SoftShadow {
                 rect,
@@ -1763,7 +1991,9 @@ fn paint_el<S>(
     }
     // A scroll view takes focus for its keys, but is no button: no wash; nor is a field.
     if controls && scroll.is_none() && el.field().is_none() {
-        f.wash(me.hit, rect, radius, enabled);
+        let c = &theme.color;
+        let wash = if enabled { w.feedback.wash(me.hit, w.t, c.hover, c.pressed) } else { Rgba::TRANSPARENT };
+        f.fill(rect, radius, wash);
     }
     // Text fits its laid-out width, so a box springing narrower never cuts it short.
     let width = me.rect.width();
@@ -1848,18 +2078,29 @@ fn paint_el<S>(
         }
         if el.hit() {
             semantics_of(el, me.hit, w.relations.get(&me.id), &mut w.semantics);
+            if let Some(key) = &el.sem.active {
+                w.actives.push((me.hit, key.clone()));
+            }
         }
     }
     let inner = if el.group.is_some() { Some(index) } else { group };
     let outer = scroll.map(|_| std::mem::take(&mut f.list.ops));
     let (first_hit, first_stop) = (f.list.hits.len(), w.nav.len());
     let scene = w.scene;
+    // What a scroll view's content can show is cut to it.
+    let clip = w.clip;
+    if scroll.is_some() {
+        w.clip = w.clip.intersect(rect);
+    }
     for (n, child) in el.children.iter().enumerate() {
         if live && !scene.ghosts.is_empty() {
             scene.paint(f, w, me.id, n, false);
         }
+        w.pressable += usize::from(enabled && live);
         paint_el(f, w, laid, poses, child, i, live, inner);
+        w.pressable -= usize::from(enabled && live);
     }
+    w.clip = clip;
     if live && !scene.ghosts.is_empty() {
         scene.paint(f, w, me.id, el.children.len(), true);
     }
@@ -1891,9 +2132,20 @@ fn paint_el<S>(
         }
     }
     if controls {
-        // A field shows its ring whenever it has focus (the caret is in it), not only after keys.
-        let on = el.field().is_some() && w.focus == Some(me.hit);
-        focus_ring(f, me.hit, rect, radius, on);
+        focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
+    }
+    // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
+    let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
+    if angle != 0.0 {
+        let c = rect.center();
+        let turn = super::rotate::Turn::new(Point::new(c.x.round(), c.y.round()), angle);
+        if !turn.none() {
+            let drawn = f.list.ops.split_off(start);
+            f.list.ops.extend(turn.ops(drawn));
+            for h in &mut f.list.hits[hits..] {
+                h.rect = turn.bounds(h.rect);
+            }
+        }
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
@@ -1914,22 +2166,21 @@ fn paint_el<S>(
     }
 }
 
-/// The keyboard focus ring of `id` just outside `rect`, as the theme's [`crate::theme::FocusRing`]
-/// says (always pushed, transparent unless the keyboard moved focus there). The default ring
-/// draws the same pixels as [`Frame::focus_ring`].
-fn focus_ring(f: &mut Frame, id: HitId, rect: Rect, radius: f32, on: bool) {
+/// A keyboard focus ring just outside `rect`, as the theme's [`crate::theme::FocusRing`] says,
+/// `shown` of the way in (always pushed, transparent at 0). Coming in it fades up and grows
+/// from the box's edge out to its gap; shown, it draws the same pixels as
+/// [`Frame::focus_ring`] with the default ring. Keyboard focus shows it, and a field shows it
+/// whenever it has focus (the caret is in it).
+fn focus_ring(f: &mut Frame, rect: Rect, radius: f32, shown: f32) {
     let ring = f.theme.focus_ring;
     let width = f.px(ring.width).max(ring.width);
-    let gap = f.px(ring.gap);
+    let gap = (f.px(ring.gap) * shown).round();
+    let alpha = if shown >= 1.0 { ring.opacity } else { (ring.opacity * shown * 255.0).round() / 255.0 };
     f.push(Op::Stroke {
         rect: rect.inflate(gap + width / 2.0),
         radius: radius + gap + width / 2.0,
         width,
-        color: if on || f.input.ring(id) {
-            f.theme.color.accent.with_alpha(ring.opacity)
-        } else {
-            Rgba::TRANSPARENT
-        },
+        color: if alpha > 0.0 { f.theme.color.accent.with_alpha(alpha) } else { Rgba::TRANSPARENT },
     });
 }
 
@@ -1968,59 +2219,32 @@ fn paint_arc(f: &mut Frame, rect: Rect, a: &ArcLook, value: f32, ink: Rgba) {
     if radius <= 0.0 {
         return;
     }
-    let q = a.start.quarters();
     let span = a.span * TAU;
     if let Some(track) = a.track {
-        stroke_arc(f, center, radius, width, q, span, track.resolve(f.theme));
+        stroke_arc(f, center, radius, width, a.start, span, track.resolve(f.theme));
     }
-    stroke_arc(f, center, radius, width, q, value.clamp(0.0, 1.0) * span, ink);
+    stroke_arc(f, center, radius, width, a.start, value.clamp(0.0, 1.0) * span, ink);
 }
 
-/// A clockwise arc of `sweep` radians from `q` quarter turns past twelve o'clock, with round
-/// caps unless it closes. `Op::Arc` always starts at twelve: a later start draws the arc up to
-/// its end clipped to the quarters it covers (exact, since quarter edges are radial), then
-/// any part past twelve as an arc of its own.
-fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, q: u8, sweep: f32, color: Rgba) {
+/// A clockwise arc of `sweep` radians from `start` radians past twelve o'clock, with round
+/// caps unless it closes.
+fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, start: f32, sweep: f32, color: Rgba) {
     let sweep = sweep.min(TAU);
     if sweep <= 0.0 || color.a <= 0.0 {
         return;
     }
-    let arc = |sweep: f32| Op::Arc {
+    f.push(Op::Arc {
         center,
         radius,
+        start,
         sweep,
         width,
         color,
-    };
-    let start = f32::from(q) * FRAC_PI_2;
-    let end = start + sweep;
-    if q == 0 {
-        f.push(arc(sweep));
-    } else {
-        let big = radius + width + 2.0;
-        let (cx, cy) = (center.x, center.y);
-        let right_bottom = Rect::new(cx, cy, big, big);
-        let left = Rect::new(cx - big, cy - big, big, 2.0 * big);
-        let top_left = Rect::new(cx - big, cy - big, big, big);
-        let clips: &[Rect] = match q {
-            1 => &[right_bottom, left],
-            2 => &[left],
-            _ => &[top_left],
-        };
-        let source: Arc<[Op]> = vec![arc(end.min(TAU))].into();
-        for &rect in clips {
-            f.push(Op::Clipped {
-                rect,
-                ops: source.clone(),
-            });
-        }
-        if end > TAU {
-            f.push(arc(end - TAU));
-        }
-    }
+    });
     if sweep >= TAU - 1e-4 {
         return;
     }
+    let end = start + sweep;
     // Round caps. On a quarter only the half beyond the arc's end draws (the end's edge is
     // radial, so the quarter's axis cuts it exactly), so a translucent stroke doesn't darken
     // where cap and stroke overlap; elsewhere the whole disc.
@@ -2038,21 +2262,27 @@ fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, q: u8, swee
         radius: width / 2.0,
         color,
     };
+    // The quarter an angle lies on, if it does.
+    let quarter = |angle: f32| {
+        let k = angle / FRAC_PI_2;
+        ((k - k.round()).abs() < 1e-4).then(|| (k.round() as i64).rem_euclid(4) as u8)
+    };
     let at = point(start);
-    f.push(Op::Clipped {
-        rect: before(at, q),
-        ops: vec![disc(at)].into(),
-    });
-    let quarters = end / FRAC_PI_2;
-    let at = point(end);
-    if (quarters - quarters.round()).abs() < 1e-4 {
-        // Past an end on quarter k is before a start on the opposite quarter.
-        f.push(Op::Clipped {
-            rect: before(at, quarters.round() as u8 + 2),
+    match quarter(start) {
+        Some(q) => f.push(Op::Clipped {
+            rect: before(at, q),
             ops: vec![disc(at)].into(),
-        });
-    } else {
-        f.push(disc(at));
+        }),
+        None => f.push(disc(at)),
+    }
+    let at = point(end);
+    match quarter(end) {
+        // Past an end on quarter k is before a start on the opposite quarter.
+        Some(q) => f.push(Op::Clipped {
+            rect: before(at, q + 2),
+            ops: vec![disc(at)].into(),
+        }),
+        None => f.push(disc(at)),
     }
 }
 

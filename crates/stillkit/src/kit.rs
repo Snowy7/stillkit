@@ -936,6 +936,7 @@ impl<'a> Frame<'a> {
         self.push(Op::Arc {
             center,
             radius,
+            start: 0.0,
             sweep: std::f32::consts::TAU,
             width,
             color: c.fill,
@@ -943,6 +944,7 @@ impl<'a> Frame<'a> {
         self.push(Op::Arc {
             center,
             radius,
+            start: 0.0,
             sweep: value.clamp(0.0, 1.0) * std::f32::consts::TAU,
             width,
             color: color.unwrap_or(c.accent),

@@ -186,18 +186,20 @@ fn op(ctx: &CGContext, text: &mut Text, images: &mut Images, op: &Op, damage: Re
             let path = polyline([(from.x as f64, from.y as f64), (to.x as f64, to.y as f64)], false);
             stroke(ctx, &path, *width, *color, false);
         }
-        Op::Arc { center, radius, sweep, width, color } => {
+        Op::Arc { center, radius, start, sweep, width, color } => {
             let path = CGMutablePath::new();
             let (x, y, r) = (center.x as f64, center.y as f64, *radius as f64);
             if *sweep >= std::f32::consts::TAU - 0.0001 {
                 // SAFETY: a live path; a null transform is the identity.
                 unsafe { CGMutablePath::add_ellipse_in_rect(Some(&path), std::ptr::null(), CGRect::new(CGPoint::new(x - r, y - r), CGSize::new(r * 2.0, r * 2.0))) };
             } else if *sweep > 0.0 {
-                // From twelve o'clock, clockwise on screen (increasing angles in y-down space).
+                // From `start` past twelve o'clock, clockwise on screen (increasing angles in
+                // y-down space, from three o'clock).
+                let from = -FRAC_PI_2 + *start as f64;
                 // SAFETY: as above; the arc starts the path at its first point.
                 unsafe {
-                    CGMutablePath::move_to_point(Some(&path), std::ptr::null(), x, y - r);
-                    CGMutablePath::add_relative_arc(Some(&path), std::ptr::null(), x, y, r, -FRAC_PI_2, *sweep as f64);
+                    CGMutablePath::move_to_point(Some(&path), std::ptr::null(), x + r * from.cos(), y + r * from.sin());
+                    CGMutablePath::add_relative_arc(Some(&path), std::ptr::null(), x, y, r, from, *sweep as f64);
                 }
             } else {
                 return;

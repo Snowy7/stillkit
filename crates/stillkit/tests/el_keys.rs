@@ -218,7 +218,9 @@ fn ring(rt: &Runtime<Form>) -> (f32, Rgba) {
 fn focus_rings_follow_the_theme_and_the_default_matches_the_kit() {
     let mut rt = runtime();
     rt.tab(false);
+    // It eases in from this frame on; at rest it is the kit's.
     rt.frame(FRAME);
+    rt.frame(Duration::from_secs(1));
     let accent = rt.theme().color.accent;
     // The default ring is the kit's `Frame::focus_ring`: 2 px, 2 px out, 0.9 of the accent.
     let rect = rt.find("first").unwrap();
@@ -257,12 +259,11 @@ fn meter(s: &Meter) -> El<Meter> {
         .child(arc(s.0).key("half").size(40.0).stroke(4.0).arc_start(ArcStart::Left).arc_span(0.5).animate())
 }
 
+/// Each arc's start and sweep (caps sit in clips, arcs never do).
 fn arcs(ops: &[Op], out: &mut Vec<f32>) {
     for op in ops {
-        match op {
-            Op::Arc { sweep, .. } => out.push(*sweep),
-            Op::Clipped { ops, .. } => arcs(ops, out),
-            _ => {}
+        if let Op::Arc { start, sweep, .. } = op {
+            out.extend([*start, *sweep]);
         }
     }
 }
@@ -273,13 +274,11 @@ fn arcs_draw_a_track_and_a_value_from_their_start() {
     let mut sweeps = Vec::new();
     arcs(&rt.list().ops, &mut sweeps);
     // The ring: a whole track and a quarter from twelve. The half meter from nine o'clock:
-    // its track round to three (the whole circle clipped to the top-left quarter, then the
-    // quarter past twelve), its value an eighth of a turn (an arc to half past ten, clipped to
-    // the top-left quarter).
+    // its track half a turn round to three, its value an eighth of a turn.
     let near = |a: f32, b: f32| (a - b).abs() < 1e-4;
-    assert!(near(sweeps[0], TAU) && near(sweeps[1], TAU / 4.0), "{sweeps:?}");
-    assert!(near(sweeps[2], TAU) && near(sweeps[3], TAU / 4.0), "{sweeps:?}");
-    assert!(near(sweeps[4], TAU * 7.0 / 8.0) && sweeps.len() == 5, "{sweeps:?}");
+    let at_nine = 3.0 * TAU / 4.0;
+    let expect = [0.0, TAU, 0.0, TAU / 4.0, at_nine, TAU / 2.0, at_nine, TAU / 8.0];
+    assert!(sweeps.len() == expect.len() && sweeps.iter().zip(expect).all(|(a, b)| near(*a, b)), "{sweeps:?}");
     let image = rt.snap().unwrap();
     let lit = |x: u32, y: u32| image.pixel(x, y)[3] > 0;
     // Half meter, centred at (20, 60), radius 18: lit left and top, not right or bottom.
@@ -294,5 +293,6 @@ fn arcs_draw_a_track_and_a_value_from_their_start() {
     }
     let mut sweeps = Vec::new();
     arcs(&rt.list().ops, &mut sweeps);
-    assert!(sweeps.iter().filter(|s| near(**s, TAU)).count() >= 3, "{sweeps:?}");
+    // Full: the ring's value is a whole turn, and the meter's its whole half.
+    assert!(near(sweeps[3], TAU) && near(sweeps[7], TAU / 2.0), "{sweeps:?}");
 }

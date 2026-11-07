@@ -290,7 +290,7 @@ impl<S> Runtime<S> {
             return;
         }
         let tip_of = |hit: HitId| self.tips.iter().find(|(id, _)| hit_of(*id) == hit).map(|(id, _)| *id);
-        let hovered = self.pointer.and_then(|p| self.list.hit_at(p.at)).and_then(|h| tip_of(h.id));
+        let hovered = self.pointer.and_then(|p| self.pointing.as_ref().unwrap_or(&self.list).hit_at(p.at)).and_then(|h| tip_of(h.id));
         let focused = self.ix.focus.filter(|_| self.ix.focus_visible).and_then(tip_of);
         let want = hovered.or(focused);
         if want == self.tip.trigger {
@@ -504,7 +504,7 @@ impl<S> Runtime<S> {
             Event::Press(p, _) | Event::DoubleClick(p, _) => {
                 // A press closes a tooltip, and its trigger shows none until the pointer leaves.
                 self.hide_tip();
-                let under = self.list.hit_at(p.at).map(|h| h.id);
+                let under = self.pointing.as_ref().unwrap_or(&self.list).hit_at(p.at).map(|h| h.id);
                 self.tip.trigger = under.and_then(|h| self.tips.iter().find(|(id, _)| hit_of(*id) == h)).map(|(id, _)| *id);
                 let mut dismiss = Vec::new();
                 let mut kept = false;

@@ -293,7 +293,7 @@ impl<S> Runtime<S> {
                 if handler(&mut self.state, c, &mut tx) == Handled::Yes {
                     drop(flat);
                     self.stale_view = true;
-                    self.apply(tx);
+                    self.apply(tx, true);
                     return;
                 }
             }

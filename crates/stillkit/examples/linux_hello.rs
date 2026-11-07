@@ -48,6 +48,7 @@ fn main() -> anyhow::Result<()> {
             list.ops.push(Op::Arc {
                 center: stillkit::Point::new(48. * scale, 154. * scale),
                 radius: 16. * scale,
+                start: 0.0,
                 sweep: (frame as f32 / 36.).min(1.) * std::f32::consts::TAU,
                 width: 3. * scale,
                 color: Rgba::rgb8([139, 184, 255], 1.),

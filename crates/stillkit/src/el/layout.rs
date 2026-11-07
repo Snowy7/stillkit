@@ -383,6 +383,9 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
     };
     let mut style = Style {
         display: Display::Flex,
+        // Every box is a containing block, so an absolutely placed child is placed and sized
+        // (`w_full`) against its parent's box, not the root's (Taffy's default is static).
+        position: Position::Relative,
         size: taffy::Size {
             width: dim(z.w),
             height: dim(z.h),
@@ -541,6 +544,32 @@ mod tests {
         // Taffy would still round the removed child's layout (a panic) without the rebuild.
         let laid = layout.update(&col::<()>(), (100.0, 100.0), &cx, &mut ui.text);
         assert_eq!(laid.len(), 1);
+    }
+
+    #[test]
+    fn an_absolute_child_sizes_by_percent_against_its_padded_parent() {
+        let mut ui = Ui::new().unwrap();
+        let theme = theme();
+        let cx = Cx { theme: &theme, s: 1.0 };
+        // A rail with a pill behind its segments (the kit's segmented control).
+        let view = col::<()>().pad(20.0).align(crate::el::Align::Start).child(
+            row()
+                .pad(4.0)
+                .child(col().key("pill").absolute(0.0, 0.0).w_full().h_full())
+                .child(col().w(60.0).h(20.0))
+                .child(col().w(40.0).h(20.0)),
+        );
+        let laid = Layout::new().update(&view, (400.0, 300.0), &cx, &mut ui.text);
+        let (rail, pill) = (laid[1].rect, laid[2].rect);
+        assert_eq!(rail, Rect::new(20.0, 20.0, 108.0, 28.0));
+        // The parent's box (its padding included, as CSS's containing block), from its corner.
+        assert_eq!(pill, rail);
+        // Deeper still: a pill inside the pill sizes against the pill.
+        let view = col::<()>().pad(20.0).align(crate::el::Align::Start).child(
+            row().w(100.0).h(40.0).child(col().absolute(10.0, 5.0).w(50.0).h(20.0).child(col().absolute(0.0, 0.0).w_full().h_full())),
+        );
+        let laid = Layout::new().update(&view, (400.0, 300.0), &cx, &mut ui.text);
+        assert_eq!(laid[3].rect, Rect::new(30.0, 25.0, 50.0, 20.0));
     }
 
     use crate::TextRole;

@@ -73,6 +73,7 @@ fn page(ui: &mut Ui) -> DisplayList {
             Op::Arc {
                 center: Point::new(250.0, 90.0),
                 radius: 22.0,
+                start: 0.0,
                 sweep: 4.0,
                 width: 4.0,
                 color: Rgba::new(0.2, 0.55, 1.0, 1.0),
