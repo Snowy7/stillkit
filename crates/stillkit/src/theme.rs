@@ -19,6 +19,11 @@
 //! surface's scale. Adaptive light/dark for small glass and the springs follow liquid-rust
 //! (github.com/al1h3n/liquid-rust, MIT/Apache-2.0), which matches Apple's iOS 26 kit.
 
+#[cfg(feature = "serde")]
+mod data;
+mod parts;
+pub use parts::*;
+
 use std::sync::Arc;
 
 use crate::geom::Rgba;
@@ -44,7 +49,13 @@ pub enum Style {
 }
 
 impl Style {
-    pub const ALL: [Self; 5] = [Self::Liquid, Self::OneUi, Self::Solid, Self::Fluent, Self::Mono];
+    pub const ALL: [Self; 5] = [
+        Self::Liquid,
+        Self::OneUi,
+        Self::Solid,
+        Self::Fluent,
+        Self::Mono,
+    ];
 
     pub const fn name(self) -> &'static str {
         match self {
@@ -66,6 +77,8 @@ pub enum Scheme {
 /// Colour roles, straight alpha. "On glass" means over the surface's own material.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
+    /// Neutral slider fills and glyphs use the label and surface.
+    pub monochrome: bool,
     /// Titles, values, glyphs.
     pub label: Rgba,
     /// Subtitles, details.
@@ -258,6 +271,15 @@ pub struct MotionTokens {
 /// Every token a surface draws with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
+    /// Composable surface optics.
+    pub material: Material,
+    /// Focus-ring geometry and ink opacity, in design pixels.
+    pub focus_ring: FocusRing,
+    /// Monochrome slider fills use label and surface ink.
+    pub monochrome: bool,
+    card_min: f32,
+    mixed: bool,
+    palettes: [Palette; 2],
     pub style: Style,
     pub scheme: Scheme,
     pub color: Palette,
@@ -284,72 +306,20 @@ impl Theme {
     /// A surface override and its concentric cards, without changing the style's defaults.
     pub fn with_surface_radius(mut self, radius: f32) -> Self {
         self.radius.surface = radius;
+        self.card_min = 0.0;
         self.radius.card = (radius - self.metrics.pad).max(0.0);
         self
     }
 
+    /// Compatibility adapter; prefer [`Theme::liquid`] and the part builders.
     /// `style` in `scheme`, with `accent` (Windows' accent colour, or [`SYSTEM_BLUE`]).
     pub fn new(style: Style, scheme: Scheme, accent: Rgba) -> Self {
-        let dark = scheme == Scheme::Dark;
-        let color = palette(style, dark, accent);
-        let (surface, pad, card_min, control) = match style {
-            Style::Liquid => (24.0, 12.0, 10.0, None),
-            Style::OneUi => (28.0, 12.0, 16.0, None),
-            Style::Solid => (14.0, 10.0, 6.0, Some(8.0)),
-            Style::Fluent => (8.0, 8.0, 4.0, Some(4.0)),
-            Style::Mono => (16.0, 10.0, 8.0, Some(10.0)),
-        };
-        let metrics = Metrics {
-            pad,
-            gap: if style == Style::Fluent { 8.0 } else { 12.0 },
-            item: 6.0,
-            row: if style == Style::OneUi { 52.0 } else { 46.0 },
-            row_single: if style == Style::OneUi { 40.0 } else { 36.0 },
-            control: if style == Style::Fluent { 32.0 } else { 30.0 },
-            control_small: 24.0,
-            icon: 16.0,
-            icon_small: 13.0,
-            icon_large: 20.0,
-            hit: 28.0,
-            scrollbar: 5.0,
-            scrollbar_inset: 3.0,
-        };
-        let glass = material(style, color.surface);
-        Self {
-            style,
-            scheme,
-            font: ramp(style),
-            radius: Radii {
-                surface,
-                card: Radii::concentric(surface, pad, card_min),
-                control,
-                small: if style == Style::Fluent { 4.0 } else { 6.0 },
-            },
-            elevation: Elevation {
-                spread: 16.0,
-                drop: 4.0,
-                color: color.shadow,
-            },
-            motion: MotionTokens {
-                interactive: Spring::INTERACTIVE,
-                open: Spring::apple(0.3, 0.12),
-                layout: Spring::SNAPPY,
-                scroll: Spring::apple(0.22, 0.0),
-                scrollbar_idle: 0.9,
-                scrollbar_fade: 0.35,
-            },
-            icons: match style {
-                Style::Fluent => IconSet::Font(crate::icons::SYSTEM_FAMILY.into()),
-                _ => IconSet::Vector,
-            },
-            icon_weight: match style {
-                Style::OneUi | Style::Fluent => 2.0,
-                _ => 1.75,
-            },
-            border: (style == Style::Solid).then_some(color.separator),
-            glass,
-            color,
-            metrics,
+        match style {
+            Style::Liquid => Self::liquid(scheme, accent),
+            Style::OneUi => Self::one_ui(scheme, accent),
+            Style::Solid => Self::solid(scheme, accent),
+            Style::Fluent => Self::fluent(scheme, accent),
+            Style::Mono => Self::mono(scheme, accent),
         }
     }
 
@@ -382,7 +352,13 @@ impl Theme {
         if scheme == self.scheme {
             return self.clone();
         }
-        Self::new(self.style, scheme, self.color.accent)
+        if !self.mixed {
+            return Self::new(self.style, scheme, self.color.accent);
+        }
+        let mut theme = self.clone();
+        theme.scheme = scheme;
+        theme.recompute();
+        theme
     }
 
     /// The menu component's tokens (`crate::Menu`), from this theme.
@@ -430,19 +406,19 @@ impl Theme {
 ///   (the engine drops dispersion and the inner rims with refraction and highlight at 0).
 /// - **Solid**, **Mono**: no glass (opaque, and flat near-opaque monochrome).
 pub fn material(style: Style, tint: Rgba) -> Option<GlassMaterial> {
-    let (clarity, blur, refraction, highlight, strength) = match style {
-        Style::Liquid => (0.55, 12.0, 0.6, 0.75, tint.a),
-        Style::OneUi => (0.35, 24.0, 0.0, 0.0, tint.a.max(0.35)),
-        Style::Fluent => (0.12, 30.0, 0.0, 0.0, tint.a.max(0.6)),
-        Style::Solid | Style::Mono => return None,
+    let preset = match style {
+        Style::Liquid => Material::liquid(),
+        Style::OneUi => Material::one_ui(),
+        Style::Fluent => Material::fluent(),
+        Style::Solid => Material::solid(),
+        Style::Mono => Material::mono(),
     };
-    Some(GlassMaterial {
-        clarity,
-        blur,
-        refraction,
-        highlight,
-        tint: tint.with_alpha(strength),
-    })
+    let tint = tint.with_alpha(match style {
+        Style::OneUi => tint.a.max(0.35),
+        Style::Fluent => tint.a.max(0.6),
+        _ => tint.a,
+    });
+    preset.resolve(tint).1
 }
 
 /// Whether `style` puts a lens under its surfaces (only Liquid; the others are flat).
@@ -475,6 +451,7 @@ impl Knobs {
 }
 
 impl GlassMaterial {
+    /// Compatibility adapter. New code uses [`Material::overrides`].
     /// This surface material (its style's, from [`material`], with the surface's own defaults)
     /// under the user's `knobs`: the one rule bars, widgets, flyouts and menus all follow, so the
     /// same sliders give the same glass everywhere. Nothing is floored or capped: blur 0 is no
@@ -483,18 +460,19 @@ impl GlassMaterial {
     /// surface keeps its own. Refraction and the highlight belong to Liquid; the flat styles keep
     /// them at 0.
     pub fn tuned(self, style: Style, knobs: &Knobs) -> Self {
-        let unit = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
-        let clarity = knobs.clarity.map_or(self.clarity, unit);
-        let strength = knobs.clarity.map_or(self.tint.a, |_| 1.0 - clarity);
-        let lensed = lensed(style);
-        let lens = |own: f32, knob: Option<f32>| if lensed { knob.map_or(own, unit) } else { 0.0 };
-        Self {
-            clarity,
-            blur: knobs.blur.map_or(self.blur, |b| if b.is_finite() { b.max(0.0) } else { 0.0 }),
-            refraction: lens(self.refraction, knobs.refraction),
-            highlight: lens(self.highlight, knobs.highlight),
-            tint: self.tint.with_alpha(strength),
+        Material::Glass {
+            clarity: self.clarity,
+            blur: self.blur,
+            refraction: self.refraction,
+            highlight: self.highlight,
+            tint: Some(self.tint),
+            tint_alpha: None,
+            lensed: lensed(style),
         }
+        .overrides(knobs)
+        .resolve(self.tint)
+        .1
+        .expect("glass material stays glass")
     }
 }
 
@@ -542,7 +520,12 @@ pub fn contrast(a: Rgba, b: Rgba) -> f32 {
 /// `top` composited over opaque `under` (straight alpha, in sRGB as DWM blends).
 pub fn over(top: Rgba, under: Rgba) -> Rgba {
     let mix = |a: f32, b: f32| a * top.a + b * (1.0 - top.a);
-    Rgba::new(mix(top.r, under.r), mix(top.g, under.g), mix(top.b, under.b), 1.0)
+    Rgba::new(
+        mix(top.r, under.r),
+        mix(top.g, under.g),
+        mix(top.b, under.b),
+        1.0,
+    )
 }
 
 fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
@@ -554,50 +537,45 @@ fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
     )
 }
 
-fn palette(style: Style, dark: bool, accent: Rgba) -> Palette {
+fn palette(spec: &PalettePreset, dark: bool, accent: Rgba) -> Palette {
     // Labels: Apple's (white / `#3C3C43` on light) with the lower steps raised for glass.
     let (ink, sub) = if dark {
         (hex(0xFFFFFF, 1.0), hex(0xEBEBF5, 1.0))
     } else {
         (hex(0x000000, 0.88), hex(0x3C3C43, 1.0))
     };
-    let (secondary, tertiary, quaternary) = match (style, dark) {
-        // Windows 11's text steps (TextFillColorSecondary/Tertiary/Disabled).
-        (Style::Fluent, true) => (0.79, 0.55, 0.36),
-        (Style::Fluent, false) => (0.80, 0.62, 0.42),
-        (_, true) => (0.72, 0.50, 0.30),
-        (_, false) => (0.78, 0.60, 0.34),
+    let index = usize::from(dark);
+    let (secondary, tertiary, quaternary) = spec.steps[index];
+    let (rgb, alpha) = spec.surface[index];
+    let surface = hex(rgb, alpha);
+    let wash = |a: f32| {
+        if dark {
+            ink.with_alpha(a)
+        } else {
+            hex(0x000000, a)
+        }
     };
-    let surface = match (style, dark) {
-        (Style::Solid, true) => hex(0x1C1C1E, 1.0),
-        (Style::Solid, false) => hex(0xF2F2F7, 1.0),
-        (Style::Fluent, true) => hex(0x202020, 0.90),
-        (Style::Fluent, false) => hex(0xF3F3F3, 0.90),
-        (Style::OneUi, true) => hex(0x17171A, 0.92),
-        (Style::OneUi, false) => hex(0xF4F4F6, 0.92),
-        // Mono stays visibly translucent without adding glass, grain or shading.
-        (Style::Mono, true) => hex(0x141416, 0.78),
-        (Style::Mono, false) => hex(0xF7F7F8, 0.78),
-        // liquid-rust's tinted dark face, `#1C1C1E` at 70-85 %; white frost on light.
-        (Style::Liquid, true) => hex(0x1C1C1E, 0.82),
-        (Style::Liquid, false) => hex(0xF5F5F7, 0.80),
-    };
-    let wash = |a: f32| if dark { ink.with_alpha(a) } else { hex(0x000000, a) };
-    let card = match (style, dark) {
-        (Style::Solid, true) => hex(0x2C2C2E, 1.0),
-        (Style::Solid, false) => hex(0xFFFFFF, 1.0),
-        (Style::Fluent, true) => hex(0xFFFFFF, 0.06),
-        (Style::Fluent, false) => hex(0xFFFFFF, 0.70),
-        (Style::OneUi, true) => hex(0xFFFFFF, 0.09),
-        (Style::OneUi, false) => hex(0xFFFFFF, 0.90),
-        (_, true) => hex(0xFFFFFF, 0.10),
-        (_, false) => hex(0xFFFFFF, 0.55),
-    };
+    let (rgb, alpha) = spec.card[index];
+    let card = hex(rgb, alpha);
     // Mono has no colour: its accent is the label.
-    let accent = if style == Style::Mono {
-        if dark { hex(0xF2F2F2, 1.0) } else { hex(0x1C1C1E, 1.0) }
+    let accent = if spec.monochrome {
+        if dark {
+            hex(0xF2F2F2, 1.0)
+        } else {
+            hex(0x1C1C1E, 1.0)
+        }
     } else {
-        readable_accent(accent, over(surface, if dark { hex(0, 1.0) } else { hex(0xFFFFFF, 1.0) }))
+        readable_accent(
+            accent,
+            over(
+                surface,
+                if dark {
+                    hex(0, 1.0)
+                } else {
+                    hex(0xFFFFFF, 1.0)
+                },
+            ),
+        )
     };
     let on_accent = if contrast(hex(0xFFFFFF, 1.0), accent) >= 3.0 {
         hex(0xFFFFFF, 1.0)
@@ -605,6 +583,7 @@ fn palette(style: Style, dark: bool, accent: Rgba) -> Palette {
         hex(0x111113, 1.0)
     };
     Palette {
+        monochrome: spec.monochrome,
         label: ink,
         secondary: sub.with_alpha(secondary),
         tertiary: sub.with_alpha(tertiary),
@@ -628,11 +607,27 @@ fn palette(style: Style, dark: bool, accent: Rgba) -> Palette {
         accent,
         on_accent,
         accent_wash: accent.with_alpha(if dark { 0.24 } else { 0.16 }),
-        destructive: if dark { hex(0xFF453A, 1.0) } else { hex(0xFF3B30, 1.0) },
-        success: if dark { hex(0x30D158, 1.0) } else { hex(0x34C759, 1.0) },
-        warning: if dark { hex(0xFF9F0A, 1.0) } else { hex(0xFF9500, 1.0) },
+        destructive: if dark {
+            hex(0xFF453A, 1.0)
+        } else {
+            hex(0xFF3B30, 1.0)
+        },
+        success: if dark {
+            hex(0x30D158, 1.0)
+        } else {
+            hex(0x34C759, 1.0)
+        },
+        warning: if dark {
+            hex(0xFF9F0A, 1.0)
+        } else {
+            hex(0xFF9500, 1.0)
+        },
         surface,
-        elevated: if dark { hex(0x2C2C2E, 0.98) } else { hex(0xFFFFFF, 0.98) },
+        elevated: if dark {
+            hex(0x2C2C2E, 0.98)
+        } else {
+            hex(0xFFFFFF, 0.98)
+        },
         hover: wash(if dark { 0.08 } else { 0.05 }),
         pressed: wash(if dark { 0.16 } else { 0.10 }),
         knob: hex(0xFFFFFF, 1.0),
@@ -659,16 +654,16 @@ fn readable_accent(accent: Rgba, surface: Rgba) -> Rgba {
     c
 }
 
-fn ramp(style: Style) -> TypeRamp {
-    let f = |size: f32, weight: u16, tracking: f32, line: f32| Font {
+fn ramp_fluent() -> TypeRamp {
+    let f = |size, weight, tracking, line| Font {
         size,
         weight,
         tracking,
         line,
     };
-    let roles = match style {
-        // Windows 11's ramp: Caption 12, Body 14, Body Strong 14, Subtitle 20, Title 28.
-        Style::Fluent => [
+    TypeRamp {
+        family: VARIABLE.into(),
+        roles: [
             f(28.0, 600, -0.3, 36.0),
             f(20.0, 600, -0.2, 26.0),
             f(16.0, 600, 0.0, 22.0),
@@ -680,7 +675,18 @@ fn ramp(style: Style) -> TypeRamp {
             f(12.0, 400, 0.0, 16.0),
             f(11.0, 400, 0.0, 14.0),
         ],
-        Style::OneUi => [
+    }
+}
+fn ramp_one_ui() -> TypeRamp {
+    let f = |size, weight, tracking, line| Font {
+        size,
+        weight,
+        tracking,
+        line,
+    };
+    TypeRamp {
+        family: VARIABLE.into(),
+        roles: [
             f(30.0, 700, -0.5, 36.0),
             f(23.0, 700, -0.3, 28.0),
             f(18.0, 700, -0.2, 23.0),
@@ -692,9 +698,18 @@ fn ramp(style: Style) -> TypeRamp {
             f(12.0, 400, 0.0, 16.0),
             f(11.0, 600, 0.0, 14.0),
         ],
-        // macOS Tahoe's proportions at Windows' reading size (body 14, not 13: grayscale text
-        // at 96 DPI needs the extra pixel).
-        Style::Liquid | Style::Solid | Style::Mono => [
+    }
+}
+fn ramp_liquid() -> TypeRamp {
+    let f = |size, weight, tracking, line| Font {
+        size,
+        weight,
+        tracking,
+        line,
+    };
+    TypeRamp {
+        family: VARIABLE.into(),
+        roles: [
             f(28.0, 700, -0.6, 34.0),
             f(22.0, 700, -0.4, 28.0),
             f(17.0, 600, -0.2, 22.0),
@@ -706,10 +721,6 @@ fn ramp(style: Style) -> TypeRamp {
             f(12.0, 400, 0.0, 16.0),
             f(11.0, 500, 0.1, 14.0),
         ],
-    };
-    TypeRamp {
-        family: VARIABLE.into(),
-        roles,
     }
 }
 
@@ -722,7 +733,11 @@ mod tests {
         for style in Style::ALL {
             for scheme in [Scheme::Dark, Scheme::Light] {
                 let t = Theme::new(style, scheme, SYSTEM_BLUE);
-                let under = if t.dark() { hex(0x000000, 1.0) } else { hex(0xFFFFFF, 1.0) };
+                let under = if t.dark() {
+                    hex(0x000000, 1.0)
+                } else {
+                    hex(0xFFFFFF, 1.0)
+                };
                 // The worst case for the surface: its tint over a backdrop of the other
                 // extreme is checked by the engine's glass; here, over its own scheme's.
                 let surface = over(t.color.surface, under);
@@ -739,7 +754,10 @@ mod tests {
                 // A card's labels too.
                 let card = over(t.color.card, surface);
                 let ratio = contrast(over(t.color.secondary, card), card);
-                assert!(ratio >= 4.5, "{style:?} {scheme:?} secondary on card: {ratio:.2}");
+                assert!(
+                    ratio >= 4.5,
+                    "{style:?} {scheme:?} secondary on card: {ratio:.2}"
+                );
                 if style != Style::Mono {
                     let a = contrast(t.color.accent, surface);
                     assert!(a >= 3.0, "{style:?} {scheme:?} accent {a:.2}");
@@ -766,7 +784,11 @@ mod tests {
     #[test]
     fn small_glass_flips_with_its_backdrop_and_panels_follow_the_scheme() {
         let t = Theme::new(Style::Liquid, Scheme::Dark, SYSTEM_BLUE);
-        assert_eq!(t.adaptive(44.0, Some(0.8)), Scheme::Light, "a button over snow");
+        assert_eq!(
+            t.adaptive(44.0, Some(0.8)),
+            Scheme::Light,
+            "a button over snow"
+        );
         assert_eq!(t.adaptive(44.0, Some(0.02)), Scheme::Dark);
         assert_eq!(t.adaptive(380.0, Some(0.8)), Scheme::Dark, "a flyout");
         assert_eq!(t.adaptive(44.0, None), Scheme::Dark, "no backdrop known");
@@ -779,14 +801,50 @@ mod tests {
         let tint = hex(0x17171A, 0.46);
         for style in [Style::Liquid, Style::OneUi, Style::Fluent] {
             let base = material(style, tint).unwrap();
-            assert_eq!(base.tuned(style, &Knobs::default()), base, "{style:?}: unset keeps it");
-            let clear = base.tuned(style, &Knobs { clarity: Some(1.0), blur: Some(0.0), ..Default::default() });
-            assert_eq!((clear.clarity, clear.blur, clear.tint.a), (1.0, 0.0, 0.0), "{style:?}");
-            let tinted = base.tuned(style, &Knobs { clarity: Some(0.0), blur: Some(32.0), ..Default::default() });
+            assert_eq!(
+                base.tuned(style, &Knobs::default()),
+                base,
+                "{style:?}: unset keeps it"
+            );
+            let clear = base.tuned(
+                style,
+                &Knobs {
+                    clarity: Some(1.0),
+                    blur: Some(0.0),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                (clear.clarity, clear.blur, clear.tint.a),
+                (1.0, 0.0, 0.0),
+                "{style:?}"
+            );
+            let tinted = base.tuned(
+                style,
+                &Knobs {
+                    clarity: Some(0.0),
+                    blur: Some(32.0),
+                    ..Default::default()
+                },
+            );
             assert_eq!((tinted.clarity, tinted.blur), (0.0, 32.0), "{style:?}");
-            assert!(tinted.tint.a > base.tint.a, "{style:?}: more tinted than its default");
-            let lens = base.tuned(style, &Knobs { refraction: Some(1.0), highlight: Some(1.0), ..Default::default() });
-            assert_eq!(lens.refraction > 0.0, lensed(style), "{style:?}: only Liquid bends");
+            assert!(
+                tinted.tint.a > base.tint.a,
+                "{style:?}: more tinted than its default"
+            );
+            let lens = base.tuned(
+                style,
+                &Knobs {
+                    refraction: Some(1.0),
+                    highlight: Some(1.0),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(
+                lens.refraction > 0.0,
+                lensed(style),
+                "{style:?}: only Liquid bends"
+            );
         }
     }
 
@@ -797,6 +855,9 @@ mod tests {
         let w0 = std::f32::consts::TAU / 0.5;
         assert!((s.stiffness - w0 * w0).abs() < 0.01);
         assert!((s.damping - 2.0 * 0.85 * w0).abs() < 0.01);
-        assert!(Spring::SMOOTH.at(0.5) > 0.98, "settles in about its duration");
+        assert!(
+            Spring::SMOOTH.at(0.5) > 0.98,
+            "settles in about its duration"
+        );
     }
 }

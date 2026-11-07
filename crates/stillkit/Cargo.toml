@@ -13,7 +13,12 @@ log.workspace = true
 # Golden-image comparison (`golden` feature), for tests in this crate and the shell.
 png = { workspace = true, optional = true }
 
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+toml = { version = "0.8", optional = true }
+
 [features]
+serde = ["dep:serde", "dep:serde_json", "dep:toml"]
 golden = ["dep:png"]
 
 [target.'cfg(windows)'.dependencies]
@@ -65,3 +70,7 @@ path = "examples/bar_spike.rs"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "gallery"
+test = true
