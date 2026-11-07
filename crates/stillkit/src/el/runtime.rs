@@ -9,6 +9,12 @@
 //!   the view does not run. Every pressable box keeps its wash and focus ring in the list
 //!   (transparent at rest), so a hover changes one op and `Surface::present` redraws one
 //!   control.
+//! - **Scrolling** moves a scroll view's children back by its offset at paint time: the view
+//!   does not run, nothing is laid out again, and only the view's clipped group changes.
+//! - **Keys** go to the focused element and up through its ancestors ([`El::on_key`], then
+//!   each one's range, focus group or scroll view), then to the defaults. Tab and arrows move
+//!   focus over the retained tree's focus stops (a focus group is one stop), so a stop hidden
+//!   in a scroll view is reached and scrolled into view.
 //! - **Size, scale and theme** re-lay out the retained tree without running the view (size
 //!   and scale land at once; a theme's colours animate where elements have motion).
 //!
@@ -16,6 +22,7 @@
 //! the same runtime the window host does, on a virtual clock.
 
 use std::collections::{HashMap, HashSet};
+use std::f32::consts::{FRAC_PI_2, TAU};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,13 +30,15 @@ use accesskit::Role;
 use anyhow::Result;
 
 use super::animate::{Animator, Mode, Pose, Target};
-use super::element::{El, Key, Transition, Tx, What};
+use super::element::{ArcLook, Axis, El, Handled, Key, KeyCode, Range, Transition, Tx, What};
 use super::layout::{Cx, Laid, Layout};
+use super::scroll::{LINE, NOTCH, ScrollView};
 use super::token;
+use crate::a11y::Detail;
 use crate::interact::{Response, State};
 use crate::{
-    Button, DisplayList, Event, Frame, Hit, HitId, Image, Interaction, Op, Point, Pointer, Rect, Rgba,
-    Surface, Theme, Ui, render,
+    AccessibilityAction, Button, DisplayList, Event, Frame, Hit, HitId, Image, Interaction, Op, Point, Pointer,
+    Rect, Rgba, Semantics, Surface, Theme, Ui, render,
 };
 
 /// A view: the element tree for a state.
@@ -39,6 +48,8 @@ type View<S> = Box<dyn Fn(&S) -> El<S>>;
 enum Action {
     Press(HitId),
     Drag(HitId, f32, f32),
+    /// A range stepped by this much.
+    Step(HitId, f64),
 }
 
 /// A keyed element's layout and look, before or after a view run.
@@ -68,7 +79,7 @@ pub struct Shown {
     /// Its hit item's role, when it has one.
     pub role: Option<Role>,
     pub label: Option<Arc<str>>,
-    /// Device pixels, where it is drawn now (mid-animation, between its layouts).
+    /// Device pixels, where it is drawn now (mid-animation, between its layouts; scrolled).
     pub rect: Rect,
     pub fill: Option<Rgba>,
     pub text: Option<Arc<str>>,
@@ -78,6 +89,15 @@ pub struct Shown {
     pub focused: bool,
     /// Its own opacity now, entrance included.
     pub opacity: f32,
+    /// A range's min, max and value ([`El::range`]).
+    pub range: Option<(f64, f64, f64)>,
+    /// Its value as text ([`El::value`]).
+    pub value: Option<Arc<str>>,
+    pub description: Option<Arc<str>>,
+    pub selected: Option<bool>,
+    pub expanded: Option<bool>,
+    /// A scroll view's offset now, device px along its axis.
+    pub scroll: Option<f32>,
 }
 
 /// An element that left the view and stays drawn, out of hit testing, until its exit settles.
@@ -91,6 +111,27 @@ struct Ghost<S> {
     laid: Vec<Laid>,
     /// Its subtree as last shown, local rects relative to its parent's.
     frozen: Vec<Pose>,
+}
+
+/// A keyboard focus stop, in paint order: an actionable hit item.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Stop {
+    hit: HitId,
+    /// The element that pushed it, in `laid`.
+    index: usize,
+    /// The focus group it belongs to (the group element's place in `laid`).
+    group: Option<usize>,
+    /// Selected or checked: where Tab enters its group.
+    selected: bool,
+}
+
+/// A scroll view as paint draws it.
+#[derive(Debug, Clone, Copy)]
+struct Bar {
+    axis: Axis,
+    offset: f32,
+    max: f32,
+    alpha: f32,
 }
 
 /// A view, its state and everything retained between frames. Headless as is; [`super::run`]
@@ -117,6 +158,21 @@ pub struct Runtime<S> {
     ix: Interaction,
     queue: Vec<Action>,
     dragging: Option<HitId>,
+    /// Scroll views by identity.
+    scrolls: HashMap<u64, ScrollView>,
+    /// Whether a scroll view glides or its scrollbar shows (frames keep coming).
+    scrolling: bool,
+    /// Keys to scroll into view once the layout is current.
+    reveal: Vec<Key>,
+    /// Range steps queued since the view last ran, by hit, so quick keys add up.
+    stepped: HashMap<HitId, f64>,
+    /// Focus stops of the last paint.
+    nav: Vec<Stop>,
+    /// Accessibility values of the last paint, by hit.
+    semantics: Vec<(HitId, Semantics)>,
+    semantics_sent: bool,
+    /// Where the pointer last was, so hover follows content scrolling under it.
+    pointer: Option<Pointer>,
     stale_view: bool,
     stale_layout: bool,
     stale_paint: bool,
@@ -158,6 +214,14 @@ impl<S: 'static> Runtime<S> {
             ix: Interaction::default(),
             queue: Vec::new(),
             dragging: None,
+            scrolls: HashMap::new(),
+            scrolling: false,
+            reveal: Vec::new(),
+            stepped: HashMap::new(),
+            nav: Vec::new(),
+            semantics: Vec::new(),
+            semantics_sent: false,
+            pointer: None,
             stale_view: true,
             stale_layout: true,
             stale_paint: true,
@@ -188,50 +252,88 @@ impl<S> Runtime<S> {
             let old = self.stale_view.then(|| {
                 self.views += 1;
                 self.stale_view = false;
+                self.stepped.clear();
                 std::mem::replace(&mut self.root, (self.view)(&self.state))
             });
             self.relayout(before, old);
+        }
+        if !self.reveal.is_empty() {
+            for key in std::mem::take(&mut self.reveal) {
+                if let Some(index) = self.index_of_key(&key) {
+                    self.reveal_index(index);
+                }
+            }
         }
         let moved = self.anim.moving();
         let left = self.anim.settle();
         if !left.is_empty() {
             self.ghosts.retain(|g| !left.contains(&g.id));
         }
-        if moved || !left.is_empty() {
+        let scrolled = self.tick_scrolls();
+        if moved || !left.is_empty() || scrolled {
             self.stale_paint = true;
         }
         if !self.stale_paint {
             return false;
         }
         self.paint();
+        // Content scrolled under a still pointer: hover what is there now.
+        if scrolled && let Some(p) = self.pointer {
+            let hover = self.ix.hover;
+            self.ix.handle(&self.list, &Event::Move(p));
+            if self.ix.hover != hover {
+                self.paint();
+            }
+        }
         true
+    }
+
+    /// Settles the scroll views; whether what any of them shows changed since the last paint.
+    fn tick_scrolls(&mut self) -> bool {
+        if self.scrolls.is_empty() {
+            self.scrolling = false;
+            return false;
+        }
+        let (t, theme) = (self.anim.t, &self.theme);
+        let mut changed = false;
+        self.scrolling = false;
+        for view in self.scrolls.values_mut() {
+            self.scrolling |= view.settle(t, theme);
+            changed |= (view.offset(t), view.bar(t, theme)) != view.shown;
+        }
+        changed
     }
 
     fn run_handlers(&mut self) {
         let mut tx = Tx::default();
         for action in std::mem::take(&mut self.queue) {
-            let hit = match action {
-                Action::Press(hit) | Action::Drag(hit, ..) => hit,
-            };
+            let (Action::Press(hit) | Action::Drag(hit, ..) | Action::Step(hit, _)) = action;
             let Some(el) = element(&self.root, &self.laid, hit) else {
                 continue;
             };
-            match (action, &el.on_press, &el.on_drag) {
-                (Action::Press(_), Some(handler), _) => handler(&mut self.state, &mut tx),
-                (Action::Drag(_, x, y), _, Some(handler)) => {
+            match (action, &el.on_press, &el.on_drag, &el.on_step) {
+                (Action::Press(_), Some(handler), ..) => handler(&mut self.state, &mut tx),
+                (Action::Drag(_, x, y), _, Some(handler), _) => {
                     handler(&mut self.state, x, y);
                     tx.instant();
                 }
+                (Action::Step(_, delta), .., Some(handler)) => handler(&mut self.state, delta),
                 _ => continue,
             }
             self.stale_view = true;
         }
+        self.apply(tx);
+    }
+
+    /// What a handler asked of its frame.
+    fn apply(&mut self, tx: Tx) {
         if tx.instant {
             self.land_next();
         }
         if let Some(theme) = tx.theme {
             self.set_theme(theme);
         }
+        self.reveal.extend(tx.reveal);
     }
 
     /// The next re-layout lands with no motion (the first frame stays the first).
@@ -264,10 +366,29 @@ impl<S> Runtime<S> {
         self.anim.retarget(&laid, &targets, &prev, mode);
         self.laid = laid;
         self.targets = targets;
+        self.sync_scrolls();
         let after = keyed(&self.root, &self.laid, &self.theme);
         self.diff(before, after);
         self.stale_layout = false;
         self.stale_paint = true;
+    }
+
+    /// Keeps a scroll state for every scroll view laid out, with its new extent.
+    fn sync_scrolls(&mut self) {
+        let t = self.anim.t;
+        let mut seen = HashSet::new();
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if let (Some(axis), Some(extent)) = (el.scrolls(), self.laid[i].extent) {
+                let l = self.laid[i];
+                let view = self.scrolls.entry(l.id).or_insert_with(|| ScrollView::new(axis));
+                if view.axis != axis {
+                    *view = ScrollView::new(axis);
+                }
+                view.laid(l.rect, extent, t);
+                seen.insert(l.id);
+            }
+        });
+        self.scrolls.retain(|id, _| seen.contains(id));
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
@@ -297,11 +418,11 @@ impl<S> Runtime<S> {
             if !self.anim.leave(me.id) {
                 continue;
             }
-            let origin = self.poses[parent].local;
+            let origin = self.child_origin(parent);
             let mut frozen: Vec<Pose> = shown
                 .iter()
                 .map(|p| Pose {
-                    local: p.local.offset(-origin.left, -origin.top),
+                    local: p.local.offset(-origin.x, -origin.y),
                     ..*p
                 })
                 .collect();
@@ -316,6 +437,17 @@ impl<S> Runtime<S> {
                 frozen,
             });
         }
+    }
+
+    /// Where the children of the element at `index` hang from now: its top-left, less its
+    /// scroll offset.
+    fn child_origin(&self, index: usize) -> Point {
+        let local = self.poses[index].local;
+        let by = self
+            .scrolls
+            .get(&self.laid[index].id)
+            .map_or(Point::new(0.0, 0.0), |v| v.shift(self.anim.t));
+        Point::new(local.left - by.x, local.top - by.y)
     }
 
     /// Diffs keyed elements across a re-layout into [`Runtime::changes`].
@@ -339,7 +471,28 @@ impl<S> Runtime<S> {
     }
 
     fn paint(&mut self) {
-        self.poses = self.anim.poses(&self.laid, &self.targets);
+        let t = self.anim.t;
+        let mut scrolled = HashMap::new();
+        let mut bars = HashMap::new();
+        if !self.scrolls.is_empty() {
+            for (i, l) in self.laid.iter().enumerate() {
+                if let Some(view) = self.scrolls.get_mut(&l.id) {
+                    let (offset, alpha) = (view.offset(t), view.bar(t, &self.theme));
+                    view.shown = (offset, alpha);
+                    scrolled.insert(i, view.shift(t));
+                    bars.insert(
+                        i,
+                        Bar {
+                            axis: view.axis,
+                            offset,
+                            max: view.max,
+                            alpha,
+                        },
+                    );
+                }
+            }
+        }
+        self.poses = self.anim.poses(&self.laid, &self.targets, &scrolled);
         let ghosts: Vec<Vec<Pose>> = if self.ghosts.is_empty() {
             Vec::new()
         } else {
@@ -348,7 +501,15 @@ impl<S> Runtime<S> {
                 .iter()
                 .map(|g| {
                     at.get(&g.parent)
-                        .map(|&p| self.anim.ghost(g.id, &g.frozen, &self.poses[p]))
+                        .map(|&p| {
+                            // Ghosts in a scroll view move with its content.
+                            let by = scrolled.get(&p).copied().unwrap_or(Point::new(0.0, 0.0));
+                            let parent = Pose {
+                                local: self.poses[p].local.offset(-by.x, -by.y),
+                                ..self.poses[p]
+                            };
+                            self.anim.ghost(g.id, &g.frozen, &parent)
+                        })
                         .unwrap_or_default()
                 })
                 .collect()
@@ -357,14 +518,26 @@ impl<S> Runtime<S> {
             ghosts: &self.ghosts,
             poses: &ghosts,
         };
+        let mut walk = Walk {
+            scene: &scene,
+            nav: Vec::with_capacity(self.nav.len()),
+            semantics: Vec::with_capacity(self.semantics.len()),
+            focus: self.ix.focus,
+            bars: &bars,
+        };
         let mut f = Frame::new(&mut self.ui.text, &self.theme, self.scale, &self.ix);
         if let Some(background) = self.background {
             let (w, h) = self.size;
             f.fill(Rect::new(0.0, 0.0, w as f32, h as f32), 0.0, background);
         }
-        paint_el(&mut f, &scene, &self.root, &self.laid, &self.poses, &mut 0, true);
+        paint_el(&mut f, &mut walk, &self.laid, &self.poses, &self.root, &mut 0, true, None);
         let mut list = f.list;
         list.focus = self.ix.focus;
+        self.nav = walk.nav;
+        if walk.semantics != self.semantics {
+            self.semantics = walk.semantics;
+            self.semantics_sent = false;
+        }
         self.damage = list.damage(&self.list);
         self.list = list;
         self.paints += 1;
@@ -374,8 +547,16 @@ impl<S> Runtime<S> {
     /// Feeds one input event. Hover, press and focus changes repaint at the next frame
     /// without running the view; activations queue their handlers.
     pub fn handle(&mut self, event: &Event) {
-        if let Event::Key(0x09) = event {
-            return self.tab(false);
+        match *event {
+            Event::Key(0x09) => return self.tab(false),
+            Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
+            Event::Wheel(p, delta) => {
+                self.pointer = Some(p);
+                return self.wheel(p.at, delta);
+            }
+            Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) => self.pointer = Some(p),
+            Event::Leave => self.pointer = None,
+            _ => {}
         }
         let before = self.ix.clone();
         if let Response::Activate(hit) = self.ix.handle(&self.list, event) {
@@ -399,12 +580,25 @@ impl<S> Runtime<S> {
         }
         if self.ix != before {
             self.stale_paint = true;
+            // Assistive technology moved the focus: show it.
+            if self.ix.focus_visible
+                && self.ix.focus != before.focus
+                && let Some(index) = self.ix.focus.and_then(|hit| self.index_of_hit(hit))
+            {
+                self.reveal_index(index);
+            }
         }
     }
 
     fn drag(&mut self, at: Point) {
         let Some(hit) = self.dragging else { return };
-        let Some(rect) = self.laid.iter().find(|l| l.hit == hit).map(|l| l.rect) else {
+        // Where it is drawn now: a scroll view may have moved it.
+        let Some(rect) = self
+            .laid
+            .iter()
+            .position(|l| l.hit == hit)
+            .map(|i| self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect))
+        else {
             return;
         };
         let along = |v: f32, start: f32, len: f32| ((v - start) / len.max(1.0)).clamp(0.0, 1.0);
@@ -421,14 +615,311 @@ impl<S> Runtime<S> {
         self.queue.push(Action::Drag(hit, x, y));
     }
 
-    /// Moves keyboard focus to the next (or, `back`, previous) focusable element (Tab).
-    pub fn tab(&mut self, back: bool) {
-        let before = self.ix.clone();
-        self.ix.step(&self.list, if back { -1 } else { 1 });
-        if self.ix != before {
-            self.stale_paint = true;
+    // ---- Keys -------------------------------------------------------------------------------
+
+    /// A key other than Tab: offered to the focused element and its ancestors (their
+    /// `on_key`, then their range, focus group or scroll view), then the defaults. Whether it
+    /// was used here (Enter, Space and Escape otherwise go on to the interaction state).
+    fn key_down(&mut self, key: KeyCode) -> bool {
+        let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
+        let mut chain = Vec::new();
+        let mut at = Some(focused.unwrap_or(0));
+        while let Some(i) = at.filter(|&i| i < self.laid.len()) {
+            chain.push(i);
+            at = self.laid[i].parent;
+        }
+        let flat = flatten(&self.root);
+        for i in chain {
+            let Some(el) = flat.get(i).copied() else { continue };
+            if let Some(handler) = &el.on_key {
+                // Queued presses come first, as they arrived first.
+                if !self.queue.is_empty() {
+                    drop(flat);
+                    self.run_handlers();
+                    return self.key_down(key);
+                }
+                let mut tx = Tx::default();
+                if handler(&mut self.state, key, &mut tx) == Handled::Yes {
+                    self.stale_view = true;
+                    self.apply(tx);
+                    return true;
+                }
+            }
+            if let Some(intent) = self.built_in(el, i, focused, key) {
+                drop(flat);
+                self.act(intent);
+                return true;
+            }
+        }
+        drop(flat);
+        let step = match key {
+            KeyCode::LEFT | KeyCode::UP => -1,
+            KeyCode::RIGHT | KeyCode::DOWN => 1,
+            _ => return false,
+        };
+        self.step(step < 0);
+        true
+    }
+
+    /// What element `el` (at `index`) does with `key` while focus is on `focused`.
+    fn built_in(&self, el: &El<S>, index: usize, focused: Option<usize>, key: KeyCode) -> Option<Intent> {
+        let on_it = focused == Some(index);
+        let hit = self.laid[index].hit;
+        if on_it
+            && !el.sem.disabled
+            && let (Some(range), Some(_)) = (el.sem.range, &el.on_step)
+        {
+            let value = range.value + self.stepped.get(&hit).copied().unwrap_or(0.0);
+            let to = range_key(range, value, key)?;
+            return Some(Intent::Step(hit, to - value));
+        }
+        if let Some(group) = el.group
+            && let Some(focus) = self.ix.focus
+            && let Some(stop) = self.nav.iter().find(|s| s.hit == focus && s.group == Some(index))
+        {
+            let (back, ahead) = match group.axis {
+                Axis::Horizontal => (KeyCode::LEFT, KeyCode::RIGHT),
+                Axis::Vertical => (KeyCode::UP, KeyCode::DOWN),
+            };
+            let members: Vec<HitId> = self.nav.iter().filter(|s| s.group == stop.group).map(|s| s.hit).collect();
+            let at = members.iter().position(|&m| m == focus)?;
+            let n = members.len();
+            let to = match key {
+                k if k == back => (at + n - 1) % n,
+                k if k == ahead => (at + 1) % n,
+                KeyCode::HOME => 0,
+                KeyCode::END => n - 1,
+                _ => return None,
+            };
+            return Some(Intent::Focus(members[to], group.follow));
+        }
+        if let Some(axis) = el.scrolls()
+            && let Some(view) = self.scrolls.get(&self.laid[index].id)
+        {
+            let s = self.scale;
+            let page = (view.viewport * 0.85).max(1.0);
+            let (back, ahead) = match axis {
+                Axis::Horizontal => (KeyCode::LEFT, KeyCode::RIGHT),
+                Axis::Vertical => (KeyCode::UP, KeyCode::DOWN),
+            };
+            let to = match key {
+                KeyCode::PAGE_UP => view.target() - page,
+                KeyCode::PAGE_DOWN => view.target() + page,
+                KeyCode::SPACE if on_it => view.target() + page,
+                KeyCode::HOME if on_it => 0.0,
+                KeyCode::END if on_it => view.max,
+                k if on_it && k == back => view.target() - LINE * s,
+                k if on_it && k == ahead => view.target() + LINE * s,
+                _ => return None,
+            };
+            return Some(Intent::Scroll(index, to));
+        }
+        None
+    }
+
+    fn act(&mut self, intent: Intent) {
+        match intent {
+            Intent::Step(hit, delta) => {
+                if delta != 0.0 {
+                    *self.stepped.entry(hit).or_default() += delta;
+                    self.queue.push(Action::Step(hit, delta));
+                }
+            }
+            Intent::Focus(hit, press) => {
+                self.focus(hit);
+                if press {
+                    self.queue.push(Action::Press(hit));
+                }
+            }
+            Intent::Scroll(index, to) => {
+                let spring = self.scroll_spring();
+                if let Some(view) = self.scrolls.get_mut(&self.laid[index].id)
+                    && view.to(to, spring, self.anim.t)
+                {
+                    self.scrolling = true;
+                    self.stale_paint = true;
+                }
+            }
         }
     }
+
+    /// Moves keyboard focus to `hit`, shows its ring and scrolls it into view.
+    fn focus(&mut self, hit: HitId) {
+        if self.ix.focus != Some(hit) || !self.ix.focus_visible {
+            self.ix.focus = Some(hit);
+            self.ix.focus_visible = true;
+            self.stale_paint = true;
+        }
+        if let Some(index) = self.index_of_hit(hit) {
+            self.reveal_index(index);
+        }
+    }
+
+    /// Moves keyboard focus to the next (or, `back`, previous) focus stop (Tab), wrapping. A
+    /// focus group is one stop: Tab lands on its selected member, else its first (its last
+    /// going back). A stop hidden in a scroll view scrolls into view.
+    pub fn tab(&mut self, back: bool) {
+        self.step(back);
+    }
+
+    fn step(&mut self, back: bool) {
+        let mut stops: Vec<Stop> = Vec::with_capacity(self.nav.len());
+        for stop in &self.nav {
+            match stop.group {
+                None => stops.push(*stop),
+                Some(g) if stops.iter().any(|s| s.group == Some(g)) => {}
+                Some(g) => {
+                    let mut members = self.nav.iter().filter(|s| s.group == Some(g));
+                    let entry = members.clone().find(|s| s.selected);
+                    let edge = if back { members.next_back() } else { members.next() };
+                    stops.extend(entry.or(edge).copied());
+                }
+            }
+        }
+        if stops.is_empty() {
+            return;
+        }
+        let current = self.ix.focus.and_then(|focus| {
+            let group = self.nav.iter().find(|s| s.hit == focus).and_then(|s| s.group);
+            stops
+                .iter()
+                .position(|s| s.hit == focus || group.is_some() && s.group == group)
+        });
+        let n = stops.len();
+        let next = match (current, back) {
+            (None, false) => 0,
+            (None, true) => n - 1,
+            (Some(at), false) => (at + 1) % n,
+            (Some(at), true) => (at + n - 1) % n,
+        };
+        self.focus(stops[next].hit);
+    }
+
+    /// Assistive technology's request on a hit item (a slider's increment, a new value):
+    /// whether it was used. The window host routes `Surface::take_accessibility_action` here.
+    pub fn accessibility_action(&mut self, hit: HitId, action: &AccessibilityAction) -> bool {
+        let Some(el) = element(&self.root, &self.laid, hit) else {
+            return false;
+        };
+        let (Some(range), Some(_), false) = (el.sem.range, &el.on_step, el.sem.disabled) else {
+            return false;
+        };
+        let value = range.value + self.stepped.get(&hit).copied().unwrap_or(0.0);
+        let to = match *action {
+            AccessibilityAction::Increment => value + range.step,
+            AccessibilityAction::Decrement => value - range.step,
+            AccessibilityAction::SetNumber(n) if n.is_finite() => n,
+            _ => return false,
+        };
+        self.act(Intent::Step(hit, to.clamp(range.min, range.max) - value));
+        true
+    }
+
+    // ---- Scrolling --------------------------------------------------------------------------
+
+    /// The spring scrolling glides along now (`None`: it lands at once).
+    fn scroll_spring(&self) -> Option<crate::Spring> {
+        (!self.anim.reduced).then_some(self.theme.motion.scroll)
+    }
+
+    /// The wheel at `at` (device px): the innermost scroll view under it that can move takes
+    /// it. A notch glides; a touchpad's small deltas move at once.
+    fn wheel(&mut self, at: Point, delta: i16) {
+        let notch = delta % 120 == 0;
+        let by = -f32::from(delta) / 120.0 * NOTCH * self.scale;
+        let spring = self.scroll_spring().filter(|_| notch);
+        let t = self.anim.t;
+        let under: Vec<u64> = self
+            .laid
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| {
+                self.scrolls.contains_key(&l.id) && self.poses.get(*i).is_some_and(|p| p.rect.contains(at))
+            })
+            .map(|(_, l)| l.id)
+            .collect();
+        for id in under.into_iter().rev() {
+            if let Some(view) = self.scrolls.get_mut(&id)
+                && view.by(by, spring, t)
+            {
+                self.scrolling = true;
+                self.stale_paint = true;
+                return;
+            }
+        }
+    }
+
+    /// Scrolls every scroll view around the element at `index` just enough to show it,
+    /// innermost first.
+    fn reveal_index(&mut self, index: usize) {
+        let spring = self.scroll_spring().filter(|_| self.mode == Mode::Animate);
+        let t = self.anim.t;
+        // Within this of the content's ends, the content's padding shows too.
+        let slack = (self.theme.metrics.pad * self.scale).round();
+        let mut rect = self.laid[index].rect;
+        let mut at = self.laid[index].parent;
+        while let Some(p) = at {
+            let l = self.laid[p];
+            if let Some(view) = self.scrolls.get_mut(&l.id) {
+                let (start, end, origin, extent) = match (view.axis, l.extent.unwrap_or_default()) {
+                    (Axis::Vertical, (_, h)) => (rect.top, rect.bottom, l.rect.top, h),
+                    (Axis::Horizontal, (w, _)) => (rect.left, rect.right, l.rect.left, w),
+                };
+                let (mut start, mut end) = (start - origin, end - origin);
+                if start <= slack {
+                    start = 0.0;
+                }
+                if extent - end <= slack {
+                    end = extent;
+                }
+                if view.reveal(start, end, spring, t) {
+                    self.scrolling = true;
+                    self.stale_paint = true;
+                }
+                let by = view.target();
+                rect = match view.axis {
+                    Axis::Vertical => rect.offset(0.0, -by),
+                    Axis::Horizontal => rect.offset(-by, 0.0),
+                };
+            }
+            at = l.parent;
+        }
+    }
+
+    /// Scrolls every scroll view around the first element keyed `key` just enough to show
+    /// it, once the layout is current (at the next frame).
+    pub fn scroll_into_view(&mut self, key: &str) {
+        self.reveal.push(key.into());
+    }
+
+    /// Where the first scroll view keyed `key` rests (device px along its axis): its offset
+    /// once any glide settles.
+    pub fn scroll_offset(&self, key: &str) -> Option<f32> {
+        let index = self.index_of_key(key)?;
+        self.scrolls.get(&self.laid[index].id).map(ScrollView::target)
+    }
+
+    // ---- Lookups ----------------------------------------------------------------------------
+
+    fn index_of_key(&self, key: &str) -> Option<usize> {
+        let mut found = None;
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if found.is_none() && el.key.as_deref() == Some(key) {
+                found = Some(i);
+            }
+        });
+        found
+    }
+
+    /// The element whose hit item `hit` is: its own, or one its kit painting pushed.
+    fn index_of_hit(&self, hit: HitId) -> Option<usize> {
+        self.laid
+            .iter()
+            .position(|l| l.hit == hit)
+            .or_else(|| self.nav.iter().find(|s| s.hit == hit).map(|s| s.index))
+    }
+
+    // ---- State ------------------------------------------------------------------------------
 
     /// Changes the state outside a handler (a timer, IPC); the view runs at the next frame
     /// and the change animates where elements have motion.
@@ -499,10 +990,10 @@ impl<S> Runtime<S> {
         self.anim.reduced
     }
 
-    /// Whether anything is still moving, or leaving: the host keeps frames coming while it
-    /// is, and none once it settles.
+    /// Whether anything is still moving, leaving or scrolling (a scrollbar waiting to fade
+    /// counts): the host keeps frames coming while it is, and none once it settles.
     pub fn animating(&self) -> bool {
-        self.anim.moving() || !self.ghosts.is_empty()
+        self.anim.moving() || !self.ghosts.is_empty() || self.scrolling
     }
 
     pub fn theme(&self) -> &Theme {
@@ -526,6 +1017,12 @@ impl<S> Runtime<S> {
     /// The latest painted frame.
     pub fn list(&self) -> &DisplayList {
         &self.list
+    }
+
+    /// What assistive technology reads beyond each hit item's name (ranges, values,
+    /// descriptions, selection, expansion), by hit, as of the latest paint.
+    pub fn semantics(&self) -> &[(HitId, Semantics)] {
+        &self.semantics
     }
 
     /// What the latest painted frame changed from the one before (`None`: nothing drawn).
@@ -572,7 +1069,13 @@ impl<S> Runtime<S> {
         self.handle(&Event::Release(pointer(x, y), Button::Left));
     }
 
-    /// A key going down (a virtual-key code: Enter 0x0D, Space 0x20, arrows, Escape).
+    /// The wheel turned by `delta` (120 a notch, positive away from the user: up) at `(x, y)`.
+    pub fn wheel_at(&mut self, x: f32, y: f32, delta: i16) {
+        self.handle(&Event::Wheel(pointer(x, y), delta));
+    }
+
+    /// A key going down (a virtual-key code: Enter 0x0D, Space 0x20, arrows, Escape; see
+    /// [`KeyCode`]).
     pub fn key(&mut self, vk: u16) {
         self.handle(&Event::Key(vk));
     }
@@ -588,15 +1091,10 @@ impl<S> Runtime<S> {
         true
     }
 
-    /// The laid-out rect (device px) of the first element keyed `key`: where it settles.
+    /// The laid-out rect (device px) of the first element keyed `key`: where it settles,
+    /// before any scroll view moves it.
     pub fn find(&self, key: &str) -> Option<Rect> {
-        let mut found = None;
-        each(&self.root, &self.laid, &mut |el, i, _| {
-            if found.is_none() && el.key.as_deref() == Some(key) {
-                found = Some(self.laid[i].rect);
-            }
-        });
-        found
+        self.index_of_key(key).map(|i| self.laid[i].rect)
     }
 
     /// What the first element keyed `key` shows now.
@@ -612,6 +1110,7 @@ impl<S> Runtime<S> {
             let pose = self.poses.get(i);
             let hit = el.hit();
             let enabled = el.interactive() && !el.sem.disabled;
+            let sem = &el.sem;
             out.push(Shown {
                 key: el.key.clone(),
                 path: path.to_owned(),
@@ -623,18 +1122,28 @@ impl<S> Runtime<S> {
                     What::Text { text, .. } => Some(text.clone()),
                     _ => None,
                 },
-                checked: el.sem.checked,
+                checked: sem.checked,
                 state: if enabled { self.ix.state(laid.hit, true) } else { State::Rest },
                 focused: self.ix.focus == Some(laid.hit),
                 opacity: pose.map_or(el.look.opacity, |p| p.opacity),
+                range: sem.range.map(|r| (r.min, r.max, r.value)),
+                value: sem.value.clone(),
+                description: sem.description.clone(),
+                selected: sem.selected,
+                expanded: sem.expanded,
+                scroll: self.scrolls.get(&laid.id).map(|v| v.offset(self.anim.t)),
             });
         });
         out
     }
 
-    /// Shows the latest frame on `surface` at `origin` (screen px; app windows ignore it).
-    /// The surface draws only what differs from what it shows.
+    /// Shows the latest frame on `surface` at `origin` (screen px; app windows ignore it),
+    /// with its accessibility values. The surface draws only what differs from what it shows.
     pub fn present(&mut self, surface: &mut Surface, origin: (i32, i32)) -> Result<bool> {
+        if !self.semantics_sent {
+            surface.set_accessibility_semantics(self.semantics.clone());
+            self.semantics_sent = true;
+        }
         surface.present(&mut self.ui, origin, self.size, self.list.clone())
     }
 
@@ -642,6 +1151,31 @@ impl<S> Runtime<S> {
     pub fn snap(&mut self) -> Result<Image> {
         render(&mut self.ui, &self.list, self.size.0, self.size.1)
     }
+}
+
+/// What a built-in key behaviour does.
+enum Intent {
+    /// Step a range by this much.
+    Step(HitId, f64),
+    /// Move focus within a group (and press there).
+    Focus(HitId, bool),
+    /// Scroll the view at this place to this offset.
+    Scroll(usize, f32),
+}
+
+/// Where `key` takes a range showing `value`, or `None` for a key it doesn't use.
+fn range_key(r: Range, value: f64, key: KeyCode) -> Option<f64> {
+    let page = ((r.max - r.min) / 10.0 / r.step).round().max(1.0) * r.step;
+    let to = match key {
+        KeyCode::RIGHT | KeyCode::UP => value + r.step,
+        KeyCode::LEFT | KeyCode::DOWN => value - r.step,
+        KeyCode::PAGE_UP => value + page,
+        KeyCode::PAGE_DOWN => value - page,
+        KeyCode::HOME => r.min,
+        KeyCode::END => r.max,
+        _ => return None,
+    };
+    Some(to.clamp(r.min, r.max))
 }
 
 fn pointer(x: f32, y: f32) -> Pointer {
@@ -662,6 +1196,19 @@ fn element<'a, S>(root: &'a El<S>, laid: &[Laid], hit: HitId) -> Option<&'a El<S
         el.children.iter().find_map(|child| walk(child, laid, i, hit))
     }
     walk(root, laid, &mut 0, hit)
+}
+
+/// Every element in pre-order: the same places as the laid-out list.
+fn flatten<S>(root: &El<S>) -> Vec<&El<S>> {
+    fn walk<'a, S>(el: &'a El<S>, out: &mut Vec<&'a El<S>>) {
+        out.push(el);
+        for child in &el.children {
+            walk(child, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, &mut out);
+    out
 }
 
 /// Visits every element in pre-order with its place in `laid` and its path.
@@ -743,10 +1290,14 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
         };
         let origin = me.parent.map_or(Point::new(0.0, 0.0), |p| Point::new(laid[p].rect.left, laid[p].rect.top));
         let r = me.rect;
+        let (ink, value) = match &el.what {
+            What::Arc(a) => (el.look.color.unwrap_or(token::ACCENT), a.fraction),
+            _ => (el.look.color.unwrap_or(token::LABEL), 0.0),
+        };
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
             fill: el.look.fill.map(|p| p.resolve(theme)),
-            ink: el.look.color.unwrap_or(token::LABEL).resolve(theme),
+            ink: ink.resolve(theme),
             opacity: el.look.opacity,
             radius: el
                 .look
@@ -755,6 +1306,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
                 .min(r.width().min(r.height()) / 2.0)
                 .max(0.0),
             shadow: if el.look.shadow { 1.0 } else { 0.0 },
+            value,
             motion,
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
@@ -772,8 +1324,10 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
 }
 
 fn role_of<S>(el: &El<S>) -> Role {
-    el.sem.role.unwrap_or(if el.on_drag.is_some() {
+    el.sem.role.unwrap_or(if el.on_drag.is_some() || el.sem.range.is_some() {
         Role::Slider
+    } else if el.scrolls().is_some() {
+        Role::ScrollView
     } else if el.interactive() && el.sem.checked.is_some() {
         Role::Switch
     } else if el.interactive() {
@@ -784,11 +1338,35 @@ fn role_of<S>(el: &El<S>) -> Role {
 }
 
 fn label_of<S>(el: &El<S>) -> Arc<str> {
-    el.sem
-        .label
-        .clone()
-        .or_else(|| el.first_text().cloned())
-        .unwrap_or_else(|| "".into())
+    let first = || el.first_text().cloned().filter(|_| el.scrolls().is_none());
+    el.sem.label.clone().or_else(first).unwrap_or_else(|| "".into())
+}
+
+/// What `el` tells assistive technology beyond its name and role.
+fn semantics_of<S>(el: &El<S>, id: HitId, out: &mut Vec<(HitId, Semantics)>) {
+    let s = &el.sem;
+    if let Some(r) = s.range {
+        out.push((
+            id,
+            Semantics::Range {
+                value: r.value,
+                min: r.min,
+                max: r.max,
+                step: r.step,
+            },
+        ));
+    }
+    if s.description.is_some() || s.value.is_some() || s.selected.is_some() || s.expanded.is_some() {
+        out.push((
+            id,
+            Semantics::Detail(Detail {
+                description: s.description.clone(),
+                value: s.value.clone(),
+                selected: s.selected,
+                expanded: s.expanded,
+            }),
+        ));
+    }
 }
 
 /// The leaving elements to draw among the live ones, with their poses now.
@@ -797,14 +1375,26 @@ struct Scene<'a, S> {
     poses: &'a [Vec<Pose>],
 }
 
+/// What a paint walk gathers besides the list.
+struct Walk<'a, S> {
+    scene: &'a Scene<'a, S>,
+    nav: Vec<Stop>,
+    semantics: Vec<(HitId, Semantics)>,
+    /// Kept in the list even when scrolled out of sight, so Enter and assistive technology
+    /// still find it.
+    focus: Option<HitId>,
+    /// Scroll views by their place in the live `laid`.
+    bars: &'a HashMap<usize, Bar>,
+}
+
 impl<S> Scene<'_, S> {
     /// Paints the ghosts that left `parent` from place `index` (and, `rest`, any after it).
-    fn paint(&self, f: &mut Frame, parent: u64, index: usize, rest: bool) {
+    fn paint(&self, f: &mut Frame, w: &mut Walk<S>, parent: u64, index: usize, rest: bool) {
         for (g, poses) in self.ghosts.iter().zip(self.poses) {
             if g.parent == parent && (g.index == index || rest && g.index > index) {
                 // Out of hit testing: whatever hits its kit painting pushed go again.
                 let hits = f.list.hits.len();
-                paint_el(f, self, &g.el, &g.laid, poses, &mut 0, false);
+                paint_el(f, w, &g.laid, poses, &g.el, &mut 0, false, None);
                 f.list.hits.truncate(hits);
             }
         }
@@ -812,9 +1402,21 @@ impl<S> Scene<'_, S> {
 }
 
 /// Paints `el` and its children (pre-order, matching `laid` and `poses`); `live` is false for
-/// a leaving element, which takes no hits, wash or focus ring.
-fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses: &[Pose], i: &mut usize, live: bool) {
+/// a leaving element, which takes no hits, wash or focus ring. `group` is the focus group
+/// around it (its place in `laid`).
+#[allow(clippy::too_many_arguments)]
+fn paint_el<S>(
+    f: &mut Frame,
+    w: &mut Walk<S>,
+    laid: &[Laid],
+    poses: &[Pose],
+    el: &El<S>,
+    i: &mut usize,
+    live: bool,
+    group: Option<usize>,
+) {
     let (Some(&me), Some(&pose)) = (laid.get(*i), poses.get(*i)) else { return };
+    let index = *i;
     *i += 1;
     let (theme, s, rect) = (f.theme, f.s, pose.rect);
     let start = f.list.ops.len();
@@ -824,6 +1426,7 @@ fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses
     let ink = pose.ink;
     let paints = matches!(el.what, What::Paint(_));
     let controls = live && el.interactive() && !paints;
+    let scroll = el.scrolls();
     if live && el.hit() && !paints {
         f.list.hits.push(hit(el, me.hit, rect));
     }
@@ -840,7 +1443,8 @@ fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses
     if let Some(fill) = pose.fill {
         f.fill(rect, radius, fill);
     }
-    if controls {
+    // A scroll view takes focus for its keys, but is no button: no wash.
+    if controls && scroll.is_none() {
         f.wash(me.hit, rect, radius, enabled);
     }
     // Text fits its laid-out width, so a box springing narrower never cuts it short.
@@ -876,6 +1480,7 @@ fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses
             opacity: 1.0,
             source: None,
         }),
+        What::Arc(a) => paint_arc(f, rect, a, pose.value, ink),
         What::Paint(painter) => {
             painter(f, rect, me.hit);
             if live && el.hit() && !f.list.hits[hits..].iter().any(|h| h.id == me.hit) {
@@ -883,20 +1488,207 @@ fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses
             }
         }
     }
-    for (index, child) in el.children.iter().enumerate() {
-        if live && !scene.ghosts.is_empty() {
-            scene.paint(f, me.id, index, false);
+    if live {
+        let selected = el.sem.selected == Some(true) || el.sem.checked == Some(true);
+        for h in f.list.hits[hits..].iter().filter(|h| h.actionable) {
+            w.nav.push(Stop {
+                hit: h.id,
+                index,
+                group,
+                selected,
+            });
         }
-        paint_el(f, scene, child, laid, poses, i, live);
+        if el.hit() {
+            semantics_of(el, me.hit, &mut w.semantics);
+        }
+    }
+    let inner = if el.group.is_some() { Some(index) } else { group };
+    let outer = scroll.map(|_| std::mem::take(&mut f.list.ops));
+    let (first_hit, first_stop) = (f.list.hits.len(), w.nav.len());
+    let scene = w.scene;
+    for (n, child) in el.children.iter().enumerate() {
+        if live && !scene.ghosts.is_empty() {
+            scene.paint(f, w, me.id, n, false);
+        }
+        paint_el(f, w, laid, poses, child, i, live, inner);
     }
     if live && !scene.ghosts.is_empty() {
-        scene.paint(f, me.id, el.children.len(), true);
+        scene.paint(f, w, me.id, el.children.len(), true);
+    }
+    if let Some(outer) = outer {
+        let content = std::mem::replace(&mut f.list.ops, outer);
+        f.push(Op::Clipped {
+            rect,
+            ops: content.into(),
+        });
+        // Hits are cut to the view; those out of sight go, except the focused one.
+        let shown: Vec<Hit> = f.list.hits.split_off(first_hit);
+        f.list.hits.extend(shown.into_iter().filter_map(|mut h| {
+            let cut = h.rect.intersect(rect);
+            if !cut.is_empty() {
+                h.rect = cut;
+            } else if w.focus == Some(h.id) {
+                h.rect = Rect::new(cut.left.min(rect.right), cut.top.min(rect.bottom), 0.0, 0.0);
+            } else {
+                return None;
+            }
+            Some(h)
+        }));
+        // A view with focus stops inside is no Tab stop itself (it still takes a click's focus).
+        if w.nav.len() > first_stop {
+            w.nav.retain(|stop| stop.hit != me.hit || stop.index != index);
+        }
+        if let Some(bar) = w.bars.get(&index).filter(|_| live) {
+            scrollbar(f, rect, me.extent, *bar);
+        }
     }
     if controls {
-        f.focus_ring(me.hit, rect, radius);
+        focus_ring(f, me.hit, rect, radius);
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
+    }
+}
+
+/// The keyboard focus ring of `id` just outside `rect`, as the theme's [`crate::theme::FocusRing`]
+/// says (always pushed, transparent unless the keyboard moved focus there). The default ring
+/// draws the same pixels as [`Frame::focus_ring`].
+fn focus_ring(f: &mut Frame, id: HitId, rect: Rect, radius: f32) {
+    let ring = f.theme.focus_ring;
+    let width = f.px(ring.width).max(ring.width);
+    let gap = f.px(ring.gap);
+    f.push(Op::Stroke {
+        rect: rect.inflate(gap + width / 2.0),
+        radius: radius + gap + width / 2.0,
+        width,
+        color: if f.input.ring(id) {
+            f.theme.color.accent.with_alpha(ring.opacity)
+        } else {
+            Rgba::TRANSPARENT
+        },
+    });
+}
+
+/// A scroll view's overlay scrollbar inside `rect`'s far edge, its thumb as long as the share
+/// of the content that shows (always pushed, transparent while hidden).
+fn scrollbar(f: &mut Frame, rect: Rect, extent: Option<(f32, f32)>, bar: Bar) {
+    let m = f.theme.metrics;
+    let (w, inset, least) = (f.px(m.scrollbar), f.px(m.scrollbar_inset), f.px(28.0));
+    let (along, content) = match bar.axis {
+        Axis::Vertical => (rect.height(), extent.map_or(0.0, |e| e.1)),
+        Axis::Horizontal => (rect.width(), extent.map_or(0.0, |e| e.0)),
+    };
+    let track = (along - 2.0 * inset).max(0.0);
+    let thumb = if content > 0.0 { (track * along / content).max(least).min(track) } else { track };
+    let at = if bar.max > 0.0 { (track - thumb) * (bar.offset / bar.max) } else { 0.0 };
+    let thumb_rect = match bar.axis {
+        Axis::Vertical => Rect::new(rect.right - inset - w, (rect.top + inset + at).round(), w, thumb.round()),
+        Axis::Horizontal => Rect::new((rect.left + inset + at).round(), rect.bottom - inset - w, thumb.round(), w),
+    };
+    let color = f.theme.color.scrollbar;
+    let shown = bar.alpha > 0.0 && bar.max > 0.0;
+    f.fill(
+        thumb_rect,
+        w / 2.0,
+        if shown { color.with_alpha(color.a * bar.alpha) } else { Rgba::TRANSPARENT },
+    );
+}
+
+/// An [`super::arc`]: its track, then `value` of its span in `ink`, round-capped, in a circle
+/// fitting `rect` (centred on whole pixels, so the quarter clips land on pixel edges).
+fn paint_arc(f: &mut Frame, rect: Rect, a: &ArcLook, value: f32, ink: Rgba) {
+    let width = f.px(a.stroke.resolve(f.theme)).max(1.0);
+    let c = rect.center();
+    let center = Point::new(c.x.round(), c.y.round());
+    let radius = ((rect.width().min(rect.height()) - width) / 2.0).max(0.0);
+    if radius <= 0.0 {
+        return;
+    }
+    let q = a.start.quarters();
+    let span = a.span * TAU;
+    if let Some(track) = a.track {
+        stroke_arc(f, center, radius, width, q, span, track.resolve(f.theme));
+    }
+    stroke_arc(f, center, radius, width, q, value.clamp(0.0, 1.0) * span, ink);
+}
+
+/// A clockwise arc of `sweep` radians from `q` quarter turns past twelve o'clock, with round
+/// caps unless it closes. `Op::Arc` always starts at twelve: a later start draws the arc up to
+/// its end clipped to the quarters it covers (exact, since quarter edges are radial), then
+/// any part past twelve as an arc of its own.
+fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, q: u8, sweep: f32, color: Rgba) {
+    let sweep = sweep.min(TAU);
+    if sweep <= 0.0 || color.a <= 0.0 {
+        return;
+    }
+    let arc = |sweep: f32| Op::Arc {
+        center,
+        radius,
+        sweep,
+        width,
+        color,
+    };
+    let start = f32::from(q) * FRAC_PI_2;
+    let end = start + sweep;
+    if q == 0 {
+        f.push(arc(sweep));
+    } else {
+        let big = radius + width + 2.0;
+        let (cx, cy) = (center.x, center.y);
+        let right_bottom = Rect::new(cx, cy, big, big);
+        let left = Rect::new(cx - big, cy - big, big, 2.0 * big);
+        let top_left = Rect::new(cx - big, cy - big, big, big);
+        let clips: &[Rect] = match q {
+            1 => &[right_bottom, left],
+            2 => &[left],
+            _ => &[top_left],
+        };
+        let source: Arc<[Op]> = vec![arc(end.min(TAU))].into();
+        for &rect in clips {
+            f.push(Op::Clipped {
+                rect,
+                ops: source.clone(),
+            });
+        }
+        if end > TAU {
+            f.push(arc(end - TAU));
+        }
+    }
+    if sweep >= TAU - 1e-4 {
+        return;
+    }
+    // Round caps. On a quarter only the half beyond the arc's end draws (the end's edge is
+    // radial, so the quarter's axis cuts it exactly), so a translucent stroke doesn't darken
+    // where cap and stroke overlap; elsewhere the whole disc.
+    let point = |angle: f32| Point::new(center.x + radius * angle.sin(), center.y - radius * angle.cos());
+    let half = width / 2.0 + 1.0;
+    // The half-plane before an arc that starts on quarter `q`, around its start `at`.
+    let before = |at: Point, q: u8| match q % 4 {
+        0 => Rect::new(at.x - half, at.y - half, half, 2.0 * half),
+        1 => Rect::new(at.x - half, at.y - half, 2.0 * half, half),
+        2 => Rect::new(at.x, at.y - half, half, 2.0 * half),
+        _ => Rect::new(at.x - half, at.y, 2.0 * half, half),
+    };
+    let disc = |at: Point| Op::Fill {
+        rect: Rect::new(at.x - width / 2.0, at.y - width / 2.0, width, width),
+        radius: width / 2.0,
+        color,
+    };
+    let at = point(start);
+    f.push(Op::Clipped {
+        rect: before(at, q),
+        ops: vec![disc(at)].into(),
+    });
+    let quarters = end / FRAC_PI_2;
+    let at = point(end);
+    if (quarters - quarters.round()).abs() < 1e-4 {
+        // Past an end on quarter k is before a start on the opposite quarter.
+        f.push(Op::Clipped {
+            rect: before(at, quarters.round() as u8 + 2),
+            ops: vec![disc(at)].into(),
+        });
+    } else {
+        f.push(disc(at));
     }
 }
 

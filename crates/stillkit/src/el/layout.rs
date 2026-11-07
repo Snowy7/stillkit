@@ -8,12 +8,13 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
+use taffy::Overflow;
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent, LengthPercentage,
     LengthPercentageAuto, NodeId, Position, Style, TaffyTree, fr, repeat,
 };
 
-use super::element::{Align, Dim, El, Flow, Justify, Len, What};
+use super::element::{Align, Axis, Dim, El, Flow, Justify, Len, What};
 use super::token;
 use crate::{HitId, Rect, Text, TextStyle, Theme};
 
@@ -30,6 +31,8 @@ struct Retained {
     node: NodeId,
     style: Style,
     measure: Option<Measure>,
+    /// A scroll view's content node (its children hang from it) and its style.
+    content: Option<(NodeId, Style)>,
     children: Vec<NodeId>,
     seen: u64,
 }
@@ -44,6 +47,8 @@ pub(crate) struct Laid {
     pub rect: Rect,
     /// The parent's place in the same list (`None` for the root).
     pub parent: Option<usize>,
+    /// A scroll view's content size (device px): how far it scrolls is this less `rect`'s.
+    pub extent: Option<(f32, f32)>,
 }
 
 /// The retained Taffy tree of one runtime.
@@ -117,7 +122,7 @@ impl Layout {
         self.nodes.retain(|_, r| {
             let keep = r.seen == generation;
             if !keep {
-                let _ = taffy.remove(r.node);
+                drop_nodes(taffy, r);
             }
             keep
         });
@@ -145,6 +150,7 @@ impl Layout {
         // Absolute rects: each node's location is relative to its parent's.
         let mut origin: Vec<(f32, f32)> = Vec::with_capacity(order.len());
         let mut laid = Vec::with_capacity(order.len());
+        // A scroll view's children hang from its content node.
         let mut stack: Vec<(NodeId, usize)> = Vec::new();
         for (i, &(id, node)) in order.iter().enumerate() {
             let parent = self.taffy.parent(node);
@@ -155,14 +161,17 @@ impl Layout {
             let l = self.taffy.layout(node).copied().unwrap_or_default();
             let base = at.map_or((0.0, 0.0), |p| origin[p]);
             let (x, y) = (base.0 + l.location.x, base.1 + l.location.y);
-            origin.push((x, y));
+            let content = self.nodes.get(&id).and_then(|r| r.content.as_ref()).map(|(c, _)| *c);
+            let inner = content.and_then(|c| self.taffy.layout(c).ok().copied());
+            origin.push(inner.map_or((x, y), |c| (x + c.location.x, y + c.location.y)));
             laid.push(Laid {
                 id,
                 hit: hit_of(id),
                 rect: Rect::new(x, y, l.size.width, l.size.height),
                 parent: at,
+                extent: inner.map(|c| (c.size.width, c.size.height)),
             });
-            stack.push((node, i));
+            stack.push((content.unwrap_or(node), i));
         }
         laid
     }
@@ -192,9 +201,21 @@ impl Layout {
                 self.sync(child, child_id, cx, None, order)
             })
             .collect();
-        let style = style_of(el, cx, root);
+        let (style, content) = match el.scrolls() {
+            Some(axis) => {
+                let (viewport, content) = scroll_styles(style_of(el, cx, root), axis);
+                (viewport, Some(content))
+            }
+            None => (style_of(el, cx, root), None),
+        };
         let measure = measure_of(el, cx);
         let generation = self.generation;
+        // An element that starts or stops scrolling is built again.
+        if self.nodes.get(&id).is_some_and(|r| r.content.is_some() != content.is_some())
+            && let Some(r) = self.nodes.remove(&id)
+        {
+            drop_nodes(&mut self.taffy, &r);
+        }
         let node = match self.nodes.get_mut(&id) {
             Some(r) => {
                 let mut touched = false;
@@ -203,13 +224,21 @@ impl Layout {
                     r.style = style;
                     touched = true;
                 }
+                if let (Some((node, old)), Some(new)) = (&mut r.content, content)
+                    && *old != new
+                {
+                    let _ = self.taffy.set_style(*node, new.clone());
+                    *old = new;
+                    touched = true;
+                }
                 if r.measure != measure {
                     let _ = self.taffy.set_node_context(r.node, measure.clone());
                     r.measure = measure;
                     touched = true;
                 }
                 if r.children != children {
-                    let _ = self.taffy.set_children(r.node, &children);
+                    let parent = r.content.as_ref().map_or(r.node, |(c, _)| *c);
+                    let _ = self.taffy.set_children(parent, &children);
                     r.children = children;
                     touched = true;
                 }
@@ -218,11 +247,15 @@ impl Layout {
                 r.node
             }
             None => {
-                let node = match &measure {
-                    Some(m) => self.taffy.new_leaf_with_context(style.clone(), m.clone()),
-                    None => self.taffy.new_with_children(style.clone(), &children),
-                }
-                .expect("taffy nodes are created in memory");
+                let made = "taffy nodes are created in memory";
+                let (node, content) = match (&measure, content) {
+                    (Some(m), _) => (self.taffy.new_leaf_with_context(style.clone(), m.clone()).expect(made), None),
+                    (None, Some(inner)) => {
+                        let c = self.taffy.new_with_children(inner.clone(), &children).expect(made);
+                        (self.taffy.new_with_children(style.clone(), &[c]).expect(made), Some((c, inner)))
+                    }
+                    (None, None) => (self.taffy.new_with_children(style.clone(), &children).expect(made), None),
+                };
                 self.touched += 1;
                 self.nodes.insert(
                     id,
@@ -230,6 +263,7 @@ impl Layout {
                         node,
                         style,
                         measure,
+                        content,
                         children,
                         seen: generation,
                     },
@@ -240,6 +274,56 @@ impl Layout {
         order[at].1 = node;
         node
     }
+}
+
+fn drop_nodes(taffy: &mut TaffyTree<Measure>, r: &Retained) {
+    if let Some((content, _)) = &r.content {
+        let _ = taffy.remove(*content);
+    }
+    let _ = taffy.remove(r.node);
+}
+
+/// A scroll view's own style (its box in its parent, clipping its one content child) and its
+/// content node's: the element's flow, padding and gap, at its own length along `axis` (at
+/// least the view's), stretched across.
+fn scroll_styles(style: Style, axis: Axis) -> (Style, Style) {
+    let mut content = Style {
+        display: style.display,
+        flex_direction: style.flex_direction,
+        gap: style.gap,
+        padding: style.padding,
+        align_items: style.align_items,
+        justify_content: style.justify_content,
+        grid_template_columns: style.grid_template_columns.clone(),
+        flex_shrink: 0.0,
+        ..Style::default()
+    };
+    let (main, overflow) = match axis {
+        Axis::Vertical => {
+            content.min_size.height = LengthPercentageAuto::percent(1.0);
+            (FlexDirection::Column, (Overflow::Hidden, Overflow::Scroll))
+        }
+        Axis::Horizontal => {
+            content.min_size.width = LengthPercentageAuto::percent(1.0);
+            (FlexDirection::Row, (Overflow::Scroll, Overflow::Hidden))
+        }
+    };
+    let viewport = Style {
+        display: Display::Flex,
+        flex_direction: main,
+        align_items: AlignItems::STRETCH,
+        justify_content: JustifyContent::NORMAL,
+        overflow: taffy::Point {
+            x: overflow.0,
+            y: overflow.1,
+        },
+        scrollbar_width: 0.0,
+        padding: taffy::Rect::zero(),
+        gap: taffy::Size::zero(),
+        grid_template_columns: Vec::new(),
+        ..style
+    };
+    (viewport, content)
 }
 
 impl Measure {
@@ -342,7 +426,7 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
         }
         // Labels shrink (cut with an ellipsis) rather than push their row wider.
         What::Text { .. } if z.min_w.is_none() => style.min_size.width = LengthPercentageAuto::length(0.0),
-        What::Icon(_) => {
+        What::Icon(_) | What::Arc(_) => {
             let side = Dimension::length(cx.px(token::ICON));
             style.size.width = z.w.map_or(side, |_| style.size.width);
             style.size.height = z.h.map_or(side, |_| style.size.height);

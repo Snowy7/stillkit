@@ -14,7 +14,8 @@
 //! Scripts and dumps use design pixels. A script is a JSON array of steps, each with an `at`
 //! time in seconds and one input: `{"at": 0.2, "move": [x, y]}`, `"down"`, `"up"`,
 //! `{"click": "key"}` (the centre of a keyed element), `{"key": "Tab"}` (also `Shift+Tab`,
-//! `Enter`, `Space`, `Escape`, arrows `Left` `Right` `Up` `Down`, or a virtual-key number).
+//! `Enter`, `Space`, `Escape`, arrows `Left` `Right` `Up` `Down`, `PageUp`, `PageDown`, `Home`,
+//! `End`, or a virtual-key number), `{"wheel": [x, y, delta]}` (120 a notch, positive up).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -48,6 +49,8 @@ pub enum Input {
     Click(String),
     /// A virtual-key code; Tab steps the focus (backwards with `shift`).
     Key { vk: u16, shift: bool },
+    /// The wheel at a point: 120 a notch, positive up.
+    Wheel(f32, f32, i16),
 }
 
 /// Timed input in design pixels, replayed on a runtime's virtual clock ([`Runtime::play`]).
@@ -72,10 +75,15 @@ impl Script {
                 Input::Up(x, y)
             } else if let Some(key) = step.get("click").and_then(Json::str) {
                 Input::Click(key.to_owned())
+            } else if let Some(Json::Arr(w)) = step.get("wheel")
+                && let [x, y, delta] = w.as_slice()
+                && let (Some(x), Some(y), Some(delta)) = (x.num(), y.num(), delta.num())
+            {
+                Input::Wheel(x as f32, y as f32, delta as i16)
             } else if let Some(key) = step.get("key") {
                 key_of(key).with_context(|| format!("step {i}: unknown key {key:?}"))?
             } else {
-                bail!("step {i}: no input (move, down, up, click or key)");
+                bail!("step {i}: no input (move, down, up, click, key or wheel)");
             };
             out.push((Duration::from_secs_f64(at.max(0.0)), input));
         }
@@ -100,6 +108,10 @@ fn key_of(key: &Json) -> Option<Input> {
         "Enter" => 0x0D,
         "Escape" => 0x1B,
         "Space" => 0x20,
+        "PageUp" => 0x21,
+        "PageDown" => 0x22,
+        "End" => 0x23,
+        "Home" => 0x24,
         "Left" => 0x25,
         "Up" => 0x26,
         "Right" => 0x27,
@@ -132,6 +144,7 @@ impl<S> Runtime<S> {
                 }
                 Input::Key { vk: 0x09, shift } => self.tab(*shift),
                 Input::Key { vk, .. } => self.key(*vk),
+                Input::Wheel(x, y, delta) => self.wheel_at(x * s, y * s, *delta),
             }
             self.frame(Duration::ZERO);
         }
@@ -140,18 +153,20 @@ impl<S> Runtime<S> {
         }
     }
 
-    /// The `--tree` dump: every element as shown now, in design pixels.
+    /// The `--tree` dump: every element as shown now, in design pixels, with what assistive
+    /// technology reads (`range` is `[min, max, value]`; `scroll` a scroll view's offset).
     pub fn tree_json(&self) -> String {
         let s = self.scale();
         let (w, h) = self.size();
         let opt = |v: Option<String>| v.unwrap_or_else(|| "null".into());
+        let text = |v: Option<std::sync::Arc<str>>| opt(v.map(|t| quote(&t)));
         let nodes: Vec<String> = self
             .tree()
             .into_iter()
             .map(|n| {
                 let r = n.rect;
                 format!(
-                    "{{\"key\":{},\"path\":{},\"role\":{},\"label\":{},\"rect\":[{},{},{},{}],\"fill\":{},\"text\":{},\"checked\":{},\"state\":\"{:?}\",\"focused\":{}}}",
+                    "{{\"key\":{},\"path\":{},\"role\":{},\"label\":{},\"rect\":[{},{},{},{}],\"fill\":{},\"text\":{},\"checked\":{},\"state\":\"{:?}\",\"focused\":{},\"range\":{},\"value\":{},\"description\":{},\"selected\":{},\"expanded\":{},\"scroll\":{}}}",
                     opt(n.key.map(|k| quote(&k))),
                     quote(if n.path.is_empty() { "/" } else { &n.path }),
                     opt(n.role.map(|r| quote(&format!("{r:?}")))),
@@ -161,10 +176,16 @@ impl<S> Runtime<S> {
                     r.width() / s,
                     r.height() / s,
                     opt(n.fill.map(|c| quote(&hex(c)))),
-                    opt(n.text.map(|t| quote(&t))),
+                    text(n.text),
                     opt(n.checked.map(|c| c.to_string())),
                     n.state,
                     n.focused,
+                    opt(n.range.map(|(min, max, value)| format!("[{min},{max},{value}]"))),
+                    text(n.value),
+                    text(n.description),
+                    opt(n.selected.map(|v| v.to_string())),
+                    opt(n.expanded.map(|v| v.to_string())),
+                    opt(n.scroll.map(|v| (v / s).to_string())),
                 )
             })
             .collect();
@@ -314,6 +335,13 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                 Event::DpiChanged(dpi) => rt.set_scale(dpi as f32 / 96.0),
                 Event::Key(0x09) => rt.tab(shift_down()),
                 Event::SettingChanged => rt.set_reduced_motion(args.reduced || reduced_motion()),
+                // A slider's increment or a new value comes with its invoke.
+                Event::Invoke(hit) => match surface.take_accessibility_action(hit) {
+                    Some(action) => {
+                        rt.accessibility_action(hit, &action);
+                    }
+                    None => rt.handle(&event),
+                },
                 event => rt.handle(&event),
             }
         }

@@ -24,6 +24,9 @@ pub const CONTROL_SMALL: Len = Len::Theme(|t| t.metrics.control_small);
 pub const ICON: Len = Len::Theme(|t| t.metrics.icon);
 /// The smallest pointer target.
 pub const HIT: Len = Len::Theme(|t| t.metrics.hit);
+/// An arc's stroke ([`super::arc`]): twice the theme's icon stroke at 24 px, so rings get
+/// heavier where icons do.
+pub const RING: Len = Len::Theme(|t| t.icon_weight * 2.0);
 
 // ---- Radii (design px) ---------------------------------------------------------------------
 
