@@ -23,9 +23,13 @@ pub enum Kind {
 pub struct SurfaceId(isize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Button.
 pub enum Button {
+    /// Left.
     Left,
+    /// Right.
     Right,
+    /// Middle.
     Middle,
 }
 
@@ -43,13 +47,19 @@ pub struct Pointer {
 pub enum Event {
     /// A temporary animation requested another frame; no timer remains once it settles.
     Frame,
+    /// Move.
     Move(Pointer),
+    /// Leave.
     Leave,
     /// Positive delta scrolls up; position uses the same coordinates as other pointer events.
     Wheel(Pointer, i16),
+    /// Capture lost.
     CaptureLost,
+    /// Press.
     Press(Pointer, Button),
+    /// Release.
     Release(Pointer, Button),
+    /// Double click.
     DoubleClick(Pointer, Button),
     /// A key went down (a virtual-key code).
     Key(u16),
@@ -61,8 +71,11 @@ pub enum Event {
     Invoke(HitId),
     /// Assistive technology moved the focus to a hit item.
     Focus(HitId),
+    /// Dpi changed.
     DpiChanged(u32),
+    /// Visibility changed.
     VisibilityChanged,
+    /// Cancelled.
     Cancelled,
     /// Windowless RichEdit changed text, selection or caret.
     TextChanged,
@@ -76,18 +89,24 @@ pub enum Event {
     SettingChanged,
 }
 
+/// Animation frames.
 pub struct AnimationFrames;
+/// Next event.
 pub fn next_event() -> Option<(SurfaceId, Event)> {
     unimplemented!("native event queue")
 }
+/// Queue event.
 pub fn queue_event(_: usize, _: Event) {
     unimplemented!("native event queue")
 }
+/// Surface.
 pub struct Surface;
 impl Surface {
+    /// Creates a new instance.
     pub fn new(_: Kind, _: &str, _: accesskit::Role) -> Result<Self> {
         bail!("no native window backend")
     }
+    /// New deferred accessibility.
     pub fn new_deferred_accessibility(
         kind: Kind,
         name: &str,
@@ -95,6 +114,7 @@ impl Surface {
     ) -> Result<Self> {
         Self::new(kind, name, role)
     }
+    /// Present.
     pub fn present(
         &mut self,
         _: &mut Ui,
@@ -104,31 +124,41 @@ impl Surface {
     ) -> Result<bool> {
         bail!("no native window backend")
     }
+    /// Shown.
     pub fn shown(&self) -> &DisplayList {
         unimplemented!("native window")
     }
+    /// Stable identity used to match this item across frames.
     pub fn id(&self) -> SurfaceId {
         unimplemented!("native window")
     }
+    /// Origin.
     pub fn origin(&self) -> (i32, i32) {
         unimplemented!("native window")
     }
+    /// Animation frames.
     pub fn animation_frames(&self, _: std::time::Duration) -> AnimationFrames {
         unimplemented!("frame scheduling")
     }
+    /// Sets alpha.
     pub fn set_alpha(&mut self, _: u8) -> Result<()> {
         bail!("no native window backend")
     }
+    /// Move to.
     pub fn move_to(&mut self, _: (i32, i32)) -> Result<()> {
         bail!("no native window backend")
     }
+    /// Sets accessibility semantics.
     pub fn set_accessibility_semantics(&self, _: Vec<(crate::HitId, crate::Semantics)>) {}
+    /// Takes accessibility action from the pending state.
     pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
         None
     }
+    /// Sets glass.
     pub fn set_glass(&self, _: Option<crate::Glass>) {
         unimplemented!("glass")
     }
+    /// Sets glass style.
     pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {
         unimplemented!("glass")
     }
@@ -136,46 +166,60 @@ impl Surface {
     pub fn with_render(kind: Kind, name: &str, role: accesskit::Role, _: crate::platform::Render) -> Result<Self> {
         Self::new(kind, name, role)
     }
+    /// Render.
     pub fn render(&self) -> crate::platform::Render {
         crate::platform::Render::Cpu
     }
+    /// Glass available.
     pub fn glass_available(&self) -> bool {
         crate::glass::available()
     }
+    /// Sets glass group.
     pub fn set_glass_group(&self, glasses: &[crate::Glass], _spacing: f32) {
         self.set_glass(glasses.first().copied())
     }
+    /// Show.
     pub fn show(&self) {
         unimplemented!("native window")
     }
+    /// Hide.
     pub fn hide(&self) {
         unimplemented!("native window")
     }
+    /// Release.
     pub fn release(&mut self) {
         unimplemented!("native window")
     }
+    /// Discard events.
     pub fn discard_events(&self) {
         unimplemented!("native event queue")
     }
+    /// Takes focus from the pending state.
     pub fn take_focus(&self) -> &'static str {
         unimplemented!("native focus")
     }
     // App-window services (`Kind::App`).
+    /// Scale.
     pub fn scale(&self) -> f32 {
         unimplemented!("native window")
     }
+    /// Place.
     pub fn place(&self, _: (i32, i32, i32, i32)) {
         unimplemented!("native window")
     }
+    /// Client size.
     pub fn client_size(&self) -> (u32, u32) {
         unimplemented!("native window")
     }
+    /// Show active.
     pub fn show_active(&self, _: bool) {
         unimplemented!("native window")
     }
+    /// Sets chrome.
     pub fn set_chrome(&self, _: &[(crate::Rect, super::app_window::Chrome)]) {
         unimplemented!("native window")
     }
+    /// Sets background.
     pub fn set_background(&self, _: crate::Rgba) {
         unimplemented!("native window")
     }

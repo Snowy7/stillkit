@@ -1600,21 +1600,21 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 
 ```rust
 65: pub struct Canvas {
-74: pub fn new(width: u32, height: u32) -> Result<Self> {
-87: pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, area: PixelRect) -> Result<()> {
-129: pub fn image(&self) -> Result<Image> {
-168: pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
-177: pub glasses: Vec<crate::Glass>,
-178: pub style: crate::glass::GlassStyle,
-179: pub spacing: f32,
-180: pub backdrop: Option<Image>,
-181: pub revision: u64,
-182: pub backdrop_revision: u64,
-202: pub unsafe fn new(view: &super::view::View, size: (u32, u32)) -> Result<Self> {
-227: pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, size: (u32, u32), area: PixelRect, glass: &GlassState, scale: f32) -> Result<()> {
-249: pub fn image(&self) -> Result<Image> {
-253: pub fn glass_revision(&self) -> u64 {
-272: pub fn present(&mut self) -> Result<()> {
+75: pub fn new(width: u32, height: u32) -> Result<Self> {
+89: pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, area: PixelRect) -> Result<()> {
+131: pub fn image(&self) -> Result<Image> {
+170: pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
+180: pub glasses: Vec<crate::Glass>,
+182: pub style: crate::glass::GlassStyle,
+184: pub spacing: f32,
+186: pub backdrop: Option<Image>,
+188: pub revision: u64,
+190: pub backdrop_revision: u64,
+210: pub unsafe fn new(view: &super::view::View, size: (u32, u32)) -> Result<Self> {
+236: pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, size: (u32, u32), area: PixelRect, glass: &GlassState, scale: f32) -> Result<()> {
+259: pub fn image(&self) -> Result<Image> {
+264: pub fn glass_revision(&self) -> u64 {
+284: pub fn present(&mut self) -> Result<()> {
 ```
 
 
@@ -1882,12 +1882,12 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 ### platform/stub/host.rs
 
 ```rust
-3: pub fn screen_size() -> (i32, i32) {
-6: pub fn shift_down() -> bool {
-9: pub fn modifiers() -> crate::el::Modifiers {
-12: pub fn wake_at(_: Option<std::time::Instant>) {
-15: pub fn wait() {
-19: pub fn reduced_motion() -> bool {
+4: pub fn screen_size() -> (i32, i32) {
+8: pub fn shift_down() -> bool {
+12: pub fn modifiers() -> crate::el::Modifiers {
+16: pub fn wake_at(_: Option<std::time::Instant>) {
+20: pub fn wait() {
+24: pub fn reduced_motion() -> bool {
 ```
 
 
@@ -1902,33 +1902,33 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 ### platform/stub/mod.rs
 
 ```rust
-2: pub mod glass;
-3: pub mod caret;
-4: pub mod host;
-5: pub mod render;
-6: pub mod screen;
-7: pub mod surface;
-8: pub mod text;
-9: pub mod text_field;
-10: pub mod timing;
-11: pub mod app_window {
-14: pub enum Chrome {
-20: pub enum Cursor {}
-21: pub fn set_modal_hook(_: Option<fn(bool)>) {
-25: pub mod layered_app {}
-26: pub mod compose {}
-27: pub mod modules {}
-29: pub mod identity {
-30: pub use crate::identity::{Identity, set_identity};
-32: pub mod watch {
-33: pub struct FileWatch;
-35: pub use render::{Image, Ui};
-36: pub use surface::{Event, Kind, Surface, SurfaceId, next_event};
-37: pub use text::Text;
-38: pub use text_field::TextField;
-39: pub mod icons;
-40: pub use render::Canvas as Renderer;
-42: pub struct Backend;
+3: pub mod glass;
+5: pub mod caret;
+7: pub mod host;
+9: pub mod render;
+11: pub mod screen;
+13: pub mod surface;
+15: pub mod text;
+17: pub mod text_field;
+19: pub mod timing;
+21: pub mod app_window {
+24: pub enum Chrome {
+35: pub enum Cursor {}
+37: pub fn set_modal_hook(_: Option<fn(bool)>) {
+42: pub mod layered_app {}
+44: pub mod compose {}
+46: pub mod modules {}
+48: pub mod identity {
+49: pub use crate::identity::{Identity, set_identity};
+52: pub mod watch {
+54: pub struct FileWatch;
+56: pub use render::{Image, Ui};
+57: pub use surface::{Event, Kind, Surface, SurfaceId, next_event};
+58: pub use text::Text;
+59: pub use text_field::TextField;
+61: pub mod icons;
+62: pub use render::Canvas as Renderer;
+64: pub struct Backend;
 ```
 
 
@@ -1936,25 +1936,25 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 
 ```rust
 1: pub use crate::bitmap::{Image, TextMode, TextQuality};
-3: pub struct Ui {
-4: pub text: super::Text,
-7: pub fn new() -> Result<Self> {
-10: pub fn isolated() -> Result<Self> {
-13: pub fn set_text_quality(&mut self, _: TextQuality) -> Result<()> {
-16: pub fn decode_image(&self, _: &[u8], _: (u32, u32)) -> Result<Image> {
-21: pub fn load(_: &Ui, _: &std::path::Path) -> Result<Self> {
-25: pub fn render(_: &mut Ui, _: &crate::DisplayList, _: u32, _: u32) -> Result<Image> {
-28: pub struct Canvas;
+4: pub struct Ui {
+6: pub text: super::Text,
+10: pub fn new() -> Result<Self> {
+14: pub fn isolated() -> Result<Self> {
+18: pub fn set_text_quality(&mut self, _: TextQuality) -> Result<()> {
+22: pub fn decode_image(&self, _: &[u8], _: (u32, u32)) -> Result<Image> {
+28: pub fn load(_: &Ui, _: &std::path::Path) -> Result<Self> {
+33: pub fn render(_: &mut Ui, _: &crate::DisplayList, _: u32, _: u32) -> Result<Image> {
+37: pub struct Canvas;
 ```
 
 
 ### platform/stub/screen.rs
 
 ```rust
-2: pub struct Screen {
-3: pub work: crate::menu::Edges,
-4: pub dpi: u32,
-6: pub fn screen_at(_: i32, _: i32) -> Screen {
+3: pub struct Screen {
+5: pub work: crate::menu::Edges,
+7: pub dpi: u32,
+10: pub fn screen_at(_: i32, _: i32) -> Screen {
 ```
 
 
@@ -1963,43 +1963,43 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 ```rust
 5: pub enum Kind {
 23: pub struct SurfaceId(isize);
-26: pub enum Button {
-34: pub struct Pointer {
-36: pub at: Point,
-38: pub screen: (i32, i32),
-43: pub enum Event {
-79: pub struct AnimationFrames;
-80: pub fn next_event() -> Option<(SurfaceId, Event)> {
-83: pub fn queue_event(_: usize, _: Event) {
-86: pub struct Surface;
-88: pub fn new(_: Kind, _: &str, _: accesskit::Role) -> Result<Self> {
-91: pub fn new_deferred_accessibility(
-98: pub fn present(
-107: pub fn shown(&self) -> &DisplayList {
-110: pub fn id(&self) -> SurfaceId {
-113: pub fn origin(&self) -> (i32, i32) {
-116: pub fn animation_frames(&self, _: std::time::Duration) -> AnimationFrames {
-119: pub fn set_alpha(&mut self, _: u8) -> Result<()> {
-122: pub fn move_to(&mut self, _: (i32, i32)) -> Result<()> {
-125: pub fn set_accessibility_semantics(&self, _: Vec<(crate::HitId, crate::Semantics)>) {}
-126: pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
-129: pub fn set_glass(&self, _: Option<crate::Glass>) {
-132: pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {
-136: pub fn with_render(kind: Kind, name: &str, role: accesskit::Role, _: crate::platform::Render) -> Result<Self> {
-139: pub fn render(&self) -> crate::platform::Render {
-142: pub fn glass_available(&self) -> bool {
-145: pub fn set_glass_group(&self, glasses: &[crate::Glass], _spacing: f32) {
-148: pub fn show(&self) {
-151: pub fn hide(&self) {
-154: pub fn release(&mut self) {
-157: pub fn discard_events(&self) {
-160: pub fn take_focus(&self) -> &'static str {
-164: pub fn scale(&self) -> f32 {
-167: pub fn place(&self, _: (i32, i32, i32, i32)) {
-170: pub fn client_size(&self) -> (u32, u32) {
-173: pub fn show_active(&self, _: bool) {
-176: pub fn set_chrome(&self, _: &[(crate::Rect, super::app_window::Chrome)]) {
-179: pub fn set_background(&self, _: crate::Rgba) {
+27: pub enum Button {
+38: pub struct Pointer {
+40: pub at: Point,
+42: pub screen: (i32, i32),
+47: pub enum Event {
+93: pub struct AnimationFrames;
+95: pub fn next_event() -> Option<(SurfaceId, Event)> {
+99: pub fn queue_event(_: usize, _: Event) {
+103: pub struct Surface;
+106: pub fn new(_: Kind, _: &str, _: accesskit::Role) -> Result<Self> {
+110: pub fn new_deferred_accessibility(
+118: pub fn present(
+128: pub fn shown(&self) -> &DisplayList {
+132: pub fn id(&self) -> SurfaceId {
+136: pub fn origin(&self) -> (i32, i32) {
+140: pub fn animation_frames(&self, _: std::time::Duration) -> AnimationFrames {
+144: pub fn set_alpha(&mut self, _: u8) -> Result<()> {
+148: pub fn move_to(&mut self, _: (i32, i32)) -> Result<()> {
+152: pub fn set_accessibility_semantics(&self, _: Vec<(crate::HitId, crate::Semantics)>) {}
+154: pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
+158: pub fn set_glass(&self, _: Option<crate::Glass>) {
+162: pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {
+166: pub fn with_render(kind: Kind, name: &str, role: accesskit::Role, _: crate::platform::Render) -> Result<Self> {
+170: pub fn render(&self) -> crate::platform::Render {
+174: pub fn glass_available(&self) -> bool {
+178: pub fn set_glass_group(&self, glasses: &[crate::Glass], _spacing: f32) {
+182: pub fn show(&self) {
+186: pub fn hide(&self) {
+190: pub fn release(&mut self) {
+194: pub fn discard_events(&self) {
+198: pub fn take_focus(&self) -> &'static str {
+203: pub fn scale(&self) -> f32 {
+207: pub fn place(&self, _: (i32, i32, i32, i32)) {
+211: pub fn client_size(&self) -> (u32, u32) {
+215: pub fn show_active(&self, _: bool) {
+219: pub fn set_chrome(&self, _: &[(crate::Rect, super::app_window::Chrome)]) {
+223: pub fn set_background(&self, _: crate::Rgba) {
 ```
 
 
@@ -2007,33 +2007,33 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 
 ```rust
 1: pub use crate::text_style::{TextStyle, VARIABLE};
-2: pub struct Text;
-4: pub fn measure(&mut self, _: &str, _: &TextStyle) -> (f32, f32) {
-7: pub fn clear_cache(&mut self) {
-10: pub fn set_capacity(&mut self, _: usize) {
-13: pub fn has_family(&self, _: &str) -> bool {
-16: pub fn families(&self) -> Vec<String> {
-19: pub fn fit(&mut self, _: &str, _: &TextStyle, _: f32) -> std::sync::Arc<str> {
-22: pub fn lines(&mut self, _: &str, _: &TextStyle, _: f32, _: usize) -> Vec<std::sync::Arc<str>> {
+3: pub struct Text;
+6: pub fn measure(&mut self, _: &str, _: &TextStyle) -> (f32, f32) {
+10: pub fn clear_cache(&mut self) {
+14: pub fn set_capacity(&mut self, _: usize) {
+18: pub fn has_family(&self, _: &str) -> bool {
+22: pub fn families(&self) -> Vec<String> {
+26: pub fn fit(&mut self, _: &str, _: &TextStyle, _: f32) -> std::sync::Arc<str> {
+30: pub fn lines(&mut self, _: &str, _: &TextStyle, _: f32, _: usize) -> Vec<std::sync::Arc<str>> {
 ```
 
 
 ### platform/stub/text_field.rs
 
 ```rust
-3: pub struct TextField;
-5: pub fn revision(&self) -> u64 {
+4: pub struct TextField;
+7: pub fn revision(&self) -> u64 {
 ```
 
 
 ### platform/stub/timing.rs
 
 ```rust
-2: pub struct Ticker;
-4: pub fn new() -> Result<Self> {
-7: pub fn schedule(&mut self, _: bool) {
-10: pub fn armed(&self) -> bool {
-14: pub fn display_frame() -> std::time::Duration {
+3: pub struct Ticker;
+6: pub fn new() -> Result<Self> {
+10: pub fn schedule(&mut self, _: bool) {
+14: pub fn armed(&self) -> bool {
+19: pub fn display_frame() -> std::time::Duration {
 ```
 
 
