@@ -70,6 +70,11 @@ pub enum Event {
     Close,
     /// Windows' settings or theme changed (light or dark, contrast, text size).
     SettingChanged,
+    /// A character typed (a key's text, a compose sequence, or an input method's commit), for
+    /// `el`'s text fields.
+    Char(char),
+    /// The input method's composition changed (`ime::preedit` has it).
+    Preedit,
 }
 
 use std::{
@@ -143,7 +148,7 @@ impl Drop for Native {
         self.surface.destroy();
     }
 }
-struct State {
+pub(crate) struct State {
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     wm: Option<xdg_wm_base::XdgWmBase>,
@@ -153,19 +158,25 @@ struct State {
     keyboard: Option<wl_keyboard::WlKeyboard>,
     xkb: Option<super::keyboard::Keyboard>,
     windows: HashMap<SurfaceId, Native>,
-    events: VecDeque<(SurfaceId, Event)>,
+    pub(super) events: VecDeque<(SurfaceId, Event)>,
     next: isize,
-    scale: u32,
+    pub(super) scale: u32,
     screen_size: (i32, i32),
     at: Point,
     pointer_focus: Option<SurfaceId>,
     key_focus: Option<SurfaceId>,
-    serial: u32,
+    pub(super) serial: u32,
+    pub(super) clip: super::clipboard::Clip,
+    pub(super) ime: super::ime::Ime,
 }
-struct Runtime {
-    conn: Connection,
-    queue: EventQueue<State>,
-    state: State,
+pub(super) struct Runtime {
+    pub(super) conn: Connection,
+    pub(super) queue: EventQueue<State>,
+    pub(super) state: State,
+}
+/// Runs `f` on this thread's Wayland connection (opened on first use).
+pub(super) fn with<T>(f: impl FnOnce(&mut Runtime) -> Result<T>) -> Result<T> {
+    runtime(f)
 }
 thread_local! { static RUNTIME:RefCell<Option<Runtime>>=const{RefCell::new(None)}; }
 fn runtime<T>(f: impl FnOnce(&mut Runtime) -> Result<T>) -> Result<T> {
@@ -192,9 +203,14 @@ fn runtime<T>(f: impl FnOnce(&mut Runtime) -> Result<T>) -> Result<T> {
                 pointer_focus: None,
                 key_focus: None,
                 serial: 0,
+                clip: Default::default(),
+                ime: Default::default(),
             };
             queue.roundtrip(&mut state)?;
             queue.roundtrip(&mut state)?;
+            let q = queue.handle();
+            super::clipboard::start(&mut state.clip, state.seat.as_ref(), &q);
+            super::ime::start(&mut state.ime, state.seat.as_ref(), &q);
             *slot = Some(Runtime { conn, queue, state });
         }
         f(slot.as_mut().unwrap())
@@ -253,7 +269,8 @@ pub fn next_event() -> Option<(SurfaceId, Event)> {
 pub fn connection_fd() -> Result<std::os::fd::RawFd> {
     runtime(|r| Ok(r.conn.as_fd().as_raw_fd()))
 }
-/// Sleeps on the Wayland display fd until an application event is queued. No idle timer.
+/// Sleeps on the Wayland display fd until an application event is queued, or the deadline
+/// `host::wake_at` set passes (its timerfd). No idle timer.
 pub(super) fn wait() {
     if let Err(e) = runtime(|r| {
         loop {
@@ -261,8 +278,31 @@ pub(super) fn wait() {
             if !r.state.events.is_empty() {
                 return Ok(());
             }
-            // wayland-client flushes, prepares a read and blocks on the display fd.
-            r.queue.blocking_dispatch(&mut r.state)?;
+            r.conn.flush()?;
+            let Some(guard) = r.queue.prepare_read() else { continue };
+            let timer = super::wake::armed();
+            let mut fds = [
+                libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 },
+                libc::pollfd { fd: timer.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
+            ];
+            // SAFETY: two initialized pollfds (a negative fd is ignored); no timeout.
+            if unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) } < 0 {
+                continue;
+            }
+            if fds[0].revents & libc::POLLIN != 0 {
+                match guard.read() {
+                    Ok(_) => {}
+                    Err(wayland_client::backend::WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(e.into()),
+                }
+            } else {
+                drop(guard);
+            }
+            if fds[1].revents & libc::POLLIN != 0 {
+                super::wake::fired();
+                r.queue.dispatch_pending(&mut r.state)?;
+                return Ok(());
+            }
         }
     }) {
         log::error!("Wayland wait: {e}");
@@ -273,6 +313,9 @@ pub(super) fn screen_size() -> (i32, i32) {
 }
 pub(super) fn shift_down() -> bool {
     runtime(|r| Ok(r.state.xkb.as_ref().is_some_and(|k| k.shift_down()))).unwrap_or(false)
+}
+pub(super) fn modifiers() -> crate::el::Modifiers {
+    runtime(|r| Ok(r.state.xkb.as_ref().map(|k| k.modifiers_held()).unwrap_or_default())).unwrap_or_default()
 }
 pub(crate) fn queue_for(id: SurfaceId, event: Event) {
     queue_event(id.0 as usize, event);
@@ -984,6 +1027,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                 "xdg_wm_base" => a.wm = Some(r.bind(name, version.min(6), q, ())),
                 "zwlr_layer_shell_v1" => a.layer = Some(r.bind(name, version.min(4), q, ())),
                 "wl_seat" => a.seat = Some(r.bind(name, version.min(8), q, ())),
+                "wl_data_device_manager" => a.clip.manager = Some(r.bind(name, version.min(3), q, ())),
+                "zwp_text_input_manager_v3" => a.ime.manager = Some(r.bind(name, 1, q, ())),
                 "wl_output" => {
                     let _: wl_output::WlOutput = r.bind(name, version.min(4), q, ());
                 }
@@ -1374,35 +1419,50 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
             }
             wl_keyboard::Event::Key {
                 key,
+                serial,
                 state: wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
             } => {
-                if let (Some(id), Some(s)) = (a.key_focus, &a.xkb) {
+                // Copying puts our selection up with the latest input's serial.
+                a.serial = serial;
+                if let (Some(id), Some(s)) = (a.key_focus, &mut a.xkb) {
                     let sym = s.symbol(key);
                     if let Some(event) = super::text_field::key(id, sym, &s.text(key)) {
                         a.events.push_back((id, event));
                     }
                     let vk = match sym {
-                        0xff51 => 0x25,
-                        0xff52 => 0x26,
-                        0xff53 => 0x27,
-                        0xff54 => 0x28,
-                        0xff1b => 0x1b,
-                        0xff0d => 0x0d,
-                        0xff09 => 9,
-                        0xff08 => 8,
-                        0xff50 => 0x24,
-                        0xff57 => 0x23,
-                        32..=126 => {
-                            if (97..=122).contains(&sym) {
-                                sym - 32
-                            } else {
-                                sym
-                            }
-                        }
-                        _ => return,
+                        0xff51 => Some(0x25),
+                        0xff52 => Some(0x26),
+                        0xff53 => Some(0x27),
+                        0xff54 => Some(0x28),
+                        0xff1b => Some(0x1b),
+                        0xff0d => Some(0x0d),
+                        0xff09 => Some(9),
+                        0xff08 => Some(8),
+                        0xff50 => Some(0x24),
+                        0xff57 => Some(0x23),
+                        0xff55 => Some(0x21),
+                        0xff56 => Some(0x22),
+                        0xff63 => Some(0x2d),
+                        0xffff => Some(0x2e),
+                        0xff67 => Some(0x5d),
+                        // Letters, digits and space are their own virtual keys; other printable
+                        // symbols ('(' would be 0x28, Down's code) type characters only.
+                        32 | 48..=57 | 65..=90 => Some(sym),
+                        97..=122 => Some(sym - 32),
+                        _ => None,
                     };
-                    a.events.push_back((id, Event::Key(vk as u16)));
+                    if let Some(vk) = vk {
+                        a.events.push_back((id, Event::Key(vk as u16)));
+                    }
+                    // What the key types, through compose (dead keys, Compose sequences), as
+                    // characters after the key, as Windows sends WM_CHAR after WM_KEYDOWN.
+                    let m = s.modifiers_held();
+                    if let super::keyboard::Typed::Text(text) = s.typed(key)
+                        && !(m.ctrl || m.alt || m.meta)
+                    {
+                        a.events.extend(text.chars().filter(|c| !c.is_control()).map(|c| (id, Event::Char(c))));
+                    }
                 }
             }
             _ => {}

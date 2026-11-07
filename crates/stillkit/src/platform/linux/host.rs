@@ -7,7 +7,17 @@ pub fn screen_size() -> (i32, i32) {
 pub fn shift_down() -> bool {
     super::surface::shift_down()
 }
-/// Blocks on the Wayland display fd until an input or window event is pending.
+/// The modifier keys the compositor's XKB state has active.
+pub fn modifiers() -> crate::el::Modifiers {
+    super::surface::modifiers()
+}
+/// Makes [`wait`] return by `deadline` though no event comes (`None`: only events wake it):
+/// a timerfd beside the display fd, disarmed when nothing is pending.
+pub fn wake_at(deadline: Option<std::time::Instant>) {
+    super::wake::set(deadline);
+}
+/// Blocks on the Wayland display fd until an input or window event is pending, or the
+/// [`wake_at`] deadline passes.
 pub fn wait() {
     super::surface::wait();
 }
