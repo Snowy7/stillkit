@@ -2,7 +2,7 @@
 //! the theme the runtime holds, so a new look restyles every view without code changes. Make
 //! your own with `Len::Theme(|t| ..)` and `Paint::Theme(|t| ..)`.
 
-use super::{Len, Paint};
+use super::{Len, Motion, Paint};
 
 // ---- Lengths (design px) -------------------------------------------------------------------
 
@@ -47,3 +47,12 @@ pub const ACCENT: Paint = Paint::Theme(|t| t.color.accent);
 pub const ON_ACCENT: Paint = Paint::Theme(|t| t.color.on_accent);
 /// A switch's or slider's knob.
 pub const KNOB: Paint = Paint::Theme(|t| t.color.knob);
+
+// ---- Motion (springs, [`El::motion`](super::El::motion)) -----------------------------------
+
+/// Layout moves and morphs.
+pub const MOTION_LAYOUT: Motion = Motion::Theme(|t| t.motion.layout);
+/// A tight follow of a press or a toggle (a switch's knob).
+pub const MOTION_INTERACTIVE: Motion = Motion::Theme(|t| t.motion.interactive);
+/// Opening, closing, entering and exiting.
+pub const MOTION_OPEN: Motion = Motion::Theme(|t| t.motion.open);

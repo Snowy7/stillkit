@@ -1,25 +1,29 @@
 //! The runtime: holds the state and the retained tree, feeds input to [`Interaction`], runs
-//! handlers between frames and paints the tree into a [`DisplayList`].
+//! handlers between frames, animates toward what the view asks for and paints the tree into a
+//! [`DisplayList`].
 //!
 //! - **State changes** (a handler, [`Runtime::update`]) re-run the view, re-sync the retained
-//!   layout by key and repaint.
+//!   layout by key and retarget the animation tracks ([`super::animate`]).
+//! - **Animation frames** only advance the tracks and repaint: the view does not run.
 //! - **Hover, press and focus** only repaint the retained tree with the new interaction state:
 //!   the view does not run. Every pressable box keeps its wash and focus ring in the list
 //!   (transparent at rest), so a hover changes one op and `Surface::present` redraws one
 //!   control.
-//! - **Size, scale and theme** re-lay out the retained tree without running the view.
+//! - **Size, scale and theme** re-lay out the retained tree without running the view (size
+//!   and scale land at once; a theme's colours animate where elements have motion).
 //!
 //! The headless methods (`pointer_down`, `click`, `find`, `presented`, `tree`, `snap`) drive
 //! the same runtime the window host does, on a virtual clock.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use accesskit::Role;
 use anyhow::Result;
 
-use super::element::{El, Key, What};
+use super::animate::{Animator, Mode, Pose, Target};
+use super::element::{El, Key, Transition, Tx, What};
 use super::layout::{Cx, Laid, Layout};
 use super::token;
 use crate::interact::{Response, State};
@@ -45,11 +49,9 @@ pub struct Snapshot {
     pub opacity: f32,
 }
 
-/// One keyed element that came, went, moved or changed its look in the last re-layout.
-///
-/// This is where phase 4's animation tracks retarget: a track per key springs from `from` to
-/// `to` (presence when either is `None`) instead of jumping. Today the runtime only records
-/// them ([`Runtime::changes`]).
+/// One keyed element that came, went, moved or changed its look in the last re-layout, from
+/// its layout target before to its target after (presence when either is `None`). The
+/// animation tracks retarget from the same re-layout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Change {
     pub key: Key,
@@ -66,7 +68,7 @@ pub struct Shown {
     /// Its hit item's role, when it has one.
     pub role: Option<Role>,
     pub label: Option<Arc<str>>,
-    /// Device pixels.
+    /// Device pixels, where it is drawn now (mid-animation, between its layouts).
     pub rect: Rect,
     pub fill: Option<Rgba>,
     pub text: Option<Arc<str>>,
@@ -74,6 +76,21 @@ pub struct Shown {
     /// Hover and press, from the interaction state.
     pub state: State,
     pub focused: bool,
+    /// Its own opacity now, entrance included.
+    pub opacity: f32,
+}
+
+/// An element that left the view and stays drawn, out of hit testing, until its exit settles.
+struct Ghost<S> {
+    id: u64,
+    parent: u64,
+    /// Its place among its parent's children when it left.
+    index: usize,
+    el: El<S>,
+    /// Its subtree's layout when it left (hit ids and text widths).
+    laid: Vec<Laid>,
+    /// Its subtree as last shown, local rects relative to its parent's.
+    frozen: Vec<Pose>,
 }
 
 /// A view, its state and everything retained between frames. Headless as is; [`super::run`]
@@ -88,7 +105,15 @@ pub struct Runtime<S> {
     background: Option<Rgba>,
     root: El<S>,
     laid: Vec<Laid>,
+    targets: Vec<Target>,
+    /// What each laid-out element showed in the last paint.
+    poses: Vec<Pose>,
+    ghosts: Vec<Ghost<S>>,
     layout: Layout,
+    anim: Animator,
+    time_scale: f32,
+    /// How the next re-layout lands.
+    mode: Mode,
     ix: Interaction,
     queue: Vec<Action>,
     dragging: Option<HitId>,
@@ -105,7 +130,7 @@ pub struct Runtime<S> {
 
 impl<S: 'static> Runtime<S> {
     /// A runtime `size` device pixels at `scale` device px per design px, with its first frame
-    /// built.
+    /// built (nothing animates on it).
     pub fn new(
         state: S,
         view: impl Fn(&S) -> El<S> + 'static,
@@ -123,7 +148,13 @@ impl<S: 'static> Runtime<S> {
             background: None,
             root: super::el(),
             laid: Vec::new(),
+            targets: Vec::new(),
+            poses: Vec::new(),
+            ghosts: Vec::new(),
             layout: Layout::new(),
+            anim: Animator::default(),
+            time_scale: 1.0,
+            mode: Mode::First,
             ix: Interaction::default(),
             queue: Vec::new(),
             dragging: None,
@@ -144,21 +175,30 @@ impl<S: 'static> Runtime<S> {
 
 impl<S> Runtime<S> {
     /// Advances the virtual clock by `dt`, runs queued handlers, re-runs the view if the state
-    /// changed, and repaints if anything it draws changed. Returns whether a new list was
-    /// painted ([`damage`](Self::damage) says what it changed).
+    /// changed, advances the animation, and repaints if anything it draws changed. Returns
+    /// whether a new list was painted ([`damage`](Self::damage) says what it changed).
     pub fn frame(&mut self, dt: Duration) -> bool {
         self.clock += dt;
+        self.anim.t += dt.as_secs_f64() * f64::from(self.time_scale);
         if !self.queue.is_empty() {
             self.run_handlers();
         }
         if self.stale_view || self.stale_layout {
             let before = keyed(&self.root, &self.laid, &self.theme);
-            if self.stale_view {
-                self.root = (self.view)(&self.state);
+            let old = self.stale_view.then(|| {
                 self.views += 1;
                 self.stale_view = false;
-            }
-            self.relayout(before);
+                std::mem::replace(&mut self.root, (self.view)(&self.state))
+            });
+            self.relayout(before, old);
+        }
+        let moved = self.anim.moving();
+        let left = self.anim.settle();
+        if !left.is_empty() {
+            self.ghosts.retain(|g| !left.contains(&g.id));
+        }
+        if moved || !left.is_empty() {
+            self.stale_paint = true;
         }
         if !self.stale_paint {
             return false;
@@ -168,6 +208,7 @@ impl<S> Runtime<S> {
     }
 
     fn run_handlers(&mut self) {
+        let mut tx = Tx::default();
         for action in std::mem::take(&mut self.queue) {
             let hit = match action {
                 Action::Press(hit) | Action::Drag(hit, ..) => hit,
@@ -176,30 +217,109 @@ impl<S> Runtime<S> {
                 continue;
             };
             match (action, &el.on_press, &el.on_drag) {
-                (Action::Press(_), Some(handler), _) => handler(&mut self.state),
-                (Action::Drag(_, x, y), _, Some(handler)) => handler(&mut self.state, x, y),
+                (Action::Press(_), Some(handler), _) => handler(&mut self.state, &mut tx),
+                (Action::Drag(_, x, y), _, Some(handler)) => {
+                    handler(&mut self.state, x, y);
+                    tx.instant();
+                }
                 _ => continue,
             }
             self.stale_view = true;
         }
+        if tx.instant {
+            self.land_next();
+        }
+        if let Some(theme) = tx.theme {
+            self.set_theme(theme);
+        }
     }
 
-    fn relayout(&mut self, before: HashMap<u64, (Key, Snapshot)>) {
+    /// The next re-layout lands with no motion (the first frame stays the first).
+    fn land_next(&mut self) {
+        if self.mode == Mode::Animate {
+            self.mode = Mode::Instant;
+        }
+    }
+
+    fn relayout(&mut self, before: HashMap<u64, (Key, Snapshot)>, old: Option<El<S>>) {
+        let mode = std::mem::replace(&mut self.mode, Mode::Animate);
         let cx = Cx {
             theme: &self.theme,
             s: self.scale,
         };
         let size = (self.size.0 as f32, self.size.1 as f32);
-        self.laid = self.layout.update(&self.root, size, &cx, &mut self.ui.text);
+        let laid = self.layout.update(&self.root, size, &cx, &mut self.ui.text);
+        let targets = targets(&self.root, &laid, &self.theme, self.scale);
+        let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
+        if let Some(old) = old
+            && mode == Mode::Animate
+        {
+            self.leave(old, &ids);
+        }
+        // Ghosts go when their parent does, or when they come back.
+        self.ghosts.retain(|g| ids.contains(&g.parent) && !ids.contains(&g.id));
+        let ghosts: HashSet<u64> = self.ghosts.iter().map(|g| g.id).collect();
+        self.anim.retain(|id| ids.contains(&id) || ghosts.contains(&id));
+        let prev: HashSet<u64> = self.laid.iter().map(|l| l.id).collect();
+        self.anim.retarget(&laid, &targets, &prev, mode);
+        self.laid = laid;
+        self.targets = targets;
         let after = keyed(&self.root, &self.laid, &self.theme);
-        self.retarget(before, after);
+        self.diff(before, after);
         self.stale_layout = false;
         self.stale_paint = true;
     }
 
-    /// Diffs keyed elements across a re-layout. Phase 4 starts or retargets a track per
-    /// [`Change`] here, and paints from the tracks instead of the targets.
-    fn retarget(&mut self, before: HashMap<u64, (Key, Snapshot)>, mut after: HashMap<u64, (Key, Snapshot)>) {
+    /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
+    fn leave(&mut self, mut old: El<S>, ids: &HashSet<u64>) {
+        let leaving: HashSet<u64> = self
+            .laid
+            .iter()
+            .zip(&self.targets)
+            .filter(|(l, t)| {
+                t.transition.is_some()
+                    && !ids.contains(&l.id)
+                    && l.parent.is_some_and(|p| ids.contains(&self.laid[p].id))
+            })
+            .map(|(l, _)| l.id)
+            .collect();
+        if leaving.is_empty() {
+            return;
+        }
+        let mut taken = Vec::new();
+        take(&mut old, &self.laid, &mut 0, &leaving, &mut taken);
+        for (start, index, el) in taken {
+            let len = count(&el);
+            let me = self.laid[start];
+            let (Some(parent), Some(shown)) = (me.parent, self.poses.get(start..start + len)) else {
+                continue;
+            };
+            if !self.anim.leave(me.id) {
+                continue;
+            }
+            let origin = self.poses[parent].local;
+            let mut frozen: Vec<Pose> = shown
+                .iter()
+                .map(|p| Pose {
+                    local: p.local.offset(-origin.left, -origin.top),
+                    ..*p
+                })
+                .collect();
+            // It leaves from its own opacity, not from wherever its entrance was.
+            frozen[0].opacity = self.targets[start].opacity;
+            self.ghosts.push(Ghost {
+                id: me.id,
+                parent: self.laid[parent].id,
+                index,
+                el,
+                laid: self.laid[start..start + len].to_vec(),
+                frozen,
+            });
+        }
+    }
+
+    /// Diffs keyed elements across a re-layout into [`Runtime::changes`].
+    fn diff(&mut self, before: HashMap<u64, (Key, Snapshot)>, mut after: HashMap<u64, (Key, Snapshot)>) {
         self.changes.clear();
         for (id, (key, from)) in before {
             match after.remove(&id) {
@@ -219,12 +339,30 @@ impl<S> Runtime<S> {
     }
 
     fn paint(&mut self) {
+        self.poses = self.anim.poses(&self.laid, &self.targets);
+        let ghosts: Vec<Vec<Pose>> = if self.ghosts.is_empty() {
+            Vec::new()
+        } else {
+            let at: HashMap<u64, usize> = self.laid.iter().enumerate().map(|(i, l)| (l.id, i)).collect();
+            self.ghosts
+                .iter()
+                .map(|g| {
+                    at.get(&g.parent)
+                        .map(|&p| self.anim.ghost(g.id, &g.frozen, &self.poses[p]))
+                        .unwrap_or_default()
+                })
+                .collect()
+        };
+        let scene = Scene {
+            ghosts: &self.ghosts,
+            poses: &ghosts,
+        };
         let mut f = Frame::new(&mut self.ui.text, &self.theme, self.scale, &self.ix);
         if let Some(background) = self.background {
             let (w, h) = self.size;
             f.fill(Rect::new(0.0, 0.0, w as f32, h as f32), 0.0, background);
         }
-        paint_el(&mut f, &self.root, &self.laid, &mut 0);
+        paint_el(&mut f, &scene, &self.root, &self.laid, &self.poses, &mut 0, true);
         let mut list = f.list;
         list.focus = self.ix.focus;
         self.damage = list.damage(&self.list);
@@ -292,33 +430,43 @@ impl<S> Runtime<S> {
         }
     }
 
-    /// Changes the state outside a handler (a timer, IPC); the view runs at the next frame.
+    /// Changes the state outside a handler (a timer, IPC); the view runs at the next frame
+    /// and the change animates where elements have motion.
     pub fn update(&mut self, change: impl FnOnce(&mut S)) {
         change(&mut self.state);
         self.stale_view = true;
+    }
+
+    /// [`update`](Self::update) with no motion: everything lands on its target at once.
+    pub fn update_instant(&mut self, change: impl FnOnce(&mut S)) {
+        self.update(change);
+        self.land_next();
     }
 
     pub fn state(&self) -> &S {
         &self.state
     }
 
-    /// Resizes the surface (device px): re-lays out without running the view.
+    /// Resizes the surface (device px): re-lays out without running the view, at once.
     pub fn resize(&mut self, size: (u32, u32)) {
         if size != self.size {
             self.size = size;
             self.stale_layout = true;
+            self.land_next();
         }
     }
 
-    /// Device px per design px (a DPI change): re-lays out without running the view.
+    /// Device px per design px (a DPI change): re-lays out without running the view, at once.
     pub fn set_scale(&mut self, scale: f32) {
         if scale != self.scale {
             self.scale = scale;
             self.stale_layout = true;
+            self.land_next();
         }
     }
 
-    /// A new look: every token resolves again; the view does not run.
+    /// A new look: every token resolves again; the view does not run. Colours animate where
+    /// elements have motion.
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = theme;
         self.stale_layout = true;
@@ -330,6 +478,31 @@ impl<S> Runtime<S> {
             self.background = background;
             self.stale_paint = true;
         }
+    }
+
+    /// How fast animations run: 1 is real time, 0.25 a quarter speed, 0 holds them.
+    pub fn set_time_scale(&mut self, scale: f32) {
+        self.time_scale = scale.max(0.0);
+    }
+
+    pub fn time_scale(&self) -> f32 {
+        self.time_scale
+    }
+
+    /// The system's reduced-motion setting ([`super::reduced_motion`]; the window host sets
+    /// it): spatial travel snaps, while opacity, colour and presence take a short fade.
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.anim.reduced = reduced;
+    }
+
+    pub fn reduced_motion(&self) -> bool {
+        self.anim.reduced
+    }
+
+    /// Whether anything is still moving, or leaving: the host keeps frames coming while it
+    /// is, and none once it settles.
+    pub fn animating(&self) -> bool {
+        self.anim.moving() || !self.ghosts.is_empty()
     }
 
     pub fn theme(&self) -> &Theme {
@@ -404,10 +577,10 @@ impl<S> Runtime<S> {
         self.handle(&Event::Key(vk));
     }
 
-    /// Presses and releases the pointer at the centre of the element keyed `key`; `false` if
-    /// there is none.
+    /// Presses and releases the pointer at the centre of the element keyed `key`, where it is
+    /// drawn now; `false` if there is none.
     pub fn click(&mut self, key: &str) -> bool {
-        let Some(at) = self.find(key).map(|r| r.center()) else {
+        let Some(at) = self.presented(key).map(|s| s.rect.center()) else {
             return false;
         };
         self.pointer_down(at.x, at.y);
@@ -415,12 +588,12 @@ impl<S> Runtime<S> {
         true
     }
 
-    /// The laid-out rect (device px) of the first element keyed `key`.
+    /// The laid-out rect (device px) of the first element keyed `key`: where it settles.
     pub fn find(&self, key: &str) -> Option<Rect> {
         let mut found = None;
-        each(&self.root, &self.laid, &mut |el, laid, _| {
+        each(&self.root, &self.laid, &mut |el, i, _| {
             if found.is_none() && el.key.as_deref() == Some(key) {
-                found = Some(laid.rect);
+                found = Some(self.laid[i].rect);
             }
         });
         found
@@ -431,10 +604,12 @@ impl<S> Runtime<S> {
         self.tree().into_iter().find(|s| s.key.as_deref() == Some(key))
     }
 
-    /// Every element as shown now, in paint order.
+    /// Every element as shown now, in paint order (leaving elements are not in it).
     pub fn tree(&self) -> Vec<Shown> {
         let mut out = Vec::with_capacity(self.laid.len());
-        each(&self.root, &self.laid, &mut |el, laid, path| {
+        each(&self.root, &self.laid, &mut |el, i, path| {
+            let laid = self.laid[i];
+            let pose = self.poses.get(i);
             let hit = el.hit();
             let enabled = el.interactive() && !el.sem.disabled;
             out.push(Shown {
@@ -442,8 +617,8 @@ impl<S> Runtime<S> {
                 path: path.to_owned(),
                 role: hit.then(|| role_of(el)),
                 label: hit.then(|| label_of(el)),
-                rect: laid.rect,
-                fill: el.look.fill.map(|p| p.resolve(&self.theme)),
+                rect: pose.map_or(laid.rect, |p| p.rect),
+                fill: pose.map_or_else(|| el.look.fill.map(|p| p.resolve(&self.theme)), |p| p.fill),
                 text: match &el.what {
                     What::Text { text, .. } => Some(text.clone()),
                     _ => None,
@@ -451,6 +626,7 @@ impl<S> Runtime<S> {
                 checked: el.sem.checked,
                 state: if enabled { self.ix.state(laid.hit, true) } else { State::Rest },
                 focused: self.ix.focus == Some(laid.hit),
+                opacity: pose.map_or(el.look.opacity, |p| p.opacity),
             });
         });
         out
@@ -488,16 +664,19 @@ fn element<'a, S>(root: &'a El<S>, laid: &[Laid], hit: HitId) -> Option<&'a El<S
     walk(root, laid, &mut 0, hit)
 }
 
-/// Visits every element in pre-order with its layout and path.
-fn each<S>(root: &El<S>, laid: &[Laid], visit: &mut impl FnMut(&El<S>, &Laid, &str)) {
+/// Visits every element in pre-order with its place in `laid` and its path.
+fn each<S>(root: &El<S>, laid: &[Laid], visit: &mut impl FnMut(&El<S>, usize, &str)) {
     fn walk<S>(
         el: &El<S>,
         laid: &[Laid],
         i: &mut usize,
         path: &mut String,
-        visit: &mut impl FnMut(&El<S>, &Laid, &str),
+        visit: &mut impl FnMut(&El<S>, usize, &str),
     ) {
-        let Some(me) = laid.get(*i) else { return };
+        if *i >= laid.len() {
+            return;
+        }
+        let me = *i;
         *i += 1;
         visit(el, me, path);
         for (n, child) in el.children.iter().enumerate() {
@@ -514,18 +693,81 @@ fn each<S>(root: &El<S>, laid: &[Laid], visit: &mut impl FnMut(&El<S>, &Laid, &s
     walk(root, laid, &mut 0, &mut String::new(), visit);
 }
 
+/// How many elements `el` holds, itself included.
+fn count<S>(el: &El<S>) -> usize {
+    1 + el.children.iter().map(count).sum::<usize>()
+}
+
+/// Moves the subtrees whose identity is in `leaving` out of `el` (laid out as `laid`, from
+/// `*i`), with their place in `laid` and among their siblings.
+fn take<S>(el: &mut El<S>, laid: &[Laid], i: &mut usize, leaving: &HashSet<u64>, out: &mut Vec<(usize, usize, El<S>)>) {
+    *i += 1;
+    for (index, child) in el.children.iter_mut().enumerate() {
+        let start = *i;
+        if laid.get(start).is_some_and(|l| leaving.contains(&l.id)) {
+            *i += count(child);
+            out.push((start, index, std::mem::replace(child, super::el())));
+        } else {
+            take(child, laid, i, leaving, out);
+        }
+    }
+}
+
 fn keyed<S>(root: &El<S>, laid: &[Laid], theme: &Theme) -> HashMap<u64, (Key, Snapshot)> {
     let mut out = HashMap::new();
-    each(root, laid, &mut |el, laid, _| {
+    each(root, laid, &mut |el, i, _| {
         if let Some(key) = &el.key {
             let snapshot = Snapshot {
-                rect: laid.rect,
+                rect: laid[i].rect,
                 fill: el.look.fill.map(|p| p.resolve(theme)),
                 opacity: el.look.opacity,
             };
-            out.insert(laid.id, (key.clone(), snapshot));
+            out.insert(laid[i].id, (key.clone(), snapshot));
         }
     });
+    out
+}
+
+/// Each laid-out element's targets, in the same order. Motion and `instant` reach down the
+/// subtree.
+fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target> {
+    fn walk<S>(el: &El<S>, cx: (&[Laid], &Theme, f32), i: &mut usize, motion: Option<crate::Spring>, instant: bool, out: &mut Vec<Target>) {
+        let (laid, theme, s) = cx;
+        let Some(&me) = laid.get(*i) else { return };
+        *i += 1;
+        let instant = instant || el.anim.instant;
+        let motion = if instant {
+            None
+        } else {
+            el.anim.motion.map(|m| m.resolve(theme)).or(motion)
+        };
+        let origin = me.parent.map_or(Point::new(0.0, 0.0), |p| Point::new(laid[p].rect.left, laid[p].rect.top));
+        let r = me.rect;
+        out.push(Target {
+            rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
+            fill: el.look.fill.map(|p| p.resolve(theme)),
+            ink: el.look.color.unwrap_or(token::LABEL).resolve(theme),
+            opacity: el.look.opacity,
+            radius: el
+                .look
+                .radius
+                .map_or(0.0, |r| (r.resolve(theme) * s).round())
+                .min(r.width().min(r.height()) / 2.0)
+                .max(0.0),
+            shadow: if el.look.shadow { 1.0 } else { 0.0 },
+            motion,
+            open: motion.unwrap_or(theme.motion.open),
+            transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
+                slide: (t.slide.0 * s, t.slide.1 * s),
+                ..t
+            }),
+        });
+        for child in &el.children {
+            walk(child, cx, i, motion, instant, out);
+        }
+    }
+    let mut out = Vec::with_capacity(laid.len());
+    walk(root, (laid, theme, s), &mut 0, None, false, &mut out);
     out
 }
 
@@ -549,47 +791,66 @@ fn label_of<S>(el: &El<S>) -> Arc<str> {
         .unwrap_or_else(|| "".into())
 }
 
-/// Paints `el` and its children (pre-order, matching `laid`).
-fn paint_el<S>(f: &mut Frame, el: &El<S>, laid: &[Laid], i: &mut usize) {
-    let Some(&me) = laid.get(*i) else { return };
+/// The leaving elements to draw among the live ones, with their poses now.
+struct Scene<'a, S> {
+    ghosts: &'a [Ghost<S>],
+    poses: &'a [Vec<Pose>],
+}
+
+impl<S> Scene<'_, S> {
+    /// Paints the ghosts that left `parent` from place `index` (and, `rest`, any after it).
+    fn paint(&self, f: &mut Frame, parent: u64, index: usize, rest: bool) {
+        for (g, poses) in self.ghosts.iter().zip(self.poses) {
+            if g.parent == parent && (g.index == index || rest && g.index > index) {
+                // Out of hit testing: whatever hits its kit painting pushed go again.
+                let hits = f.list.hits.len();
+                paint_el(f, self, &g.el, &g.laid, poses, &mut 0, false);
+                f.list.hits.truncate(hits);
+            }
+        }
+    }
+}
+
+/// Paints `el` and its children (pre-order, matching `laid` and `poses`); `live` is false for
+/// a leaving element, which takes no hits, wash or focus ring.
+fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses: &[Pose], i: &mut usize, live: bool) {
+    let (Some(&me), Some(&pose)) = (laid.get(*i), poses.get(*i)) else { return };
     *i += 1;
-    let (theme, s, rect) = (f.theme, f.s, me.rect);
+    let (theme, s, rect) = (f.theme, f.s, pose.rect);
     let start = f.list.ops.len();
     let hits = f.list.hits.len();
     let enabled = el.interactive() && !el.sem.disabled;
-    let radius = el
-        .look
-        .radius
-        .map_or(0.0, |r| (r.resolve(theme) * s).round())
-        .min(rect.width().min(rect.height()) / 2.0)
-        .max(0.0);
-    let ink = el.look.color.unwrap_or(token::LABEL).resolve(theme);
+    let radius = pose.radius();
+    let ink = pose.ink;
     let paints = matches!(el.what, What::Paint(_));
-    if el.hit() && !paints {
+    let controls = live && el.interactive() && !paints;
+    if live && el.hit() && !paints {
         let label = label_of(el);
         f.hit(me.hit, rect, role_of(el), &label, enabled, el.sem.checked);
     }
-    if el.look.shadow {
+    if pose.shadow > 0.0 {
         let e = theme.elevation;
         f.push(Op::Shadow {
             rect,
             radius,
             spread: (e.spread * s).round(),
             drop: (e.drop * s).round(),
-            color: e.color,
+            color: e.color.with_alpha(e.color.a * pose.shadow),
         });
     }
-    if let Some(fill) = el.look.fill {
-        f.fill(rect, radius, fill.resolve(theme));
+    if let Some(fill) = pose.fill {
+        f.fill(rect, radius, fill);
     }
-    if el.interactive() && !paints {
+    if controls {
         f.wash(me.hit, rect, radius, enabled);
     }
+    // Text fits its laid-out width, so a box springing narrower never cuts it short.
+    let width = me.rect.width();
     match &el.what {
         What::Box(_) => {}
         What::Text { text, role, wrap: None } => {
             let style = theme.font.style(*role, s);
-            let fitted = f.text.fit(text, &style, rect.width());
+            let fitted = f.text.fit(text, &style, width);
             let (w, h) = f.text.measure(&fitted, &style);
             let top = (rect.top + (rect.height() - h) / 2.0).round();
             f.push(Op::Text {
@@ -600,7 +861,7 @@ fn paint_el<S>(f: &mut Frame, el: &El<S>, laid: &[Laid], i: &mut usize) {
             });
         }
         What::Text { text, role, wrap: Some(lines) } => {
-            f.paragraph(rect.left, rect.top, rect.width(), text, *role, ink, *lines);
+            f.paragraph(rect.left, rect.top, width, text, *role, ink, *lines);
         }
         What::Icon(icon) => f.icon(rect, *icon, rect.width().min(rect.height()) / s, ink),
         What::Image(image) if radius > 0.0 => f.push(Op::RoundedImage {
@@ -618,20 +879,26 @@ fn paint_el<S>(f: &mut Frame, el: &El<S>, laid: &[Laid], i: &mut usize) {
         }),
         What::Paint(painter) => {
             painter(f, rect, me.hit);
-            if el.hit() && !f.list.hits[hits..].iter().any(|h| h.id == me.hit) {
+            if live && el.hit() && !f.list.hits[hits..].iter().any(|h| h.id == me.hit) {
                 let label = label_of(el);
                 f.hit(me.hit, rect, role_of(el), &label, enabled, el.sem.checked);
             }
         }
     }
-    for child in &el.children {
-        paint_el(f, child, laid, i);
+    for (index, child) in el.children.iter().enumerate() {
+        if live && !scene.ghosts.is_empty() {
+            scene.paint(f, me.id, index, false);
+        }
+        paint_el(f, scene, child, laid, poses, i, live);
     }
-    if el.interactive() && !paints {
+    if live && !scene.ghosts.is_empty() {
+        scene.paint(f, me.id, el.children.len(), true);
+    }
+    if controls {
         f.focus_ring(me.hit, rect, radius);
     }
-    if el.look.opacity < 1.0 {
-        fade(&mut f.list.ops[start..], el.look.opacity);
+    if pose.opacity < 1.0 {
+        fade(&mut f.list.ops[start..], pose.opacity);
     }
 }
 
