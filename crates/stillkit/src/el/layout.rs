@@ -351,6 +351,16 @@ impl Measure {
 }
 
 fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
+    // A field is as tall as its lines; its width is what it is given.
+    if let What::Field(f) = &el.what {
+        let rows = if f.multiline { f.rows } else { 1 };
+        return Some(Measure {
+            text: "".into(),
+            style: cx.theme.font.style(f.role, cx.s),
+            line: cx.theme.font.line(f.role, cx.s) * rows as f32,
+            wrap: None,
+        });
+    }
     let What::Text { text, role, wrap } = &el.what else {
         return None;
     };
@@ -443,7 +453,8 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
                 style.size.height = Dimension::length(image.height as f32);
             }
         }
-        What::Text { .. } | What::Paint(_) => {}
+        What::Field(_) if z.min_w.is_none() => style.min_size.width = LengthPercentageAuto::length(0.0),
+        What::Text { .. } | What::Paint(_) | What::Field(_) => {}
     }
     // The root is the surface.
     if let Some((w, h)) = root {

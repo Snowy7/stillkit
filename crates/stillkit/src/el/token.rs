@@ -52,6 +52,10 @@ pub const ACCENT: Paint = Paint::Theme(|t| t.color.accent);
 pub const ON_ACCENT: Paint = Paint::Theme(|t| t.color.on_accent);
 /// A switch's or slider's knob.
 pub const KNOB: Paint = Paint::Theme(|t| t.color.knob);
+/// A text field's caret: the accent.
+pub const CARET: Paint = Paint::Theme(|t| t.color.accent);
+/// A text field's selection: the accent, light enough to read the text through.
+pub const SELECTION: Paint = Paint::Theme(|t| t.color.accent.with_alpha(if t.dark() { 0.45 } else { 0.3 }));
 
 // ---- Motion (springs, [`El::motion`](super::El::motion)) -----------------------------------
 

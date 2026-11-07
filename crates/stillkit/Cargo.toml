@@ -12,6 +12,7 @@ anyhow.workspace = true
 log.workspace = true
 # Golden-image comparison (`golden` feature), for tests in this crate and the shell.
 png = { workspace = true, optional = true }
+unicode-segmentation = "1.12"
 taffy = { version = "0.15.1", default-features = false, features = ["std", "flexbox", "grid", "taffy_tree"] }
 
 serde = { version = "1", features = ["derive"], optional = true }
@@ -97,7 +98,7 @@ raw-window-handle = { version = "0.6", optional = true }
 vello_cpu = { version = "0.3", default-features = false, features = ["std", "text", "u8_pipeline"] }
 cosmic-text = { version = "0.19", features = ["peniko"] }
 wayland-client = "0.31"
-wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 memmap2 = "0.9"
 libc = "0.2"

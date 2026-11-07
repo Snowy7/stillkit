@@ -1372,7 +1372,34 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         if msg == WM_LBUTTONDOWN && in_field && !focused {
             field.focus();
         }
-        if msg == WM_KEYDOWN && focused && wparam.0 == 13 && !field.multiline() {
+        // An `el` field takes the keys `el`'s policy gives it (crate::el::edit::command); the
+        // rest go to the app as keys, untouched by RichEdit.
+        let mut refused = false;
+        // An `el` field attached while the window was inactive takes the focus with it.
+        if field.is_el() && msg == WM_SETFOCUS {
+            field.focus();
+            return LRESULT(0);
+        }
+        if field.is_el() && focused {
+            use crate::el::edit::{Cmd, command, types};
+            use windows::Win32::UI::WindowsAndMessaging::WM_SYSKEYDOWN;
+            if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+                let (key, mods) = (crate::el::KeyCode(wparam.0 as u16), super::host::modifiers());
+                match command(key, mods, field.multiline()) {
+                    Some(Cmd::Submit) => {
+                        push(id, Event::TextSubmit);
+                        return LRESULT(0);
+                    }
+                    Some(_) => {}
+                    None => refused = !types(key, mods),
+                }
+            }
+            // Tab, Escape and the Enter that submitted type nothing.
+            if msg == WM_CHAR && (matches!(wparam.0, 9 | 10 | 27) || wparam.0 == 13 && !field.multiline()) {
+                return LRESULT(0);
+            }
+        }
+        if msg == WM_KEYDOWN && focused && wparam.0 == 13 && !field.multiline() && !field.is_el() {
             push(id, Event::TextSubmit);
             return LRESULT(0);
         }
@@ -1381,6 +1408,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         if msg == WM_KEYDOWN
             && focused
             && !field.multiline()
+            && !field.is_el()
             && matches!(wparam.0, 0x09 | 0x21 | 0x22 | 0x26 | 0x28)
         {
             push(id, Event::Key(wparam.0 as u16));
@@ -1392,7 +1420,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         // A single line has no use for Up, Down, Tab and the page keys: they move the
         // selection of whatever the field filters (the launcher's results).
         const NAVIGATION: [usize; 5] = [0x26, 0x28, 0x09, 0x21, 0x22];
-        if focused && !field.multiline() {
+        if focused && !field.multiline() && !field.is_el() {
             if msg == WM_KEYDOWN
                 && (NAVIGATION.contains(&wparam.0)
                     || ([0x25, 0x27].contains(&wparam.0)
@@ -1409,7 +1437,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             return field.send(msg, WPARAM(wparam.0 - 0x50000), lparam);
         }
         if (mouse && (in_field || captured))
-            || (keyboard && focused && wparam.0 != 27)
+            || (keyboard && focused && wparam.0 != 27 && !refused)
             || msg == WM_SETFOCUS
             || msg == WM_KILLFOCUS
         {

@@ -7,6 +7,7 @@ pub mod glass;
 pub mod gpu;
 #[cfg(feature = "gpu")]
 pub mod gpu_glass;
+pub mod caret;
 pub mod host;
 pub mod identity;
 pub mod layered_app;

@@ -1,5 +1,6 @@
 //! Compile-only backend. Native services are unavailable until a backend is installed.
 pub mod glass;
+pub mod caret;
 pub mod host;
 pub mod render;
 pub mod screen;

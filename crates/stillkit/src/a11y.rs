@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use accesskit::{
-    Action, Node, NodeId, Role, Toggled, TreeId,
+    Action, Node, NodeId, Role, TextPosition, TextSelection, Toggled, TreeId,
     TreeInfo, TreeUpdate,
 };
 
@@ -26,6 +26,28 @@ pub enum Semantics {
     /// What a hit item says beyond its name, read-only; it can sit beside any other entry
     /// for the same hit (a range with its value as text).
     Detail(Detail),
+    /// A text field's lines, characters, caret and selection (beside its [`Semantics::Text`]),
+    /// as text runs assistive technology reads by character, word and line.
+    Field(Arc<FieldText>),
+}
+
+/// A text field's text laid out ([`Semantics::Field`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FieldText {
+    pub lines: Vec<TextLine>,
+    /// Where the selection started, and the caret: (line, character) in `lines`.
+    pub anchor: (usize, usize),
+    pub caret: (usize, usize),
+}
+
+/// One visual line of a field ([`FieldText`]).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TextLine {
+    pub text: Arc<str>,
+    /// Where it is, in the surface's pixels.
+    pub rect: crate::Rect,
+    /// Where each character starts and how wide it is, px from the line's left.
+    pub chars: Vec<(f32, f32)>,
 }
 
 /// Read-only state for [`Semantics::Detail`]; `None` leaves a property out.
@@ -60,6 +82,12 @@ pub enum AccessibilityAction {
 pub(crate) const ROOT: NodeId = NodeId(0);
 pub(crate) const REORDER_BASE: u64 = 1 << 40;
 const STATUS_BASE: u64 = 1 << 48;
+/// Text runs: a field's lines, 4096 a field at most.
+const RUN_BASE: u64 = 1 << 44;
+
+fn run_node(hit: HitId, line: usize) -> NodeId {
+    NodeId(RUN_BASE + u64::from(hit) * 4096 + line.min(4095) as u64)
+}
 
 pub(crate) fn status_node(id: HitId) -> NodeId {
     NodeId(STATUS_BASE + u64::from(id))
@@ -171,6 +199,17 @@ impl Snapshot {
                         // Windows clients the same operations without inventing keyboard input.
                         node.set_children(vec![reorder_node(hit.id, 1), reorder_node(hit.id, 2)]);
                     }
+                    Semantics::Field(text) => {
+                        let n = text.lines.len().min(4096);
+                        node.set_children((0..n).map(|line| run_node(hit.id, line)).collect::<Vec<_>>());
+                        let at = |(line, ch): (usize, usize)| TextPosition {
+                            node: run_node(hit.id, line.min(n.saturating_sub(1))),
+                            character_index: ch,
+                        };
+                        if n > 0 {
+                            node.set_text_selection(TextSelection { anchor: at(text.anchor), focus: at(text.caret) });
+                        }
+                    }
                     Semantics::Detail(detail) => {
                         if let Some(description) = &detail.description {
                             node.set_description(&**description);
@@ -219,6 +258,15 @@ impl Snapshot {
                 nodes.push((reorder_node(hit.id, direction), node));
             }
         }
+        for (id, semantic) in &self.semantics {
+            let Semantics::Field(text) = semantic else { continue };
+            if !seen.contains(id) {
+                continue;
+            }
+            for (line, l) in text.lines.iter().take(4096).enumerate() {
+                nodes.push((run_node(*id, line), text_run(l)));
+            }
+        }
         nodes.extend(self.semantics.iter().filter_map(|(id, semantic)| {
             let Semantics::Status(message) = semantic else {
                 return None;
@@ -240,3 +288,78 @@ impl Snapshot {
     }
 }
 
+
+/// One line of a field as an AccessKit text run: its characters' UTF-8 lengths, places and
+/// widths, and where its words start (the first 256 characters).
+fn text_run(l: &TextLine) -> Node {
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut node = Node::new(Role::TextRun);
+    node.set_value(&*l.text);
+    node.set_bounds(accesskit::Rect {
+        x0: f64::from(l.rect.left),
+        y0: f64::from(l.rect.top),
+        x1: f64::from(l.rect.right),
+        y1: f64::from(l.rect.bottom),
+    });
+    let lengths: Vec<u8> = l.text.chars().map(|c| c.len_utf8() as u8).collect();
+    let n = lengths.len();
+    node.set_character_lengths(lengths);
+    let place = |k: usize| l.chars.get(k).copied().unwrap_or_default();
+    node.set_character_positions((0..n).map(|k| place(k).0).collect::<Vec<_>>());
+    node.set_character_widths((0..n).map(|k| place(k).1).collect::<Vec<_>>());
+    // Words start where Ctrl+Right lands: at each word, its trailing spaces part of it.
+    let mut starts = Vec::new();
+    let mut at = 0usize;
+    for word in l.text.split_word_bounds() {
+        if !word.chars().all(char::is_whitespace) && at <= usize::from(u8::MAX) {
+            starts.push(at as u8);
+        }
+        at += word.chars().count();
+    }
+    node.set_word_starts(starts);
+    node
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Rect;
+
+    /// A field's lines become text runs under it, with its selection on them.
+    #[test]
+    fn a_field_reads_as_text_runs_with_its_selection() {
+        let hit = Hit {
+            id: 7,
+            rect: Rect::new(0.0, 0.0, 100.0, 40.0),
+            role: Role::MultilineTextInput,
+            label: "Notes".into(),
+            enabled: true,
+            actionable: true,
+            checked: None,
+        };
+        let line = |text: &str, top: f32| TextLine {
+            text: text.into(),
+            rect: Rect::new(0.0, top, 50.0, 20.0),
+            chars: (0..text.chars().count()).map(|k| (k as f32 * 8.0, 8.0)).collect(),
+        };
+        let text = FieldText { lines: vec![line("one two ", 0.0), line("three", 20.0)], anchor: (0, 4), caret: (1, 2) };
+        let tree = Snapshot {
+            role: Role::Window,
+            name: "w".into(),
+            hits: vec![hit],
+            focus: Some(7),
+            semantics: vec![(7, Semantics::Text("one two three".into())), (7, Semantics::Field(Arc::new(text)))],
+        }
+        .tree();
+        let field = &tree.nodes.iter().find(|(id, _)| *id == node_id(7)).unwrap().1;
+        assert_eq!(field.children(), [run_node(7, 0), run_node(7, 1)]);
+        let sel = field.text_selection().unwrap();
+        assert_eq!((sel.anchor.node, sel.anchor.character_index), (run_node(7, 0), 4));
+        assert_eq!((sel.focus.node, sel.focus.character_index), (run_node(7, 1), 2));
+        let run = &tree.nodes.iter().find(|(id, _)| *id == run_node(7, 0)).unwrap().1;
+        assert_eq!(run.role(), Role::TextRun);
+        assert_eq!(run.value(), Some("one two "));
+        assert_eq!(run.word_starts(), [0, 4]);
+        assert_eq!(run.character_positions().map(<[f32]>::len), Some(8));
+    }
+}

@@ -17,6 +17,9 @@
 //!   in a scroll view is reached and scrolled into view.
 //! - **Size, scale and theme** re-lay out the retained tree without running the view (size
 //!   and scale land at once; a theme's colours animate where elements have motion).
+//! - **Text fields** ([`text`]) take keys and characters before their ancestors, keep their
+//!   caret, selection, undo and scroll here, and hand edits to `on_input`; on Windows the
+//!   focused one types through RichEdit (`native`).
 //! - **Overlays** ([`layer`]) are lifted out of the tree after each view run and appended to
 //!   the root, placed against their anchors, and take Escape, outside presses and focus first.
 //!   Tooltips and timers run on the clock without running the view.
@@ -33,9 +36,13 @@ use accesskit::Role;
 use anyhow::Result;
 
 mod layer;
+#[cfg(windows)]
+mod native;
+mod text;
 
 use super::animate::{Animator, Mode, Pose, Target};
-use super::element::{ArcLook, Axis, El, Handled, Key, KeyCode, Range, Transition, Tx, What};
+use super::element::{ArcLook, Axis, El, Handled, Key, KeyCode, Modifiers, Range, Transition, Tx, What};
+use super::field::Field;
 use super::layout::{Cx, Laid, Layout};
 use super::overlay::{Dismiss, Kind};
 use layer::{Entry, Layer, MENU, Relation, Tip};
@@ -63,6 +70,10 @@ enum Action<S> {
     Timeout(HitId),
     /// An overlay should close.
     Dismiss(Dismiss<S>),
+    /// A field's text after an edit (`on_input`).
+    Input(HitId, String),
+    /// Enter in a field (`on_submit`).
+    Submit(HitId, String),
 }
 
 /// A keyed element's layout and look, before or after a view run.
@@ -106,6 +117,8 @@ pub struct Shown {
     pub range: Option<(f64, f64, f64)>,
     /// Its value as text ([`El::value`]).
     pub value: Option<Arc<str>>,
+    /// A text field's selection: where it started and the caret (byte offsets in `text`).
+    pub selection: Option<(usize, usize)>,
     pub description: Option<Arc<str>>,
     pub selected: Option<bool>,
     pub expanded: Option<bool>,
@@ -222,6 +235,18 @@ pub struct Runtime<S> {
     window_list: Option<DisplayList>,
     /// Overlays drawn outside the window, open or leaving.
     lifted: HashMap<u64, Rect>,
+    // ---- Text fields (`text`) ---------------------------------------------------------
+    fields: HashMap<u64, Field>,
+    /// The field with focus, by identity, as last seen.
+    typing: Option<u64>,
+    selecting: Option<text::Selecting>,
+    clipboard: Box<dyn super::Clipboard>,
+    /// The modifier keys held with the key being handled.
+    mods: Modifiers,
+    /// Whether the window has the keyboard (the caret blinks and shows only then).
+    active: bool,
+    /// Whether the last paint drew the caret.
+    caret_shown: bool,
 }
 
 impl<S: 'static> Runtime<S> {
@@ -285,6 +310,13 @@ impl<S: 'static> Runtime<S> {
             popups: Vec::new(),
             window_list: None,
             lifted: HashMap::new(),
+            fields: HashMap::new(),
+            typing: None,
+            selecting: None,
+            clipboard: Box::new(super::clipboard::Memory::default()),
+            mods: Modifiers::NONE,
+            active: true,
+            caret_shown: false,
         };
         runtime.frame(Duration::ZERO);
         Ok(runtime)
@@ -336,7 +368,8 @@ impl<S> Runtime<S> {
             let before = keyed(&self.root, &self.laid, &self.theme);
             self.relayout(before, None);
         }
-        if moved || !left.is_empty() || scrolled {
+        self.sync_focus();
+        if moved || !left.is_empty() || scrolled || self.caret_on() != self.caret_shown {
             self.stale_paint = true;
         }
         if !self.stale_paint {
@@ -380,6 +413,8 @@ impl<S> Runtime<S> {
                     continue;
                 }
                 Action::Press(hit)
+                | Action::Input(hit, _)
+                | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
                 | Action::Step(hit, _)
                 | Action::Context(hit, ..)
@@ -411,6 +446,14 @@ impl<S> Runtime<S> {
                 },
                 Action::Timeout(_) => match &el.on_timeout {
                     Some((_, handler)) => handler(state),
+                    None => continue,
+                },
+                Action::Input(_, text) => match &el.on_input {
+                    Some(handler) => handler(state, &text),
+                    None => continue,
+                },
+                Action::Submit(_, text) => match &el.on_submit {
+                    Some(handler) => handler(state, &text),
                     None => continue,
                 },
                 Action::Dismiss(_) => continue,
@@ -459,6 +502,7 @@ impl<S> Runtime<S> {
         self.anim.retarget(&laid, &targets, &prev, mode);
         self.laid = laid;
         self.targets = targets;
+        self.sync_fields();
         self.sync_scrolls();
         self.sync_timers();
         if !self.layers.is_empty() || !self.shown.is_empty() {
@@ -484,8 +528,12 @@ impl<S> Runtime<S> {
     fn sync_scrolls(&mut self) {
         let t = self.anim.t;
         let mut seen = HashSet::new();
+        let areas: HashMap<u64, (f32, f32)> =
+            self.fields.keys().filter_map(|&id| Some((id, self.field_extent(id)?))).collect();
         each(&self.root, &self.laid, &mut |el, i, _| {
-            if let (Some(axis), Some(extent)) = (el.scrolls(), self.laid[i].extent) {
+            let field = areas.get(&self.laid[i].id).copied();
+            let axis = el.scrolls().or(field.map(|_| Axis::Vertical));
+            if let (Some(axis), Some(extent)) = (axis, self.laid[i].extent.or(field)) {
                 let l = self.laid[i];
                 let view = self.scrolls.entry(l.id).or_insert_with(|| ScrollView::new(axis));
                 if view.axis != axis {
@@ -654,7 +702,10 @@ impl<S> Runtime<S> {
             inert: None,
             lifted: &self.lifted,
             escaped: Vec::new(),
+            fields: &self.fields,
+            caret: self.caret_on().then_some(self.typing).flatten(),
         };
+        self.caret_shown = walk.caret.is_some();
         let mut f = Frame::new(&mut self.ui.text, &self.theme, self.scale, &self.ix);
         if let Some(background) = self.background {
             let (w, h) = self.size;
@@ -694,7 +745,16 @@ impl<S> Runtime<S> {
 
     fn input(&mut self, event: &Event) {
         match *event {
-            Event::Key(0x09) => return self.tab(false),
+            Event::Press(..) | Event::Key(_) | Event::Activated => self.active = true,
+            Event::Deactivated => self.active = false,
+            _ => {}
+        }
+        match *event {
+            #[cfg(windows)]
+            Event::TextChanged => return self.rich_edit_changed(),
+            #[cfg(windows)]
+            Event::TextSubmit => return self.rich_edit_submit(),
+            Event::Key(0x09) => return self.tab(self.mods.shift),
             Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
             Event::Wheel(p, delta) => {
                 self.pointer = Some(p);
@@ -715,6 +775,12 @@ impl<S> Runtime<S> {
         let before = self.ix.clone();
         if let Response::Activate(hit) = self.ix.handle(&self.list, event) {
             self.queue.push(Action::Press(hit));
+        }
+        if !self.fields.is_empty()
+            && matches!(event, Event::Press(..) | Event::Move(_) | Event::Release(..) | Event::CaptureLost | Event::Cancelled | Event::Leave)
+        {
+            self.sync_focus();
+            self.field_pointer(event);
         }
         match *event {
             Event::Press(p, Button::Left) => {
@@ -779,6 +845,13 @@ impl<S> Runtime<S> {
             self.hide_tip();
             return true;
         }
+        // A focused field gets first refusal (Escape and Tab always go on).
+        if key != KeyCode::ESCAPE && !self.fields.is_empty() {
+            self.sync_focus();
+            if self.field_key(key) == Some(true) {
+                return true;
+            }
+        }
         let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
         let mut chain = Vec::new();
         let mut at = Some(focused.unwrap_or(0));
@@ -796,7 +869,7 @@ impl<S> Runtime<S> {
                     self.run_handlers();
                     return self.key_down(key);
                 }
-                let mut tx = Tx::default();
+                let mut tx = text::tx_with(self.mods);
                 if handler(&mut self.state, key, &mut tx) == Handled::Yes {
                     self.stale_view = true;
                     self.apply(tx);
@@ -961,6 +1034,9 @@ impl<S> Runtime<S> {
     /// Assistive technology's request on a hit item (a slider's increment, a new value):
     /// whether it was used. The window host routes `Surface::take_accessibility_action` here.
     pub fn accessibility_action(&mut self, hit: HitId, action: &AccessibilityAction) -> bool {
+        if let AccessibilityAction::SetText(text) = action {
+            return self.field_set_text(hit, text);
+        }
         let Some(el) = element(&self.root, &self.laid, hit) else {
             return false;
         };
@@ -1246,7 +1322,16 @@ impl<S> Runtime<S> {
     /// A key going down (a virtual-key code: Enter 0x0D, Space 0x20, arrows, Escape; see
     /// [`KeyCode`]).
     pub fn key(&mut self, vk: u16) {
+        self.key_with(vk, Modifiers::NONE);
+    }
+
+    /// A key going down with modifiers held (Ctrl+A, Shift+Left, Shift+Tab): what
+    /// [`El::on_key`] handlers read through [`Tx::modifiers`], and what text fields edit by.
+    /// The window host sends every key this way.
+    pub fn key_with(&mut self, vk: u16, mods: Modifiers) {
+        self.mods = mods;
         self.handle(&Event::Key(vk));
+        self.mods = Modifiers::NONE;
     }
 
     /// Presses and releases the pointer at the centre of the element keyed `key`, where it is
@@ -1289,8 +1374,10 @@ impl<S> Runtime<S> {
                 fill: pose.map_or_else(|| el.look.fill.map(|p| p.resolve(&self.theme)), |p| p.fill),
                 text: match &el.what {
                     What::Text { text, .. } => Some(text.clone()),
+                    What::Field(f) if !f.secure => self.field_shown(laid.id).map(|(t, _)| t.into()),
                     _ => None,
                 },
+                selection: el.field().filter(|f| !f.secure).and_then(|_| self.field_shown(laid.id)).map(|(_, s)| s),
                 checked: sem.checked,
                 state: if enabled { self.ix.state(laid.hit, true) } else { State::Rest },
                 focused: self.ix.focus == Some(laid.hit),
@@ -1495,7 +1582,13 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
 }
 
 fn role_of<S>(el: &El<S>) -> Role {
-    el.sem.role.unwrap_or(if el.on_drag.is_some() || el.sem.range.is_some() {
+    el.sem.role.unwrap_or(if let Some(f) = el.field() {
+        match (f.secure, f.multiline) {
+            (true, _) => Role::PasswordInput,
+            (_, true) => Role::MultilineTextInput,
+            _ => Role::TextInput,
+        }
+    } else if el.on_drag.is_some() || el.sem.range.is_some() {
         Role::Slider
     } else if el.scrolls().is_some() {
         Role::ScrollView
@@ -1510,6 +1603,7 @@ fn role_of<S>(el: &El<S>) -> Role {
 
 fn label_of<S>(el: &El<S>) -> Arc<str> {
     let first = || el.first_text().cloned().filter(|_| el.scrolls().is_none());
+    let first = || first().or_else(|| el.field().and_then(|f| f.placeholder.clone()));
     el.sem.label.clone().or_else(first).unwrap_or_else(|| "".into())
 }
 
@@ -1569,6 +1663,9 @@ struct Walk<'a, S> {
     lifted: &'a HashMap<u64, Rect>,
     /// Escaped entries: their identity, ops and hits.
     escaped: Vec<Escaped>,
+    fields: &'a HashMap<u64, Field>,
+    /// The field whose caret is drawn now.
+    caret: Option<u64>,
 }
 
 /// An entry painted for a popup surface: its identity, ops and hits in the list.
@@ -1636,14 +1733,44 @@ fn paint_el<S>(
     if let Some(fill) = pose.fill {
         f.fill(rect, radius, fill);
     }
-    // A scroll view takes focus for its keys, but is no button: no wash.
-    if controls && scroll.is_none() {
+    // A scroll view takes focus for its keys, but is no button: no wash; nor is a field.
+    if controls && scroll.is_none() && el.field().is_none() {
         f.wash(me.hit, rect, radius, enabled);
     }
     // Text fits its laid-out width, so a box springing narrower never cuts it short.
     let width = me.rect.width();
     match &el.what {
         What::Box(_) => {}
+        What::Field(spec) => {
+            if let Some(field) = w.fields.get(&me.id) {
+                let focused = w.focus == Some(me.hit);
+                let caret = (w.caret == Some(me.id)).then(|| token::CARET.resolve(theme));
+                let bar = w.bars.get(&index).copied();
+                let hint = token::TERTIARY.resolve(theme);
+                let selection = if focused { token::SELECTION.resolve(theme) } else { Rgba::TRANSPARENT };
+                let scroll_y = bar.map_or(0.0, |b| b.offset);
+                #[cfg(windows)]
+                let native = field.native.as_ref();
+                #[cfg(not(windows))]
+                let native: Option<&()> = None;
+                match native {
+                    #[cfg(windows)]
+                    Some(native) => native::paint_rich_edit(f, field, native, spec.placeholder.as_deref(), caret, hint),
+                    _ => super::field::paint(f, field, rect, spec.placeholder.as_deref(), caret, selection, hint, scroll_y),
+                }
+                if let Some(bar) = bar.filter(|_| live) {
+                    let extent = field.look.as_ref().map(|l| (l.rect.width(), field.shape.height() + l.rect.height() - l.content.height()));
+                    scrollbar(f, rect, extent, bar);
+                }
+                // What assistive technology reads and sets; a secure field tells nothing.
+                if live && !spec.secure {
+                    w.semantics.push((me.hit, Semantics::Text(field.ed.text.as_str().into())));
+                    if let Some(text) = field.accessible(scroll_y) {
+                        w.semantics.push((me.hit, Semantics::Field(Arc::new(text))));
+                    }
+                }
+            }
+        }
         What::Text { text, role, wrap: None } => {
             let style = theme.font.style(*role, s);
             let fitted = f.text.fit(text, &style, width);
@@ -1736,7 +1863,9 @@ fn paint_el<S>(
         }
     }
     if controls {
-        focus_ring(f, me.hit, rect, radius);
+        // A field shows its ring whenever it has focus (the caret is in it), not only after keys.
+        let on = el.field().is_some() && w.focus == Some(me.hit);
+        focus_ring(f, me.hit, rect, radius, on);
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
@@ -1760,7 +1889,7 @@ fn paint_el<S>(
 /// The keyboard focus ring of `id` just outside `rect`, as the theme's [`crate::theme::FocusRing`]
 /// says (always pushed, transparent unless the keyboard moved focus there). The default ring
 /// draws the same pixels as [`Frame::focus_ring`].
-fn focus_ring(f: &mut Frame, id: HitId, rect: Rect, radius: f32) {
+fn focus_ring(f: &mut Frame, id: HitId, rect: Rect, radius: f32, on: bool) {
     let ring = f.theme.focus_ring;
     let width = f.px(ring.width).max(ring.width);
     let gap = f.px(ring.gap);
@@ -1768,7 +1897,7 @@ fn focus_ring(f: &mut Frame, id: HitId, rect: Rect, radius: f32) {
         rect: rect.inflate(gap + width / 2.0),
         radius: radius + gap + width / 2.0,
         width,
-        color: if f.input.ring(id) {
+        color: if on || f.input.ring(id) {
             f.theme.color.accent.with_alpha(ring.opacity)
         } else {
             Rgba::TRANSPARENT

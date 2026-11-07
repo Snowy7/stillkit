@@ -5,6 +5,9 @@ pub mod glass;
 pub mod gpu;
 #[cfg(feature = "gpu")]
 mod gpu_glass;
+pub mod caret;
+pub mod clipboard;
+pub mod ime;
 pub mod host;
 mod keyboard;
 pub mod render;
@@ -13,6 +16,7 @@ pub mod surface;
 pub mod text;
 pub mod text_field;
 pub mod timing;
+mod wake;
 pub mod layered_app {}
 pub mod compose {}
 pub mod modules;
