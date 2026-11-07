@@ -3,13 +3,15 @@
 //! Windows.UI.Composition. DWM draws the blur out of process, so no GPU device or vendor driver
 //! loads here (`tests/no_gpu_driver.rs`).
 //!
-//! Each surface with glass gets a frost window directly under it, the size of its body: no
-//! redirection bitmap, click-through, never activated, topmost when the surface is. Its
+//! Each surface with glass gets a frost window directly under it, the size of its body: layered
+//! with a fully transparent bitmap (click-through, and moved by a position-only
+//! `UpdateLayeredWindow`), never activated, topmost when the surface is. Its
 //! [`DesktopWindowTarget`] holds one visual clipped to the body's rounded rect: the blur and, over
 //! it, the material's tint. It is placed before every move of its surface (as the engine's glass
-//! windows are), and put back under it when the surface's z-order changes ([`follow`]). The frost
-//! can't live in the surface's own window: DWM composes a layered window's visuals over its
-//! pixels whatever the target's `isTopmost` says (measured), and the blur is opaque.
+//! windows are), and put back under it when the surface's z-order changes
+//! ([`SystemBackdrop::follow`]). The frost can't live in the surface's own window: DWM composes a
+//! layered window's visuals over its pixels whatever the target's `isTopmost` says (measured,
+//! `backdrop_spike layered`), and the blur is opaque.
 //!
 //! Nothing is made until the first surface opens glass, and the windows, visuals and compositor
 //! all go when the last one closes. What it can't do: lenses and rims (a lensed material gets the
@@ -25,7 +27,7 @@ use windows::System::DispatcherQueueController;
 use windows::UI::Color;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{CompositionColorBrush, Compositor, ContainerVisual, SpriteVisual};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
@@ -36,9 +38,11 @@ use windows::Win32::System::WinRT::{
     CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE, GetWindowLongPtrW, HTTRANSPARENT,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GW_HWNDNEXT, GWL_EXSTYLE, GetWindow,
+    GetWindowLongPtrW, HTTRANSPARENT,
     MA_NOACTIVATE, RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_NCHITTEST,
+    SWP_NOSIZE, SetWindowPos,
+    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_NCHITTEST,
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
@@ -70,6 +74,8 @@ struct Frost {
     body: ContainerVisual,
     blur: SpriteVisual,
     tint: CompositionColorBrush,
+    /// The clip made last: width, height and radius.
+    clip: Cell<Option<(i32, i32, f32)>>,
     open: bool,
 }
 
@@ -93,7 +99,9 @@ impl SystemBackdrop {
 
     /// Puts `client`'s frost back directly under it (its z-order changed).
     pub fn follow(&self, client: HWND) {
-        if let Some(window) = self.window(client) {
+        if let Some(window) = self.window(client)
+            && !directly_under(window, client)
+        {
             // SAFETY: two windows of this thread; z-order only.
             let _ = unsafe { SetWindowPos(window, Some(client), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
         }
@@ -177,8 +185,18 @@ impl Frost {
         // SAFETY: a read of our own window's style.
         let topmost = unsafe { WINDOW_EX_STYLE(GetWindowLongPtrW(client, GWL_EXSTYLE) as u32) }.contains(WS_EX_TOPMOST);
         let window = create_window(topmost)?;
+        // A desktop surface's frost belongs to its desktop band: marked as the surface is, so the
+        // band's order checks and repairs (`keep_above_desktop`) step over it.
+        // SAFETY: property reads and writes on windows of this thread.
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{GetPropW, SetPropW};
+            let mark = GetPropW(client, crate::identity::desktop_prop());
+            if !mark.is_invalid() {
+                let _ = SetPropW(window, crate::identity::desktop_prop(), Some(mark));
+            }
+        }
         match Self::build(compositor, window) {
-            Ok((target, body, blur, tint)) => Ok(Self { window, _target: target, body, blur, tint, open: false }),
+            Ok((target, body, blur, tint)) => Ok(Self { window, _target: target, body, blur, tint, clip: Cell::new(None), open: false }),
             Err(e) => {
                 // SAFETY: the window made above, on this thread.
                 let _ = unsafe { DestroyWindow(window) };
@@ -214,14 +232,32 @@ impl Frost {
     }
 
     /// Moves the frost window to `shape` (screen px), directly under `client`, and clips it to
-    /// the rounded body.
+    /// the rounded body. A move of the same size is a position-only `UpdateLayeredWindow`,
+    /// 0.2 ms against 0.5 ms for `SetWindowPos` (`backdrop_spike movebench`); a new size gives
+    /// the window a transparent bitmap of that size first, and remakes the clip.
     fn place(&self, compositor: &Compositor, client: HWND, shape: Shape, radius: f32) -> Result<()> {
         let (w, h) = (shape.width as f32, shape.height as f32);
         let r = radius.clamp(0.0, w.min(h) / 2.0);
-        let corner = Vector2 { X: r, Y: r };
-        self.body.SetClip(&compositor.CreateRectangleClipWithSidesAndRadius(0.0, 0.0, w, h, corner, corner, corner, corner)?)?;
-        // SAFETY: two windows of this thread.
-        unsafe { SetWindowPos(self.window, Some(client), shape.x, shape.y, shape.width, shape.height, SWP_NOACTIVATE) }?;
+        let resized = self.clip.get().is_none_or(|(cw, ch, _)| (cw, ch) != (shape.width, shape.height));
+        if self.clip.get() != Some((shape.width, shape.height, r)) {
+            let corner = Vector2 { X: r, Y: r };
+            self.body.SetClip(&compositor.CreateRectangleClipWithSidesAndRadius(0.0, 0.0, w, h, corner, corner, corner, corner)?)?;
+            self.clip.set(Some((shape.width, shape.height, r)));
+        }
+        let at = POINT { x: shape.x, y: shape.y };
+        if resized {
+            // A new size: a fully transparent layered bitmap of that size, so later moves can be
+            // position-only.
+            transparent(self.window, at, (shape.width, shape.height))?;
+        } else {
+            // SAFETY: our own layered window; only its position changes.
+            unsafe { UpdateLayeredWindow(self.window, None, Some(&at), None, None, None, COLORREF(0), Some(&BLEND), ULW_ALPHA) }
+                .context("moving the frost window")?;
+        }
+        if !directly_under(self.window, client) {
+            // SAFETY: two windows of this thread; z-order only.
+            unsafe { SetWindowPos(self.window, Some(client), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }?;
+        }
         Ok(())
     }
 
@@ -266,6 +302,67 @@ fn create_window(topmost: bool) -> Result<HWND> {
         }
         CreateWindowExW(ex, class, w!("frost"), WS_POPUP, 0, 0, 1, 1, None, None, Some(instance.into()), None).context("frost window")
     }
+}
+
+/// Per-pixel alpha, the bitmap as it is (a transparent one).
+const BLEND: windows::Win32::Graphics::Gdi::BLENDFUNCTION = windows::Win32::Graphics::Gdi::BLENDFUNCTION {
+    BlendOp: windows::Win32::Graphics::Gdi::AC_SRC_OVER as u8,
+    BlendFlags: 0,
+    SourceConstantAlpha: 255,
+    AlphaFormat: windows::Win32::Graphics::Gdi::AC_SRC_ALPHA as u8,
+};
+
+/// Gives the layered `window` a fully transparent bitmap of `size` at `at`. The bitmap is freed
+/// at once: DWM keeps its own copy, out of this process.
+fn transparent(window: HWND, at: POINT, size: (i32, i32)) -> Result<()> {
+    use windows::Win32::Foundation::SIZE;
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, SelectObject,
+    };
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: size.0,
+            biHeight: -size.1,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // SAFETY: GDI objects made and released here; a new DIB section is zeroed (transparent).
+    unsafe {
+        let dc = CreateCompatibleDC(None);
+        let mut bits = std::ptr::null_mut();
+        let bitmap = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0);
+        let result = bitmap.as_ref().map_err(Clone::clone).and_then(|&bitmap| {
+            let old = SelectObject(dc, bitmap.into());
+            let r = UpdateLayeredWindow(
+                window,
+                None,
+                Some(&at),
+                Some(&SIZE { cx: size.0, cy: size.1 }),
+                Some(dc),
+                Some(&POINT::default()),
+                COLORREF(0),
+                Some(&BLEND),
+                ULW_ALPHA,
+            );
+            SelectObject(dc, old);
+            r
+        });
+        if let Ok(bitmap) = bitmap {
+            let _ = DeleteObject(bitmap.into());
+        }
+        let _ = DeleteDC(dc);
+        result.context("sizing the frost window")
+    }
+}
+
+fn directly_under(window: HWND, client: HWND) -> bool {
+    // SAFETY: a z-order query.
+    unsafe { GetWindow(client, GW_HWNDNEXT) }.is_ok_and(|next| next == window)
 }
 
 fn ensure_queue() -> Result<()> {

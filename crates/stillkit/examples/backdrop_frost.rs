@@ -79,8 +79,12 @@ mod native {
             panel.render()
         );
         if let Some(path) = shot {
+            // Moved first: the frost follows its surface (the move is told before it happens).
+            pump_for(Duration::from_millis(300));
+            panel.move_to((PANEL.0 + 20, PANEL.1 + 20))?;
+            flyout.move_to((FLYOUT.0 + 20, FLYOUT.1 + 20))?;
             pump_for(Duration::from_millis(800));
-            capture(&path, (PANEL.0, PANEL.1, (FLYOUT.0 + FLYOUT.2 as i32 - PANEL.0) as u32, PANEL.3))?;
+            capture(&path, (PANEL.0 + 20, PANEL.1 + 20, (FLYOUT.0 + FLYOUT.2 as i32 - PANEL.0) as u32, PANEL.3))?;
             let drivers = modules::gpu_drivers();
             println!("wrote {path}; GPU drivers loaded: {drivers:?}");
             println!("modules: {}", modules::loaded().join(" "));

@@ -683,7 +683,8 @@ frame timer and DWM refresh query live in the Windows backend.
 
 A surface draws in one of two ways. **CPU** (the default) is everything above: software
 Direct2D on a WIC bitmap in a per-pixel-alpha layered window, no GPU device in the process, and
-glass (if any) from an external [`Backdrop`](#glass-under-a-surface-n3). **GPU** draws the same
+glass (if any) from an installed [`Backdrop`](#glass-under-a-surface-n3), else on Windows the
+[system backdrop](#system-backdrop)'s frost, drawn by DWM. **GPU** draws the same
 display list with the same code on a hardware device, and draws Liquid Glass in-process. Both
 kinds mix freely on one UI thread.
 
@@ -704,8 +705,10 @@ stillkit::platform::windows::gpu::set_power(gpu::Power::High); // default Low: t
   with no render field: an app picks GPU with one call before `run`, and mypaper's ~1,000 call
   sites stay as they are. Per surface, so CPU bars and widgets can sit beside one GPU panel.
 - **`Auto`** resolves when the surface is made: `Cpu` unless glass is wanted
-  (`glass::set_style(Some(..))`, see `glass::wanted`) and no external backdrop is installed;
-  then `Gpu`. The measured numbers below are why it isn't simply "GPU when glass".
+  (`glass::set_style(Some(..))`, see `glass::wanted`) and no backdrop draws it in full on the
+  CPU (`glass::cpu_backdrop`: none is installed, and the system backdrop is unavailable or the
+  material has a lens); then `Gpu`. The measured numbers below and in
+  [System backdrop](#system-backdrop) are why it isn't simply "GPU when glass".
 - **The `gpu` feature.** Without it no GPU code is compiled (no wgpu, no `stillkit-glass`), and
   every mode is `Cpu`. With it, nothing GPU-related loads until the first GPU surface: the
   device is made then, once per thread (`gpu::device`), and a CPU surface never touches it
@@ -822,8 +825,102 @@ driver. The gallery is byte-identical with and without the feature.
 
 **`Auto`, from these numbers:** CPU when no glass is wanted; when glass is wanted, the external
 backdrop if one is installed (mypaper's engine: its device is already paid for, and one serves
-every app); otherwise GPU, with small glass-less surfaces made `Render::Cpu` beside it. A glass
-process would win only if it could exit while no glass shows, or serve several apps.
+every app); then the system backdrop on Windows when the material is frost without a lens (it
+costs about nothing, [System backdrop](#system-backdrop)); otherwise GPU, with small glass-less
+surfaces made `Render::Cpu` beside it. A glass process would win only if it could exit while no
+glass shows, or serve several apps.
+
+## System backdrop
+
+One UI and Fluent are defined by frost: a blur of whatever is behind the panel. A CPU surface
+can't see behind itself, so without an engine they used to fall back to a flat tinted fill. On
+Windows 11 a CPU surface now gets the frost from DWM itself
+(`platform::windows::system_backdrop`), with no GPU device in the process: DWM draws the blur out
+of process, and `tests/no_gpu_driver.rs` opens it and finds no vendor driver and no Direct3D 12.
+
+```rust,ignore
+// No backdrop installed: the built-in one serves the kit's glass, as an engine would.
+let glass = f.surface(body, surface.glass_available());   // One UI: Some(Glass), a HIT fill
+surface.set_glass(glass);                                  // frost under the body, from DWM
+stillkit::platform::windows::glass::system().active();     // its compositor is up
+```
+
+**How.** Each CPU surface with glass gets a *frost window* directly under it, the size of its
+body: layered with a fully transparent bitmap (so it is click-through and moves with a
+position-only `UpdateLayeredWindow`), never activated, topmost when its surface is. A
+Windows.UI.Composition `DesktopWindowTarget` on it holds one visual clipped to the body's rounded
+rect (`RectangleClip` with corner radii): a `HostBackdropBrush` sprite (DWM's acrylic blur of
+what is behind the window, `DWMWA_USE_HOSTBACKDROPBRUSH`), and over it a colour sprite with the
+material's tint as given (its alpha is the stain). `blur` under half a pixel is clear glass: the
+tint alone. It speaks the same `Backdrop` contract as the engine, so views and components don't
+change: the surface opens it after `show`, places it **before** every move and on reshapes,
+closes it on `hide` and drop; the surface's `WM_WINDOWPOSCHANGED` puts the frost back under it
+when its z-order changes. Nothing is made until a surface opens glass; the windows, visuals and
+compositor all go when the last one closes (the thread's `DispatcherQueue` stays: a few KB).
+
+**Which backdrop.** `glass::install`ed (mypaper's engine) **always** wins, available or not, so
+mypaper, which installs its overlay client in the shell and Files before any surface, is
+unchanged (`tests/backdrop_system.rs`). Without one, Windows uses the system backdrop; other
+platforms have none. `glass::available()` is true while it is (Windows 11, and Settings' "Transparency effects" on: read
+per call, one registry value), so menus and `Frame::surface` take glass; otherwise views draw
+their fill as before.
+
+| Surface kind | System frost |
+| --- | --- |
+| `Popup` | Yes: a topmost frost window under it. |
+| `Bar` | Yes, the same. |
+| `DesktopChild` | Yes: a non-topmost frost window under it in the desktop band; it blurs the wallpaper. |
+| `App` | No: a CPU app window is opaque (`SetDIBitsToDevice`), so frost under it can't show. `glass_available()` is false unless an installed backdrop serves it. |
+
+**The Auto rule.** `Render::Auto` makes a surface `Gpu` only for glass no backdrop draws in full
+on the CPU (`glass::cpu_backdrop`): with an installed backdrop, `Cpu`; else with the system
+backdrop available and a material with no lens (One UI, Fluent, Liquid with refraction and
+highlight at 0), `Cpu`; else (a lensed Liquid, Windows 10, transparency off, Linux) `Gpu` when
+the `gpu` feature is on. A CPU surface given a lensed material still gets the system frost,
+without its lens and rim.
+
+**Measured** (`examples/backdrop_measure.rs`, 2026-11-08, this PC, release): a 360×420 One UI
+panel, 10 s settle, 30 s idle, then 10 s of the app moving its own window along a circle every
+display frame. Sampled from outside; drag CPU and frame time are this process's own (DWM's
+work is not in them).
+
+| Configuration | Private MB | Idle wakes / 30 s | Idle CPU | Drag CPU | Drag move median / p95 ms | GPU drivers loaded |
+| --- | --- | --- | --- | --- | --- | --- |
+| CPU, fill (before) | **8.3** | **4** | 0.000 % | 3.0 % | 0.170 / 0.226 | none |
+| CPU, system backdrop | **8.4** | **5** | 0.000 % | 8.3 % | 0.397 / 0.475 | none |
+| GPU, in-process glass (frost only) | **258.3** | **1958** | 0.000 % | 16.7 % | 0.880 / 2.655 | `amdxc64`, `amdxx64`, `atidxx64`, `nvgpucomp64`, `nvwgf2umx` (+ `d3d12`) |
+
+Both CPU rows load the same graphics modules (`d2d1`, `d3d10warp`, `d3d11`, `dxgi`, `dxcore`,
+`dcomp`, `coremessaging`).
+
+- **Free when idle and in memory.** The frost adds no private memory to speak of and no idle
+  wakes: DWM does the blur, and nothing in this process runs while nothing moves. The GPU glass
+  that would otherwise draw this frost costs a wgpu device (~260 MB private, ~2,000 driver wakes
+  in 30 s, both vendors' drivers).
+- **A move costs one more window move.** The frost window moves with a position-only
+  `UpdateLayeredWindow` (0.2 ms; `SetWindowPos` was 0.5 ms and doubled the drag again,
+  `backdrop_spike movebench`), so a dragged frosted surface spends 0.4 ms a move against 0.17,
+  still half the GPU path's CPU.
+- **The modules.** `dcomp.dll` and `coremessaging.dll` were already loaded by a CPU surface; the
+  compositor adds no vendor driver, no `d3d12.dll` and no `windows.ui.dll`.
+
+**What else was tried** (`examples/backdrop_spike.rs`, each over this process's own stripes):
+
+- *The host backdrop in the surface's own window*, a `DesktopWindowTarget` with `isTopmost =
+  false`: DWM composes a layered window's visuals over its pixels anyway, and the blur is opaque,
+  so the content vanished. Hence the separate frost window.
+- *`DWMWA_SYSTEMBACKDROP_TYPE` (transient acrylic)* on a never-activated popup: only the grey
+  fallback. System backdrops show on active windows only, and are whole-window shapes; they fit
+  an app window's own background, not popups, bars or widgets.
+- *`SetWindowCompositionAttribute` acrylic accent* (undocumented): it does blur under an inactive
+  popup, but only the whole window rect, unrounded. Not used.
+
+**Limits.** No lens, rim or liquid merging (GPU or an engine); separate shapes don't fuse
+(`set_glass_group` shows the first body). The blur radius is the system's, not `blur`. A fade
+(`set_alpha`) fades the surface, not its frost (a host backdrop under partial opacity drops its
+blur). Moves are two window updates in one turn of the loop, placed before the surface moves, as
+the engine's windows are; nothing makes them one composition frame. The frost blurs what is behind the frost
+window, which is what is behind the surface.
 
 ## Linux backend
 

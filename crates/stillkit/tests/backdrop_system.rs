@@ -158,6 +158,31 @@ fn auto_goes_gpu_only_for_glass_no_cpu_backdrop_draws_in_full() {
 }
 
 #[test]
+fn a_desktop_surface_keeps_its_frost_inside_the_desktop_band() {
+    use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
+    // SAFETY: a lookup of Explorer's desktop window.
+    let Ok(progman) = (unsafe { FindWindowW(windows::core::w!("Progman"), None) }) else {
+        eprintln!("no Explorer desktop here");
+        return;
+    };
+    let system = system();
+    if !system.available() {
+        eprintln!("the system backdrop is unavailable here");
+        return;
+    }
+    let mut ui = Ui::new().unwrap();
+    let mut s = Surface::new(Kind::DesktopChild { parent: progman }, "desktop frost", Role::Pane).unwrap();
+    s.present(&mut ui, (140, 160), SIZE, body()).unwrap();
+    s.show();
+    s.set_glass(glass(Rect::new(0.0, 0.0, 200.0, 120.0)));
+    let frost = system.window(s.hwnd()).expect("a frost window");
+    assert_eq!(under(s.hwnd()), Some(frost));
+    assert!(s.desktop_order_valid(), "the frost counts as part of the band");
+    assert!(!s.keep_above_desktop().unwrap(), "no repair needed");
+    assert_eq!(under(s.hwnd()), Some(frost));
+}
+
+#[test]
 fn app_windows_never_get_the_system_frost() {
     let app = Surface::new(Kind::App { min: (200, 120) }, "app", Role::Window).unwrap();
     assert!(!app.glass_available(), "a CPU app window draws opaque");
