@@ -8,9 +8,7 @@ mod editors;
 #[allow(dead_code)]
 #[path = "../examples/layout_support/mod.rs"]
 mod layout;
-#[allow(dead_code)]
-#[path = "../examples/kit_overlays.rs"]
-mod overlays;
+use editors::overlays;
 use std::time::Duration;
 use stillkit::el::{Runtime, col, text};
 use stillkit_kit::{Disclosure, Stepper};

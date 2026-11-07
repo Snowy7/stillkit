@@ -381,3 +381,29 @@ cargo test -p stillkit-kit --test polish export_scale_audit -- --ignored
 The audit export is explicitly invoked because it writes inspection artifacts;
 the two normal polish tests verify range limits, control height, value centring
 and stable disclosure alignment across all 16 theme compositions at both scales.
+
+
+Visual verification: opened the baseline sheets and old native kit references,
+then every final sheet through labelled contact sheets (128 exports), with native
+pixel crops of Stepper/Disclosure, Sidebar, TextArea, palette search and Toast.
+Full-resolution Studio layout and Solid overlay sheets were also opened to check
+the overview reductions. Compared before/after: numeric buttons now use aligned
+vector marks; group/content text follows its title grid; multiline wells retain
+finite card corners; palette search glyphs clear the editor focus ring. Badge,
+menu row geometry and ink hierarchy retain the reference treatment. No additional
+obvious snapping drift was found at the inspected integer device scales.
+
+Inspection artifacts remain under `D:\stillkit-targets\S\audit-before`,
+`audit-step1`, `audit-final` and `audit-contact`. The tracked changes are all 16
+`kit-*`, 12 `layout-*`, 12 `text-*`, 12 `overlays-*` goldens, the checkbox motion
+strip (themed label gap), and refreshed `overview.png`/`overlays-overview.png`.
+
+
+Validation used `CARGO_TARGET_DIR=D:\stillkit-targets\S` and the LLVM dev
+backend throughout. The final full test run passed 47 tests (plus the explicitly
+invoked audit exporter); Linux and aarch64 macOS cargo checks passed. Linux emits
+8 pre-existing dead-code warnings in stillkit's compile-only accessibility path.
+No changes were made under `crates/stillkit`, and no branch was pushed or merged.
+
+Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
+reuses the text gallery's overlay module to avoid duplicate module loading.

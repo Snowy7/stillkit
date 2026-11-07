@@ -5,7 +5,7 @@ use stillkit::{Image, Theme};
 use stillkit_kit::*;
 #[path = "kit_overlays.rs"]
 #[allow(dead_code)]
-mod overlays;
+pub(crate) mod overlays;
 pub use overlays::themes;
 #[derive(Default)]
 pub struct State {
