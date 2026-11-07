@@ -5,13 +5,13 @@ use anyhow::{Context, Result, bail};
 pub enum Kind {
     /// Parentless popup fallback (xdg toplevel). Use `Surface::popup` with a parent
     /// for a real xdg popup. Activation always belongs to the compositor.
-    Popup { activate: bool },
+    Popup { #[doc = "Whether the popup requests activation."] activate: bool },
     /// Layer-shell top-layer surface; unavailable on GNOME.
     Bar,
     /// Layer-shell background surface; `parent` is retained for source compatibility.
-    DesktopChild { parent: usize },
+    DesktopChild { #[doc = "Native parent handle retained for desktop surface compatibility."] parent: usize },
     /// A normal xdg toplevel with client-side chrome. Minimum size is logical pixels.
-    App { min: (u32, u32) },
+    App { #[doc = "Minimum logical window size."] min: (u32, u32) },
 }
 
 /// Identifies a surface in [`Event`]s.
@@ -19,9 +19,13 @@ pub enum Kind {
 pub struct SurfaceId(isize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Button.
 pub enum Button {
+    /// Left.
     Left,
+    /// Right.
     Right,
+    /// Middle.
     Middle,
 }
 
@@ -39,13 +43,19 @@ pub struct Pointer {
 pub enum Event {
     /// A temporary animation requested another frame; no timer remains once it settles.
     Frame,
+    /// Move.
     Move(Pointer),
+    /// Leave.
     Leave,
     /// Positive delta scrolls up; position uses the same coordinates as other pointer events.
     Wheel(Pointer, i16),
+    /// Capture lost.
     CaptureLost,
+    /// Press.
     Press(Pointer, Button),
+    /// Release.
     Release(Pointer, Button),
+    /// Double click.
     DoubleClick(Pointer, Button),
     /// A key went down (a virtual-key code).
     Key(u16),
@@ -57,8 +67,11 @@ pub enum Event {
     Invoke(HitId),
     /// Assistive technology moved the focus to a hit item.
     Focus(HitId),
+    /// Dpi changed.
     DpiChanged(u32),
+    /// Visibility changed.
     VisibilityChanged,
+    /// Cancelled.
     Cancelled,
     /// Windowless RichEdit changed text, selection or caret.
     TextChanged,
@@ -117,6 +130,7 @@ enum Shell {
     Layer(layer_surface::ZwlrLayerSurfaceV1),
 }
 struct Native {
+    a11y: super::a11y::A11y,
     surface: wl_surface::WlSurface,
     shell: Shell,
     configured: bool,
@@ -257,6 +271,7 @@ pub fn next_event() -> Option<(SurfaceId, Event)> {
             }
             r.queue.dispatch_pending(&mut r.state)?;
         }
+        r.state.accessibility_events();
         Ok(r.state.events.pop_front())
     })
     .unwrap_or_else(|e| {
@@ -275,18 +290,23 @@ pub(super) fn wait() {
     if let Err(e) = runtime(|r| {
         loop {
             r.queue.dispatch_pending(&mut r.state)?;
+            r.state.accessibility_events();
             if !r.state.events.is_empty() {
                 return Ok(());
             }
             r.conn.flush()?;
             let Some(guard) = r.queue.prepare_read() else { continue };
             let timer = super::wake::armed();
-            let mut fds = [
+            let mut fds = vec![
                 libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: timer.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             ];
-            // SAFETY: two initialized pollfds (a negative fd is ignored); no timeout.
-            if unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) } < 0 {
+            fds.extend(r.state.windows.values().filter_map(|n| {
+                let fd = n.a11y.fd();
+                (fd >= 0).then_some(libc::pollfd { fd, events: libc::POLLIN, revents: 0 })
+            }));
+            // SAFETY: fds contains initialized pollfds; no timeout or idle timer.
+            if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, -1) } < 0 {
                 continue;
             }
             if fds[0].revents & libc::POLLIN != 0 {
@@ -320,6 +340,7 @@ pub(super) fn modifiers() -> crate::el::Modifiers {
 pub(crate) fn queue_for(id: SurfaceId, event: Event) {
     queue_event(id.0 as usize, event);
 }
+/// Queue event.
 pub fn queue_event(id: usize, event: Event) {
     let _ = runtime(|r| {
         r.state.events.push_back((SurfaceId(id as isize), event));
@@ -339,6 +360,7 @@ pub struct Surface {
     size: (u32, u32),
 }
 impl Surface {
+    /// Creates a new instance.
     pub fn new(kind: Kind, name: &str, role: accesskit::Role) -> Result<Self> {
         Self::create(kind, name, role, None)
     }
@@ -355,7 +377,7 @@ impl Surface {
     fn create(
         kind: Kind,
         name: &str,
-        _: accesskit::Role,
+        role: accesskit::Role,
         parent: Option<(SurfaceId, (i32, i32))>,
     ) -> Result<Self> {
         runtime(|r| {
@@ -427,6 +449,7 @@ impl Surface {
             r.state.windows.insert(
                 id,
                 Native {
+                    a11y: super::a11y::A11y::new(role, name),
                     surface,
                     shell,
                     configured: false,
@@ -458,9 +481,11 @@ impl Surface {
             })
         })
     }
+    /// New deferred accessibility.
     pub fn new_deferred_accessibility(k: Kind, n: &str, r: accesskit::Role) -> Result<Self> {
         Self::new(k, n, r)
     }
+    /// Present.
     pub fn present(
         &mut self,
         ui: &mut Ui,
@@ -468,6 +493,10 @@ impl Surface {
         size: (u32, u32),
         list: DisplayList,
     ) -> Result<bool> {
+        runtime(|r| {
+            r.state.windows.get_mut(&self.id).context("surface released")?.a11y.update(&list.hits, list.focus);
+            Ok(())
+        })?;
         let resized = self.size != size;
         #[cfg(feature = "gpu")]
         let glass_changed = self.mode == crate::platform::Render::Gpu
@@ -670,15 +699,19 @@ impl Surface {
         }
         Ok(self.canvas.as_ref().context("no CPU frame")?.image())
     }
+    /// Shown.
     pub fn shown(&self) -> &DisplayList {
         &self.shown
     }
+    /// Stable identity used to match this item across frames.
     pub fn id(&self) -> SurfaceId {
         self.id
     }
+    /// Origin.
     pub fn origin(&self) -> (i32, i32) {
         self.origin
     }
+    /// Scale.
     pub fn scale(&self) -> f32 {
         runtime(|r| Ok(r.state.windows[&self.id].scale as f32)).unwrap_or(1.0)
     }
@@ -730,6 +763,7 @@ impl Surface {
             Ok(())
         });
     }
+    /// Animation frames.
     pub fn animation_frames(&self, duration: Duration) -> AnimationFrames {
         let a = Rc::new(Cell::new(true));
         let _ = runtime(|r| {
@@ -746,6 +780,7 @@ impl Surface {
         });
         AnimationFrames(a)
     }
+    /// Sets alpha.
     pub fn set_alpha(&mut self, alpha: u8) -> Result<()> {
         if self.alpha != alpha {
             self.alpha = alpha;
@@ -771,18 +806,23 @@ impl Surface {
         }
         Ok(())
     }
+    /// Move to.
     pub fn move_to(&mut self, _: (i32, i32)) -> Result<()> {
         bail!("Wayland does not permit absolute window positioning")
     }
-    /// No accessibility tree on Linux yet: values are kept nowhere.
-    pub fn set_accessibility_semantics(&self, _: Vec<(crate::HitId, crate::Semantics)>) {}
-    /// No accessibility tree on Linux yet: there are no rich requests.
-    pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
-        None
+    /// Publishes semantic values only while an assistive client is active.
+    pub fn set_accessibility_semantics(&self, semantics: Vec<(crate::HitId, crate::Semantics)>) {
+        let _ = runtime(|r| { if let Some(n) = r.state.windows.get_mut(&self.id) { n.a11y.semantics(semantics); } Ok(()) });
     }
+    /// Takes a rich action accompanying an accessibility Invoke event.
+    pub fn take_accessibility_action(&self, hit: crate::HitId) -> Option<crate::AccessibilityAction> {
+        runtime(|r| Ok(r.state.windows.get_mut(&self.id).and_then(|n| n.a11y.take(hit)))).ok().flatten()
+    }
+    /// Sets glass.
     pub fn set_glass(&self, glass: Option<crate::Glass>) {
         self.set_glass_group(glass.as_slice(), 16.0);
     }
+    /// Sets glass style.
     pub fn set_glass_style(&self, style: crate::glass::GlassStyle) {
         #[cfg(feature = "gpu")]
         {
@@ -822,6 +862,7 @@ impl Surface {
         surface.mode = mode.resolve(crate::glass::wanted(), crate::glass::cpu_backdrop());
         Ok(surface)
     }
+    /// Render.
     pub fn render(&self) -> crate::platform::Render {
         self.mode
     }
@@ -829,6 +870,7 @@ impl Surface {
     pub fn glass_available(&self) -> bool {
         self.mode == crate::platform::Render::Gpu
     }
+    /// Sets glass group.
     pub fn set_glass_group(&self, glasses: &[crate::Glass], spacing: f32) {
         #[cfg(feature = "gpu")]
         {
@@ -889,6 +931,7 @@ impl Surface {
             _ => {}
         }
     }
+    /// Hide.
     pub fn hide(&self) {
         let _ = runtime(|r| {
             if let Some(n) = r.state.windows.get_mut(&self.id) {
@@ -900,6 +943,7 @@ impl Surface {
             Ok(())
         });
     }
+    /// Release.
     pub fn release(&mut self) {
         let _ = runtime(|r| {
             r.state.windows.remove(&self.id);
@@ -907,15 +951,18 @@ impl Surface {
             Ok(())
         });
     }
+    /// Discard events.
     pub fn discard_events(&self) {
         let _ = runtime(|r| {
             r.state.events.retain(|(id, _)| *id != self.id);
             Ok(())
         });
     }
+    /// Takes focus from the pending state.
     pub fn take_focus(&self) -> &'static str {
         "Wayland focus is compositor controlled"
     }
+    /// Sets chrome.
     pub fn set_chrome(&self, parts: &[(crate::Rect, super::app_window::Chrome)]) {
         let _ = runtime(|r| {
             if let Some(n) = r.state.windows.get_mut(&self.id) {
@@ -924,6 +971,7 @@ impl Surface {
             Ok(())
         });
     }
+    /// Minimize.
     pub fn minimize(&self) -> Result<()> {
         runtime(|r| {
             if let Shell::Top(_, t) = &r.state.windows[&self.id].shell {
@@ -933,6 +981,7 @@ impl Surface {
             Ok(())
         })
     }
+    /// Toggle maximize.
     pub fn toggle_maximize(&self) -> Result<()> {
         runtime(|r| {
             let n = r
@@ -963,6 +1012,7 @@ impl Surface {
             Ok(())
         })
     }
+    /// Start resize.
     pub fn start_resize(&self, edge: xdg_toplevel::ResizeEdge) -> Result<()> {
         runtime(|r| {
             if let (Some(seat), Shell::Top(_, top)) =
@@ -1276,6 +1326,11 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
     }
 }
 impl State {
+    fn accessibility_events(&mut self) {
+        for (id, native) in &mut self.windows {
+            self.events.extend(native.a11y.drain().into_iter().map(|event| (*id, event)));
+        }
+    }
     fn pointer_event(&mut self, e: impl FnOnce(Pointer) -> Event) {
         if let Some(id) = self.pointer_focus {
             let s = self.windows.get(&id).map_or(1, |n| n.scale) as f32;
@@ -1401,9 +1456,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                 a.xkb = super::keyboard::Keyboard::new(fd, size as usize);
             }
             wl_keyboard::Event::Enter { surface, .. } => {
-                a.key_focus = surface.data::<SurfaceId>().copied()
+                a.key_focus = surface.data::<SurfaceId>().copied();
+                if let Some(n) = a.key_focus.and_then(|id| a.windows.get_mut(&id)) { n.a11y.focus(true); }
             }
             wl_keyboard::Event::Leave { .. } => {
+                if let Some(n) = a.key_focus.and_then(|id| a.windows.get_mut(&id)) { n.a11y.focus(false); }
                 a.key_focus = None;
             }
             wl_keyboard::Event::Modifiers {

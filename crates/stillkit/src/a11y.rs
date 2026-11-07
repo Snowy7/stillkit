@@ -14,14 +14,22 @@ use crate::scene::{Hit, HitId};
 /// Values and operations that a name alone cannot describe to assistive technology.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Semantics {
+    /// Range.
     Range {
+        /// Current value.
         value: f64,
+        /// Minimum logical window size.
         min: f64,
+        /// Max.
         max: f64,
+        /// Step.
         step: f64,
     },
+    /// Text.
     Text(Arc<str>),
+    /// Reorder.
     Reorder,
+    /// Status.
     Status(Arc<str>),
     /// What a hit item says beyond its name, read-only; it can sit beside any other entry
     /// for the same hit (a range with its value as text).
@@ -34,15 +42,18 @@ pub enum Semantics {
 /// A text field's text laid out ([`Semantics::Field`]).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FieldText {
+    /// Lines.
     pub lines: Vec<TextLine>,
     /// Where the selection started, and the caret: (line, character) in `lines`.
     pub anchor: (usize, usize),
+    /// Caret.
     pub caret: (usize, usize),
 }
 
 /// One visual line of a field ([`FieldText`]).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TextLine {
+    /// Text content.
     pub text: Arc<str>,
     /// Where it is, in the surface's pixels.
     pub rect: crate::Rect,
@@ -72,10 +83,15 @@ pub struct Detail {
 /// Rich actions remain owned data until the surface's UI thread consumes them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AccessibilityAction {
+    /// Set number.
     SetNumber(f64),
+    /// Set text.
     SetText(String),
+    /// Increment.
     Increment,
+    /// Decrement.
     Decrement,
+    /// Custom.
     Custom(i32),
 }
 
@@ -83,11 +99,8 @@ pub(crate) const ROOT: NodeId = NodeId(0);
 pub(crate) const REORDER_BASE: u64 = 1 << 40;
 const STATUS_BASE: u64 = 1 << 48;
 /// Text runs: a field's lines, 4096 a field at most.
-// Linux has no adapter yet: the tree is built on Windows only.
-#[cfg_attr(not(windows), allow(dead_code))]
 const RUN_BASE: u64 = 1 << 44;
 
-#[cfg_attr(not(windows), allow(dead_code))]
 fn run_node(hit: HitId, line: usize) -> NodeId {
     NodeId(RUN_BASE + u64::from(hit) * 4096 + line.min(4095) as u64)
 }
@@ -294,7 +307,6 @@ impl Snapshot {
 
 /// One line of a field as an AccessKit text run: its characters' UTF-8 lengths, places and
 /// widths, and where its words start (the first 256 characters).
-#[cfg_attr(not(windows), allow(dead_code))]
 fn text_run(l: &TextLine) -> Node {
     use unicode_segmentation::UnicodeSegmentation;
     let mut node = Node::new(Role::TextRun);
