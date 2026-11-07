@@ -1,0 +1,32 @@
+# Liquid Glass for stillkit: liquid-rust by al1h3n (MIT OR Apache-2.0), adopted with the changes
+# mypaper made to it. See CREDITS.md. The GPU lives here and only here: stillkit's UI crates
+# stay CPU-only, and apps run this renderer in a separate glass host process.
+[package]
+name = "stillkit-glass"
+description = "Apple-style Liquid Glass on the GPU (wgpu): refraction, dispersion, liquid merging and morphs."
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+publish = false
+
+[dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+glam = { version = "0.34", features = ["bytemuck"] }
+slotmap = "1.1.1"
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl"] }
+
+# One native backend per OS, nothing else compiled.
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["dx12"] }
+[target.'cfg(target_vendor = "apple")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["metal"] }
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["vulkan"] }
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
