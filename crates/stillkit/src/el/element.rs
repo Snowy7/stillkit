@@ -17,7 +17,9 @@ pub type Key = Arc<str>;
 /// A length in design pixels, or one read from the theme ([`super::token`]).
 #[derive(Clone, Copy)]
 pub enum Len {
+    /// Px.
     Px(f32),
+    /// Theme.
     Theme(fn(&Theme) -> f32),
 }
 
@@ -40,11 +42,14 @@ impl From<f32> for Len {
 /// A colour, fixed or read from the theme's palette ([`super::token`]).
 #[derive(Clone, Copy)]
 pub enum Paint {
+    /// Rgba.
     Rgba(Rgba),
+    /// Theme.
     Theme(fn(&Theme) -> Rgba),
 }
 
 impl Paint {
+    /// Resolve.
     pub fn resolve(self, theme: &Theme) -> Rgba {
         match self {
             Self::Rgba(c) => c,
@@ -63,11 +68,14 @@ impl From<Rgba> for Paint {
 /// motion tokens ([`super::token::MOTION_LAYOUT`]...).
 #[derive(Clone, Copy)]
 pub enum Motion {
+    /// Spring.
     Spring(Spring),
+    /// Theme.
     Theme(fn(&Theme) -> Spring),
 }
 
 impl Motion {
+    /// Resolve.
     pub fn resolve(self, theme: &Theme) -> Spring {
         match self {
             Self::Spring(s) => s,
@@ -161,20 +169,35 @@ impl Tx {
 pub struct KeyCode(pub u16);
 
 impl KeyCode {
+    /// Backspace.
     pub const BACKSPACE: Self = Self(0x08);
+    /// Tab.
     pub const TAB: Self = Self(0x09);
+    /// Enter.
     pub const ENTER: Self = Self(0x0D);
+    /// Escape.
     pub const ESCAPE: Self = Self(0x1B);
+    /// Space.
     pub const SPACE: Self = Self(0x20);
+    /// Page up.
     pub const PAGE_UP: Self = Self(0x21);
+    /// Page down.
     pub const PAGE_DOWN: Self = Self(0x22);
+    /// End.
     pub const END: Self = Self(0x23);
+    /// Home.
     pub const HOME: Self = Self(0x24);
+    /// Left.
     pub const LEFT: Self = Self(0x25);
+    /// Up.
     pub const UP: Self = Self(0x26);
+    /// Right.
     pub const RIGHT: Self = Self(0x27);
+    /// Down.
     pub const DOWN: Self = Self(0x28);
+    /// Insert.
     pub const INSERT: Self = Self(0x2D);
+    /// Delete.
     pub const DELETE: Self = Self(0x2E);
 
     /// A letter or digit key (`KeyCode::of('A')`): its virtual-key code is the upper-case
@@ -187,17 +210,24 @@ impl KeyCode {
 /// The modifier keys held with a key ([`Tx::modifiers`], [`super::Runtime::key_with`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Modifiers {
+    /// Shift.
     pub shift: bool,
+    /// Ctrl.
     pub ctrl: bool,
+    /// Alt.
     pub alt: bool,
     /// The Windows or Super key.
     pub meta: bool,
 }
 
 impl Modifiers {
+    /// None.
     pub const NONE: Self = Self { shift: false, ctrl: false, alt: false, meta: false };
+    /// Shift.
     pub const SHIFT: Self = Self { shift: true, ..Self::NONE };
+    /// Ctrl.
     pub const CTRL: Self = Self { ctrl: true, ..Self::NONE };
+    /// Alt.
     pub const ALT: Self = Self { alt: true, ..Self::NONE };
 }
 
@@ -219,7 +249,9 @@ impl std::ops::BitOr for Modifiers {
 /// element's built-in keys (a range, a group, a scroll view) and then its parent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Handled {
+    /// Yes.
     Yes,
+    /// No.
     No,
 }
 
@@ -232,7 +264,9 @@ impl From<bool> for Handled {
 /// A direction: a scroll view's ([`El::scroll`]) or a focus group's ([`El::focus_group`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Axis {
+    /// Horizontal.
     Horizontal,
+    /// Vertical.
     Vertical,
 }
 
@@ -268,18 +302,26 @@ impl ArcStart {
 /// Where children sit across a row or column (CSS `align-items`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align {
+    /// Start.
     Start,
+    /// Center.
     Center,
+    /// End.
     End,
+    /// Stretch.
     Stretch,
 }
 
 /// How children share a row's or column's main axis (CSS `justify-content`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Justify {
+    /// Start.
     Start,
+    /// Center.
     Center,
+    /// End.
     End,
+    /// Between.
     Between,
 }
 
@@ -617,11 +659,13 @@ impl<S> El<S> {
         self
     }
 
+    /// Child.
     pub fn child(mut self, child: El<S>) -> Self {
         self.children.push(child);
         self
     }
 
+    /// Children.
     pub fn children(mut self, children: impl IntoIterator<Item = El<S>>) -> Self {
         self.children.extend(children);
         self
@@ -629,11 +673,13 @@ impl<S> El<S> {
 
     // ---- Size and flex --------------------------------------------------------------------
 
+    /// W.
     pub fn w(mut self, w: impl Into<Len>) -> Self {
         self.sizing.w = Some(Dim::Len(w.into()));
         self
     }
 
+    /// H.
     pub fn h(mut self, h: impl Into<Len>) -> Self {
         self.sizing.h = Some(Dim::Len(h.into()));
         self
@@ -663,21 +709,25 @@ impl<S> El<S> {
         self
     }
 
+    /// Min w.
     pub fn min_w(mut self, v: impl Into<Len>) -> Self {
         self.sizing.min_w = Some(v.into());
         self
     }
 
+    /// Min h.
     pub fn min_h(mut self, v: impl Into<Len>) -> Self {
         self.sizing.min_h = Some(v.into());
         self
     }
 
+    /// Max w.
     pub fn max_w(mut self, v: impl Into<Len>) -> Self {
         self.sizing.max_w = Some(v.into());
         self
     }
 
+    /// Max h.
     pub fn max_h(mut self, v: impl Into<Len>) -> Self {
         self.sizing.max_h = Some(v.into());
         self

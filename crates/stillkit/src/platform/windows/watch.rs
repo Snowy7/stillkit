@@ -25,6 +25,7 @@ pub struct FileWatch {
     stop: Arc<Stop>,
 }
 impl FileWatch {
+    /// Creates a new instance.
     pub fn new(path: &Path, changed: impl Fn() + Send + 'static) -> Result<Self> {
         let parent = path.parent().context("watched file has no parent")?;
         std::fs::create_dir_all(parent)?;

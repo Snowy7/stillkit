@@ -30,25 +30,38 @@ pub const RING: Len = Len::Theme(|t| t.icon_weight * 2.0);
 
 // ---- Radii (design px) ---------------------------------------------------------------------
 
+/// Radius surface.
 pub const RADIUS_SURFACE: Len = Len::Theme(|t| t.radius.surface);
+/// Radius card.
 pub const RADIUS_CARD: Len = Len::Theme(|t| t.radius.card);
+/// Radius small.
 pub const RADIUS_SMALL: Len = Len::Theme(|t| t.radius.small);
 /// The theme's control radius, or a capsule.
 pub const RADIUS_CONTROL: Len = Len::Theme(|t| t.radius.control.unwrap_or(f32::INFINITY));
 
 // ---- Colours -------------------------------------------------------------------------------
 
+/// Label.
 pub const LABEL: Paint = Paint::Theme(|t| t.color.label);
+/// Secondary.
 pub const SECONDARY: Paint = Paint::Theme(|t| t.color.secondary);
+/// Tertiary.
 pub const TERTIARY: Paint = Paint::Theme(|t| t.color.tertiary);
+/// Surface.
 pub const SURFACE: Paint = Paint::Theme(|t| t.color.surface);
+/// Elevated.
 pub const ELEVATED: Paint = Paint::Theme(|t| t.color.elevated);
+/// Card.
 pub const CARD: Paint = Paint::Theme(|t| t.color.card);
 /// The neutral control fill.
 pub const FILL: Paint = Paint::Theme(|t| t.color.fill);
+/// Well.
 pub const WELL: Paint = Paint::Theme(|t| t.color.well);
+/// Separator.
 pub const SEPARATOR: Paint = Paint::Theme(|t| t.color.separator);
+/// Accent.
 pub const ACCENT: Paint = Paint::Theme(|t| t.color.accent);
+/// On accent.
 pub const ON_ACCENT: Paint = Paint::Theme(|t| t.color.on_accent);
 /// A switch's or slider's knob.
 pub const KNOB: Paint = Paint::Theme(|t| t.color.knob);

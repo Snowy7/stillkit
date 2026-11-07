@@ -1,7 +1,9 @@
 use anyhow::{Result, bail};
 #[derive(Debug, Clone, PartialEq)]
+/// Text field.
 pub struct TextField;
 impl TextField {
+    /// Revision.
     pub fn revision(&self) -> u64 {
         unimplemented!("native text input")
     }

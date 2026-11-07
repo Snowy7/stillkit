@@ -1,5 +1,7 @@
 //! CPU rendering and native Wayland surfaces, plus opt-in Vulkan rendering and glass.
+mod a11y;
 pub mod app_window;
+/// Glass services.
 pub mod glass;
 #[cfg(feature = "gpu")]
 pub mod gpu;
@@ -12,21 +14,24 @@ pub mod host;
 mod keyboard;
 pub mod render;
 pub mod screen;
+/// Surface services.
 pub mod surface;
 pub mod text;
 pub mod text_field;
 pub mod timing;
 mod wake;
+/// Layered app services.
 pub mod layered_app {}
+/// Compose services.
 pub mod compose {}
 pub mod modules;
+/// Portable process identity.
 pub mod identity {
-    pub struct Identity;
-    pub fn set_identity(_: Identity) {
-        /* xdg app-id is set per surface. */
-    }
+    pub use crate::identity::{Identity, set_identity};
 }
+/// Watch services.
 pub mod watch {
+    /// File watch.
     pub struct FileWatch;
 }
 pub use render::{Image, Ui};

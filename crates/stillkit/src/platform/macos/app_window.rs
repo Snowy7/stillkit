@@ -13,8 +13,11 @@ use std::cell::RefCell;
 pub enum Chrome {
     /// Drags the window (and double-click zooms), wherever no hit item is under the pointer.
     Caption,
+    /// Minimize.
     Minimize,
+    /// Maximize.
     Maximize,
+    /// Close.
     Close,
 }
 
@@ -22,11 +25,17 @@ pub enum Chrome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Cursor {
     #[default]
+    /// Arrow.
     Arrow,
+    /// Text.
     Text,
+    /// Hand.
     Hand,
+    /// Move.
     Move,
+    /// Resize.
     Resize,
+    /// Resize horizontal.
     ResizeHorizontal,
 }
 

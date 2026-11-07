@@ -50,6 +50,7 @@ pub struct Text {
 }
 
 impl Text {
+    /// Creates a new instance.
     pub fn new() -> anyhow::Result<Self> {
         Ok(Self { cache: HashMap::new(), fonts: HashMap::new(), families: Default::default(), capacity: 512 })
     }
@@ -107,6 +108,7 @@ impl Text {
         &self.cache[&key]
     }
 
+    /// Measures the text in device pixels.
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32) {
         if text.chars().count() == 1 && text.chars().next().and_then(crate::icons::from_system_glyph).is_some() {
             return (style.size, style.size);
@@ -115,10 +117,12 @@ impl Text {
         (l.width, l.height())
     }
 
+    /// Releases cached native text layouts.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
 
+    /// Sets capacity.
     pub fn set_capacity(&mut self, capacity: usize) {
         self.capacity = capacity.max(1);
         self.cache.clear();
@@ -135,10 +139,12 @@ impl Text {
         })
     }
 
+    /// Has family.
     pub fn has_family(&self, name: &str) -> bool {
         SYSTEM_NAMES.contains(&name) || self.family_set().contains(name)
     }
 
+    /// Families.
     pub fn families(&self) -> Vec<String> {
         let mut names: Vec<String> = self.family_set().iter().cloned().collect();
         names.push(SYSTEM.into());
@@ -172,6 +178,7 @@ impl Text {
         }
     }
 
+    /// Lines.
     pub fn lines(&mut self, text: &str, style: &TextStyle, width: f32, max: usize) -> Vec<Arc<str>> {
         let mut lines = Vec::new();
         let mut line = String::new();

@@ -11,8 +11,8 @@
 //! - **focus rings** show only after the keyboard moved focus (`focus_visible`), never on a
 //!   click.
 
-#[path = "interaction_motion.rs"]
-pub mod motion;
+/// Compatibility path for interaction timing; prefer `crate::interaction_motion`.
+pub use crate::interaction_motion as motion;
 
 use crate::focus;
 use crate::geom::{Point, Rgba};
@@ -22,9 +22,13 @@ use crate::surface::{Button, Event};
 /// What a control looks like now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
+    /// Rest.
     Rest,
+    /// Hover.
     Hover,
+    /// Pressed.
     Pressed,
+    /// Disabled.
     Disabled,
 }
 
@@ -59,9 +63,11 @@ pub enum Response {
 /// Pointer and keyboard state over one surface's hit items.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Interaction {
+    /// The hit under the pointer.
     pub hover: Option<HitId>,
     /// Pressed and not yet released (shown pressed only while the pointer is over it).
     pub pressed: Option<HitId>,
+    /// The hit with keyboard focus.
     pub focus: Option<HitId>,
     /// The keyboard moved the focus: draw its ring.
     pub focus_visible: bool,

@@ -36,10 +36,13 @@ pub fn set_interaction_motion(motion: Option<InteractionTimings>) {
 /// Optional shell-configured opening motion. Unset keeps the kit's existing menu behavior.
 #[derive(Debug, Clone, Copy)]
 pub struct MenuMotion {
+    /// Timing.
     pub timing: crate::transition::Timing,
+    /// Style.
     pub style: crate::reveal::Reveal,
 }
 
+/// Sets open motion.
 pub fn set_open_motion(motion: Option<MenuMotion>) {
     OPEN_MOTION.with(|value| value.set(motion));
 }
@@ -52,23 +55,33 @@ pub fn set_style(tokens: Option<Tokens>) {
 /// One item of a menu; `C` is what choosing it does.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entry<C> {
+    /// Separator.
     Separator,
+    /// Action.
     Action {
+        /// Text announced to assistive technology.
         label: String,
+        /// Command.
         command: C,
         /// `None` for a plain item, `Some(on)` for a check item.
         checked: Option<bool>,
+        /// Whether the control accepts interaction.
         enabled: bool,
     },
+    /// Submenu.
     Submenu {
+        /// Text announced to assistive technology.
         label: String,
+        /// Items.
         items: Vec<Entry<C>>,
     },
     /// An action or a submenu with an icon in the leading column (where a check mark goes). On a
     /// check item the icon stands in for the check mark and shows only while it is on (a radio
     /// dot, say).
     Iconic {
+        /// Icon.
         icon: MenuIcon,
+        /// Item.
         item: Box<Entry<C>>,
     },
 }
@@ -160,6 +173,7 @@ impl<C> Entry<C> {
         }
     }
 
+    /// Text announced to assistive technology.
     pub fn label(&self) -> &str {
         match self.plain() {
             Self::Action { label, .. } | Self::Submenu { label, .. } => label,
@@ -174,8 +188,11 @@ pub type Edges = (i32, i32, i32, i32);
 pub use crate::platform::current::screen::{Screen, screen_at};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Row.
 pub struct Row {
+    /// Top.
     pub top: f32,
+    /// Height in device pixels.
     pub height: f32,
     /// The label's measured size.
     pub label: (f32, f32),
@@ -184,12 +201,15 @@ pub struct Row {
 /// A panel's geometry in device pixels, relative to the panel's body.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
+    /// Width in device pixels.
     pub width: f32,
+    /// Height in device pixels.
     pub height: f32,
     /// One per item, top to bottom.
     pub rows: Vec<Row>,
     /// The check mark's and the chevron's measured sizes.
     pub check: (f32, f32),
+    /// Chevron.
     pub chevron: (f32, f32),
     /// Device pixels per design pixel.
     pub scale: f32,
@@ -585,6 +605,7 @@ impl<C: Clone> Menu<C> {
         self.presentation = Some((tokens, opening));
     }
 
+    /// Sets interaction timings.
     pub fn set_interaction_timings(
         &mut self,
         hover: crate::transition::Timing,
@@ -659,6 +680,7 @@ impl<C: Clone> Menu<C> {
         while self.close_innermost() {}
     }
 
+    /// Whether open.
     pub fn is_open(&self) -> bool {
         !self.panels.is_empty()
     }

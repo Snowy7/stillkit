@@ -30,11 +30,15 @@ use crate::theme::{TextRole, Theme};
 
 /// One display list being built.
 pub struct Frame<'a> {
+    /// Text content.
     pub text: &'a mut Text,
+    /// Theme.
     pub theme: &'a Theme,
     /// Device px per design px.
     pub s: f32,
+    /// List.
     pub list: DisplayList,
+    /// Input.
     pub input: &'a Interaction,
     motion: Option<&'a crate::interact::motion::InteractionMotion>,
 }
@@ -57,10 +61,13 @@ pub enum ButtonKind {
 /// What leads a row.
 #[derive(Debug, Clone)]
 pub enum Lead {
+    /// None.
     None,
+    /// Icon.
     Icon(Icon),
     /// An icon in a filled circle (Control Center, settings lists); accent when `on`.
     Badge(Icon, bool),
+    /// Image.
     Image(Arc<crate::Image>),
     /// A letter in a circle, for an app with no icon.
     Monogram(char),
@@ -69,10 +76,15 @@ pub enum Lead {
 /// What ends a row.
 #[derive(Debug, Clone)]
 pub enum Accessory<'a> {
+    /// None.
     None,
+    /// Chevron.
     Chevron,
+    /// Check.
     Check,
+    /// Text.
     Text(&'a str),
+    /// Switch.
     Switch(bool),
     /// A small icon button with its own hit (a dismiss ×).
     Button(HitId, Icon, &'a str),
@@ -81,12 +93,19 @@ pub enum Accessory<'a> {
 /// A list row: lead, title and subtitle, accessory. The row is one button.
 #[derive(Debug, Clone)]
 pub struct Row<'a> {
+    /// Stable identity used to match this item across frames.
     pub id: HitId,
+    /// Lead.
     pub lead: Lead,
+    /// Title.
     pub title: &'a str,
+    /// Subtitle.
     pub subtitle: Option<&'a str>,
+    /// Accessory.
     pub accessory: Accessory<'a>,
+    /// Selected.
     pub selected: bool,
+    /// Whether the control accepts interaction.
     pub enabled: bool,
 }
 
@@ -94,12 +113,19 @@ pub struct Row<'a> {
 /// optional "more" chevron of its own.
 #[derive(Debug, Clone)]
 pub struct Tile<'a> {
+    /// Stable identity used to match this item across frames.
     pub id: HitId,
+    /// Icon.
     pub icon: Icon,
+    /// Title.
     pub title: &'a str,
+    /// Subtitle.
     pub subtitle: &'a str,
+    /// On.
     pub on: bool,
+    /// Whether the control accepts interaction.
     pub enabled: bool,
+    /// More.
     pub more: Option<HitId>,
 }
 
@@ -107,6 +133,7 @@ pub struct Tile<'a> {
 pub const NONE: HitId = 0;
 
 impl<'a> Frame<'a> {
+    /// Creates a new instance.
     pub fn new(text: &'a mut Text, theme: &'a Theme, s: f32, input: &'a Interaction) -> Self {
         Self {
             text,
@@ -129,6 +156,7 @@ impl<'a> Frame<'a> {
         (v * self.s).round()
     }
 
+    /// Font.
     pub fn font(&self, role: TextRole) -> TextStyle {
         self.theme.font.style(role, self.s)
     }
@@ -138,10 +166,12 @@ impl<'a> Frame<'a> {
         self.theme.font.line(role, self.s)
     }
 
+    /// Push.
     pub fn push(&mut self, op: Op) {
         self.list.ops.push(op);
     }
 
+    /// Fill.
     pub fn fill(&mut self, rect: Rect, radius: f32, color: Rgba) {
         self.push(Op::Fill {
             rect,
@@ -150,6 +180,7 @@ impl<'a> Frame<'a> {
         });
     }
 
+    /// Hit.
     pub fn hit(
         &mut self,
         id: HitId,
@@ -173,6 +204,7 @@ impl<'a> Frame<'a> {
         });
     }
 
+    /// State.
     pub fn state(&self, id: HitId, enabled: bool) -> State {
         if id == NONE {
             return State::Rest;
@@ -277,6 +309,7 @@ impl<'a> Frame<'a> {
         rect.inflate(-self.px(self.theme.metrics.pad))
     }
 
+    /// Separator.
     pub fn separator(&mut self, left: f32, right: f32, y: f32) {
         let h = 1.0_f32.max(self.s.floor());
         self.fill(
@@ -312,6 +345,7 @@ impl<'a> Frame<'a> {
         self.label_styled(x, y, text, &style, color, max)
     }
 
+    /// Label styled.
     pub fn label_styled(
         &mut self,
         x: f32,
@@ -434,6 +468,7 @@ impl<'a> Frame<'a> {
         )
     }
 
+    /// Button.
     pub fn button(
         &mut self,
         id: HitId,

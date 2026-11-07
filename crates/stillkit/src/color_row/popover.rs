@@ -6,19 +6,27 @@ use crate::controls::{Align, Behavior, Builder, Font, Key, key};
 use crate::{Image, Op, Point, Rect, Rgba, Role, Semantics};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Hsv.
 pub struct Hsv {
+    /// Hue.
     pub hue: f32,
+    /// Saturation.
     pub saturation: f32,
+    /// Current value.
     pub value: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Part.
 pub enum Part {
+    /// Saturation value.
     SaturationValue,
+    /// Hue.
     Hue,
 }
 
 impl Hsv {
+    /// From rgb.
     pub fn from_rgb(rgb: [u8; 3]) -> Self {
         let [r, g, b] = rgb.map(|channel| channel as f32 / 255.0);
         let max = r.max(g).max(b);
@@ -40,6 +48,7 @@ impl Hsv {
         }
     }
 
+    /// Rgb.
     pub fn rgb(self) -> [u8; 3] {
         let hue = self.hue.rem_euclid(360.0) / 60.0;
         let chroma = self.value * self.saturation;
@@ -56,6 +65,7 @@ impl Hsv {
         rgb.map(|channel| ((channel + m) * 255.0).round().clamp(0.0, 255.0) as u8)
     }
 
+    /// Position in device pixels.
     pub fn at(self, part: Part, rect: Rect, point: Point) -> Self {
         let x = ((point.x - rect.left) / rect.width().max(1.0)).clamp(0.0, 1.0);
         match part {

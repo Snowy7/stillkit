@@ -12,12 +12,15 @@ mod scene {
 }
 /// Per-thread text and image services, usable without a Wayland connection.
 pub struct Ui {
+    /// Text content.
     pub text: Text,
 }
 impl Ui {
+    /// Creates a new instance.
     pub fn new() -> Result<Self> {
         Ok(Self { text: Text::new()? })
     }
+    /// Isolated.
     pub fn isolated() -> Result<Self> {
         Self::new()
     }
@@ -25,6 +28,7 @@ impl Ui {
     pub fn set_text_quality(&mut self, _: TextQuality) -> Result<()> {
         Ok(())
     }
+    /// Decode image.
     pub fn decode_image(&self, bytes: &[u8], max: (u32, u32)) -> Result<Image> {
         let decoded = image::load_from_memory(bytes)?
             .thumbnail(max.0, max.1)
@@ -46,6 +50,7 @@ impl Ui {
     }
 }
 impl Image {
+    /// Load.
     pub fn load(ui: &Ui, path: &std::path::Path) -> Result<Self> {
         ui.decode_image(&std::fs::read(path)?, (32768, 32768))
     }
@@ -71,6 +76,7 @@ pub struct Canvas {
     state: RefCell<State>,
 }
 impl Canvas {
+    /// Creates a new instance.
     pub fn new(_: &Ui, width: u32, height: u32) -> Result<Self> {
         ensure!(
             width > 0 && height > 0 && width <= u16::MAX as u32 && height <= u16::MAX as u32,
@@ -87,13 +93,16 @@ impl Canvas {
             }),
         })
     }
+    /// Size.
     pub fn size(&self) -> (u32, u32) {
         let s = self.state.borrow();
         (s.pixels.width, s.pixels.height)
     }
+    /// Image.
     pub fn image(&self) -> Image {
         self.state.borrow().pixels.clone()
     }
+    /// Draws into the current display list.
     pub fn draw(&self, text: &mut Text, list: &DisplayList, area: PixelRect) -> Result<()> {
         let mut s = self.state.borrow_mut();
         ensure!(
@@ -135,6 +144,7 @@ impl Canvas {
         }
         Ok(())
     }
+    /// Reads the requested pixels into the supplied sink.
     pub fn read(&self, area: PixelRect, mut sink: impl FnMut(u32, &[u8])) -> Result<()> {
         let s = self.state.borrow();
         ensure!(

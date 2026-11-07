@@ -4,15 +4,25 @@ use crate::controls::{Align, Behavior, Builder, Font, Glyph, Key, key};
 use crate::icons::Icon;
 use crate::{Rect, Role};
 
+/// Row.
 pub struct Row<'a, A> {
+    /// Key.
     pub key: Key,
+    /// Bounds in device pixels.
     pub rect: Rect,
+    /// Text announced to assistive technology.
     pub label: &'a str,
+    /// Detail.
     pub detail: &'a str,
+    /// Separator.
     pub separator: bool,
+    /// Icon.
     pub icon: Option<Glyph>,
+    /// Select.
     pub select: A,
+    /// Drag.
     pub drag: A,
+    /// Remove.
     pub remove: A,
 }
 

@@ -59,9 +59,11 @@ const TOP_EDGE: f32 = 5.0;
 pub enum Chrome {
     /// Drags the window (and double-click maximizes), wherever no hit item is under the pointer.
     Caption,
+    /// Minimize.
     Minimize,
     /// Also where Windows 11 shows its snap layouts flyout.
     Maximize,
+    /// Close.
     Close,
 }
 
@@ -69,11 +71,17 @@ pub enum Chrome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Cursor {
     #[default]
+    /// Arrow.
     Arrow,
+    /// Text.
     Text,
+    /// Hand.
     Hand,
+    /// Move.
     Move,
+    /// Resize.
     Resize,
+    /// Resize horizontal.
     ResizeHorizontal,
 }
 
@@ -631,10 +639,12 @@ impl Surface {
         scale_of(self.hwnd())
     }
 
+    /// Whether maximized.
     pub fn is_maximized(&self) -> bool {
         zoomed(self.hwnd())
     }
 
+    /// Minimize.
     pub fn minimize(&self) {
         // SAFETY: a standard command to our own window.
         let _ = unsafe {
@@ -647,6 +657,7 @@ impl Surface {
         };
     }
 
+    /// Toggle maximize.
     pub fn toggle_maximize(&self) {
         toggle_maximize(self.hwnd());
     }
@@ -664,6 +675,7 @@ impl Surface {
         self.app().background.set(color);
     }
 
+    /// Sets cursor.
     pub fn set_cursor(&self, cursor: Cursor) {
         self.app().cursor.set(cursor);
     }

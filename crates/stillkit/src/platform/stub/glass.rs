@@ -23,9 +23,13 @@ pub trait Backdrop {
         }
         opened
     }
+    /// Updates the glass optics for this client.
     fn style(&self, _client: HWND, _style: &GlassStyle) {}
+    /// Moves the glass shape and updates its corner radius.
     fn place(&self, client: HWND, shape: Shape, radius: f32);
+    /// Updates the glass material for this client.
     fn material(&self, client: HWND, material: &GlassMaterial);
+    /// Removes the glass belonging to this client.
     fn close(&self, client: HWND);
 }
 

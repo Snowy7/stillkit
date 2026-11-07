@@ -7,6 +7,7 @@
 pub trait Clipboard {
     /// The text on the clipboard, if it holds text.
     fn get(&mut self) -> Option<String>;
+    /// Set.
     fn set(&mut self, text: &str);
 }
 

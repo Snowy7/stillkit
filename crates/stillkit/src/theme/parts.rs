@@ -3,16 +3,26 @@ use super::*;
 /// A surface's optics. `None` tint inherits the palette's surface in either scheme.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Material {
+    /// Glass.
     Glass {
+        /// Clarity.
         clarity: f32,
+        /// Blur.
         blur: f32,
+        /// Refraction.
         refraction: f32,
+        /// Highlight.
         highlight: f32,
+        /// Tint.
         tint: Option<Rgba>,
+        /// Tint alpha.
         tint_alpha: Option<f32>,
+        /// Lensed.
         lensed: bool,
     },
+    /// Fill.
     Fill {
+        /// Tint.
         tint: Option<Rgba>,
     },
 }
@@ -21,6 +31,7 @@ pub enum Material {
 pub type MaterialOverrides = Knobs;
 
 impl Material {
+    /// Liquid.
     pub fn liquid() -> Self {
         Self::Glass {
             clarity: 0.55,
@@ -32,6 +43,7 @@ impl Material {
             lensed: true,
         }
     }
+    /// One ui.
     pub fn one_ui() -> Self {
         Self::Glass {
             clarity: 0.35,
@@ -43,6 +55,7 @@ impl Material {
             lensed: false,
         }
     }
+    /// Fluent.
     pub fn fluent() -> Self {
         Self::Glass {
             clarity: 0.12,
@@ -54,12 +67,15 @@ impl Material {
             lensed: false,
         }
     }
+    /// Solid.
     pub fn solid() -> Self {
         Self::Fill { tint: None }
     }
+    /// Mono.
     pub fn mono() -> Self {
         Self::Fill { tint: None }
     }
+    /// Tint.
     pub fn tint(mut self, value: Rgba) -> Self {
         match &mut self {
             Self::Glass {
@@ -72,30 +88,35 @@ impl Material {
         }
         self
     }
+    /// Clarity.
     pub fn clarity(self, value: f32) -> Self {
         self.overrides(&MaterialOverrides {
             clarity: Some(value),
             ..Default::default()
         })
     }
+    /// Blur.
     pub fn blur(self, value: f32) -> Self {
         self.overrides(&MaterialOverrides {
             blur: Some(value),
             ..Default::default()
         })
     }
+    /// Refraction.
     pub fn refraction(self, value: f32) -> Self {
         self.overrides(&MaterialOverrides {
             refraction: Some(value),
             ..Default::default()
         })
     }
+    /// Highlight.
     pub fn highlight(self, value: f32) -> Self {
         self.overrides(&MaterialOverrides {
             highlight: Some(value),
             ..Default::default()
         })
     }
+    /// Overrides.
     pub fn overrides(self, knobs: &MaterialOverrides) -> Self {
         match self {
             Self::Fill { .. } => self,
@@ -170,12 +191,17 @@ impl Material {
 /// Shape values; cards are derived from surface minus padding, floored at `card_min`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shape {
+    /// Surface.
     pub surface: f32,
+    /// Card min.
     pub card_min: f32,
+    /// Control.
     pub control: Option<f32>,
+    /// Small.
     pub small: f32,
 }
 impl Shape {
+    /// Liquid.
     pub fn liquid() -> Self {
         Self {
             surface: 24.0,
@@ -184,6 +210,7 @@ impl Shape {
             small: 6.0,
         }
     }
+    /// One ui.
     pub fn one_ui() -> Self {
         Self {
             surface: 28.0,
@@ -192,6 +219,7 @@ impl Shape {
             small: 6.0,
         }
     }
+    /// Solid.
     pub fn solid() -> Self {
         Self {
             surface: 14.0,
@@ -200,6 +228,7 @@ impl Shape {
             small: 6.0,
         }
     }
+    /// Fluent.
     pub fn fluent() -> Self {
         Self {
             surface: 8.0,
@@ -208,6 +237,7 @@ impl Shape {
             small: 4.0,
         }
     }
+    /// Mono.
     pub fn mono() -> Self {
         Self {
             surface: 16.0,
@@ -220,46 +250,60 @@ impl Shape {
 /// Which radius to override. Card sets its minimum; its concentric radius is still derived.
 #[derive(Debug, Clone, Copy)]
 pub enum Radius {
+    /// Surface.
     Surface,
+    /// Card.
     Card,
+    /// Control.
     Control,
+    /// Small.
     Small,
 }
+/// Spacing.
 pub type Spacing = Metrics;
+/// Motion.
 pub type Motion = MotionTokens;
 /// Icon drawing source and stroke weight.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Icons {
+    /// Set.
     pub set: IconSet,
+    /// Weight.
     pub weight: f32,
 }
 impl Icons {
+    /// Liquid.
     pub fn liquid() -> Self {
         Self {
             set: IconSet::Vector,
             weight: 1.75,
         }
     }
+    /// One ui.
     pub fn one_ui() -> Self {
         Self {
             weight: 2.0,
             ..Self::liquid()
         }
     }
+    /// Solid.
     pub fn solid() -> Self {
         Self::liquid()
     }
+    /// Fluent.
     pub fn fluent() -> Self {
         Self {
             set: IconSet::Font(crate::icons::SYSTEM_FAMILY.into()),
             weight: 2.0,
         }
     }
+    /// Mono.
     pub fn mono() -> Self {
         Self::liquid()
     }
 }
 impl Metrics {
+    /// Liquid.
     pub fn liquid() -> Self {
         Self {
             pad: 12.0,
@@ -277,6 +321,7 @@ impl Metrics {
             scrollbar_inset: 3.0,
         }
     }
+    /// One ui.
     pub fn one_ui() -> Self {
         Self {
             row: 52.0,
@@ -284,12 +329,14 @@ impl Metrics {
             ..Self::liquid()
         }
     }
+    /// Solid.
     pub fn solid() -> Self {
         Self {
             pad: 10.0,
             ..Self::liquid()
         }
     }
+    /// Fluent.
     pub fn fluent() -> Self {
         Self {
             pad: 8.0,
@@ -298,6 +345,7 @@ impl Metrics {
             ..Self::liquid()
         }
     }
+    /// Mono.
     pub fn mono() -> Self {
         Self::solid()
     }
@@ -371,6 +419,7 @@ impl Shadows {
 }
 
 impl MotionTokens {
+    /// Liquid.
     pub fn liquid() -> Self {
         Self {
             interactive: Spring::INTERACTIVE,
@@ -381,15 +430,19 @@ impl MotionTokens {
             scrollbar_fade: 0.35,
         }
     }
+    /// One ui.
     pub fn one_ui() -> Self {
         Self::liquid()
     }
+    /// Solid.
     pub fn solid() -> Self {
         Self::liquid()
     }
+    /// Fluent.
     pub fn fluent() -> Self {
         Self::liquid()
     }
+    /// Mono.
     pub fn mono() -> Self {
         Self::liquid()
     }
@@ -432,9 +485,9 @@ const MONO: PalettePreset = PalettePreset {
 };
 macro_rules! presets {
     ($($name:ident => ($style:ident, $palette:ident, $ramp:ident, $border:expr)),*) => {
-        impl TypeRamp { $(pub fn $name() -> Self { $ramp() })* }
-        impl Palette { $(pub fn $name(scheme: Scheme, accent: Rgba) -> Self { palette(&$palette, scheme == Scheme::Dark, accent) })* }
-        impl Theme { $(pub fn $name(scheme: Scheme, accent: Rgba) -> Self {
+        impl TypeRamp { $(#[doc = "Fn."] pub fn $name() -> Self { $ramp() })* }
+        impl Palette { $(#[doc = "Fn."] pub fn $name(scheme: Scheme, accent: Rgba) -> Self { palette(&$palette, scheme == Scheme::Dark, accent) })* }
+        impl Theme { $(#[doc = "Fn."] pub fn $name(scheme: Scheme, accent: Rgba) -> Self {
             let mut t = Self::compose(Style::$style, scheme, [Palette::$name(Scheme::Light, accent), Palette::$name(Scheme::Dark, accent)],
                 Material::$name(), Shape::$name(), TypeRamp::$name(), Spacing::$name(), Motion::$name(), Icons::$name(), Shadows::$name());
             t.border = if $border { Some(t.color.separator) } else { None };
@@ -447,8 +500,11 @@ presets!(liquid => (Liquid, LIQUID, ramp_liquid, false), one_ui => (OneUi, ONE_U
 /// A contrast requirement which cannot be satisfied by the chosen surface and ink.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Problem {
+    /// Role.
     pub role: &'static str,
+    /// Ratio.
     pub ratio: f32,
+    /// Required.
     pub required: f32,
 }
 
@@ -498,11 +554,13 @@ impl Theme {
             monochrome: color.monochrome,
         }
     }
+    /// Material.
     pub fn material(mut self, material: Material) -> Self {
         self.material = material;
         self.recompute();
         self
     }
+    /// Shape.
     pub fn shape(mut self, shape: Shape) -> Self {
         self.radius.surface = shape.surface;
         self.radius.control = shape.control;
@@ -511,6 +569,7 @@ impl Theme {
         self.recompute();
         self
     }
+    /// Radius.
     pub fn radius(mut self, radius: Radius, value: f32) -> Self {
         match radius {
             Radius::Surface => self.radius.surface = value,
@@ -521,11 +580,13 @@ impl Theme {
         self.recompute();
         self
     }
+    /// Type ramp.
     pub fn type_ramp(mut self, ramp: TypeRamp) -> Self {
         self.font = ramp;
         self.recompute();
         self
     }
+    /// Spacing.
     pub fn spacing(mut self, spacing: Spacing) -> Self {
         self.metrics = spacing;
         self.recompute();
@@ -537,11 +598,13 @@ impl Theme {
         self.recompute();
         self
     }
+    /// Motion.
     pub fn motion(mut self, motion: Motion) -> Self {
         self.motion = motion;
         self.recompute();
         self
     }
+    /// Icons.
     pub fn icons(mut self, icons: Icons) -> Self {
         self.icons = icons.set;
         self.icon_weight = icons.weight;
@@ -554,16 +617,19 @@ impl Theme {
         self.recompute();
         self
     }
+    /// Palette.
     pub fn palette(mut self, palette: Palette) -> Self {
         self.palettes[usize::from(self.dark())] = palette;
         self.recompute();
         self
     }
+    /// Focus ring.
     pub fn focus_ring(mut self, ring: FocusRing) -> Self {
         self.focus_ring = ring;
         self.recompute();
         self
     }
+    /// Border.
     pub fn border(mut self, border: Option<Rgba>) -> Self {
         self.border = border;
         self.recompute();
@@ -637,6 +703,7 @@ impl Theme {
                 .with_alpha(if self.dark() { 0.24 } else { 0.16 });
         self.elevation.color = self.color.shadow;
     }
+    /// Check.
     pub fn check(&self) -> Vec<Problem> {
         let mut problems = Vec::new();
         for (role, ink, required) in [
@@ -674,8 +741,11 @@ impl Theme {
 /// Focus ring values for hosts and components (design pixels).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FocusRing {
+    /// Width in device pixels.
     pub width: f32,
+    /// Gap.
     pub gap: f32,
+    /// Opacity.
     pub opacity: f32,
 }
 impl Default for FocusRing {

@@ -71,6 +71,7 @@ pub struct Canvas {
 }
 
 impl Canvas {
+    /// Creates a new instance.
     pub fn new(width: u32, height: u32) -> Result<Self> {
         ensure!(width > 0 && height > 0 && width <= u16::MAX as u32 && height <= u16::MAX as u32, "invalid GPU bitmap size");
         let gpu = device()?;
@@ -84,6 +85,7 @@ impl Canvas {
         Ok(Self { gpu, renderer, resources, pixels, size: (width, height) })
     }
 
+    /// Draws into the current display list.
     pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, area: PixelRect) -> Result<()> {
         ensure!(area.x + area.width <= self.size.0 && area.y + area.height <= self.size.1, "GPU damage outside bitmap");
         if area.width == 0 || area.height == 0 {
@@ -174,11 +176,17 @@ pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Resul
 /// What a GPU surface's glass should be; `revision` counts changes.
 #[derive(Default)]
 pub(super) struct GlassState {
+    /// Glasses.
     pub glasses: Vec<crate::Glass>,
+    /// Style.
     pub style: crate::glass::GlassStyle,
+    /// Spacing.
     pub spacing: f32,
+    /// Backdrop.
     pub backdrop: Option<Image>,
+    /// Revision.
     pub revision: u64,
+    /// Backdrop revision.
     pub backdrop_revision: u64,
 }
 
@@ -224,6 +232,7 @@ impl Window {
         Ok(Self { surface, canvas, config, glass: None, scale: 1., revision: u64::MAX, output: None, animating: false, backdrop_revision: 0 })
     }
 
+    /// Draws into the current display list.
     pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, size: (u32, u32), area: PixelRect, glass: &GlassState, scale: f32) -> Result<()> {
         if self.canvas.size != size {
             self.canvas = Canvas::new(size.0, size.1)?;
@@ -246,10 +255,12 @@ impl Window {
         self.present()
     }
 
+    /// Image.
     pub fn image(&self) -> Result<Image> {
         self.canvas.read_texture(self.output.as_ref().unwrap_or(&self.canvas.pixels))
     }
 
+    /// Glass revision.
     pub fn glass_revision(&self) -> u64 {
         self.revision
     }
@@ -269,6 +280,7 @@ impl Window {
         }
     }
 
+    /// Present.
     pub fn present(&mut self) -> Result<()> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,

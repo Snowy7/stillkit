@@ -8,7 +8,9 @@ use crate::theme::TextRole;
 
 /// One area series, drawn in list order (put the largest first, as T3 does).
 pub struct Series<'a> {
+    /// Color.
     pub color: Rgba,
+    /// Values.
     pub values: &'a [f64],
 }
 
@@ -132,6 +134,7 @@ pub struct LimitBar<'a> {
     pub left: f32,
     /// The fraction of the window's time still to run, 0..=1 (the pace marker).
     pub pace: Option<f32>,
+    /// Fill.
     pub fill: Rgba,
     /// A monogram at the start (an account's initials).
     pub badge: Option<&'a str>,
@@ -141,6 +144,7 @@ pub struct LimitBar<'a> {
     pub reset: Option<&'a str>,
 }
 
+/// Limit bar.
 pub fn limit_bar(f: &mut Frame<'_>, rect: Rect, bar: &LimitBar<'_>) {
     draw_limit_bar(f, rect, bar, false);
 }

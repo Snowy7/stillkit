@@ -38,11 +38,14 @@ use std::{
 /// What kind of window a surface is (see the module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    Popup { activate: bool },
+    /// Popup.
+    Popup { #[doc = "Whether the popup requests activation."] activate: bool },
+    /// Bar.
     Bar,
-    DesktopChild { parent: usize },
+    /// Desktop child.
+    DesktopChild { #[doc = "Native parent handle retained for desktop surface compatibility."] parent: usize },
     /// `min` is its smallest client size in design pixels (points).
-    App { min: (u32, u32) },
+    App { #[doc = "Minimum logical window size."] min: (u32, u32) },
 }
 
 /// Identifies a surface in [`Event`]s.
@@ -57,9 +60,13 @@ impl SurfaceId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Button.
 pub enum Button {
+    /// Left.
     Left,
+    /// Right.
     Right,
+    /// Middle.
     Middle,
 }
 
@@ -77,13 +84,19 @@ pub struct Pointer {
 pub enum Event {
     /// A temporary animation requested another frame; no timer remains once it settles.
     Frame,
+    /// Move.
     Move(Pointer),
+    /// Leave.
     Leave,
     /// Positive delta scrolls up; 120 a wheel notch.
     Wheel(Pointer, i16),
+    /// Capture lost.
     CaptureLost,
+    /// Press.
     Press(Pointer, Button),
+    /// Release.
     Release(Pointer, Button),
+    /// Double click.
     DoubleClick(Pointer, Button),
     /// A key went down (a virtual-key code).
     Key(u16),
@@ -97,7 +110,9 @@ pub enum Event {
     Focus(HitId),
     /// The window's backing scale changed: 96 per point-to-pixel factor (192 on Retina).
     DpiChanged(u32),
+    /// Visibility changed.
     VisibilityChanged,
+    /// Cancelled.
     Cancelled,
     /// A focused `TextField` changed.
     TextChanged,
@@ -278,10 +293,12 @@ pub struct Surface {
 }
 
 impl Surface {
+    /// Creates a new instance.
     pub fn new(kind: Kind, name: &str, role: accesskit::Role) -> Result<Self> {
         Self::with_render(kind, name, role, crate::platform::render())
     }
 
+    /// New deferred accessibility.
     pub fn new_deferred_accessibility(kind: Kind, name: &str, role: accesskit::Role) -> Result<Self> {
         Self::new(kind, name, role)
     }
@@ -343,6 +360,7 @@ impl Surface {
         })
     }
 
+    /// Render.
     pub fn render(&self) -> crate::platform::Render {
         self.mode
     }
@@ -431,18 +449,22 @@ impl Surface {
         Ok(self.canvas.as_ref().context("no CPU frame")?.image())
     }
 
+    /// Shown.
     pub fn shown(&self) -> &DisplayList {
         &self.shown
     }
 
+    /// Stable identity used to match this item across frames.
     pub fn id(&self) -> SurfaceId {
         self.id
     }
 
+    /// Origin.
     pub fn origin(&self) -> (i32, i32) {
         self.origin
     }
 
+    /// Animation frames.
     pub fn animation_frames(&self, duration: Duration) -> AnimationFrames {
         let active = Rc::new(Cell::new(true));
         super::pump::frames(self.id, active.clone(), Instant::now() + duration);
@@ -455,6 +477,7 @@ impl Surface {
         Ok(())
     }
 
+    /// Move to.
     pub fn move_to(&mut self, origin: (i32, i32)) -> Result<()> {
         if origin != self.origin {
             self.origin = origin;
@@ -481,6 +504,7 @@ impl Surface {
         self.set_glass_group(glass.as_slice(), 16.0);
     }
 
+    /// Sets glass style.
     pub fn set_glass_style(&self, style: crate::glass::GlassStyle) {
         if self.glass_style.replace(style) == style {
             return;
@@ -600,11 +624,13 @@ impl Surface {
         }
     }
 
+    /// Hide.
     pub fn hide(&self) {
         self.close_glass();
         self.window.orderOut(None);
     }
 
+    /// Whether visible.
     pub fn is_visible(&self) -> bool {
         self.window.isVisible()
     }
@@ -625,6 +651,7 @@ impl Surface {
         self.shown = DisplayList::default();
     }
 
+    /// Discard events.
     pub fn discard_events(&self) {
         super::pump::discard(self.id);
     }
@@ -669,14 +696,17 @@ impl Surface {
         }
     }
 
+    /// Whether maximized.
     pub fn is_maximized(&self) -> bool {
         self.window.isZoomed()
     }
 
+    /// Minimize.
     pub fn minimize(&self) {
         self.window.miniaturize(None);
     }
 
+    /// Toggle maximize.
     pub fn toggle_maximize(&self) {
         self.window.zoom(None);
     }
@@ -698,6 +728,7 @@ impl Surface {
         }
     }
 
+    /// Sets cursor.
     pub fn set_cursor(&self, cursor: Cursor) {
         self.view.set_cursor(cursor);
     }

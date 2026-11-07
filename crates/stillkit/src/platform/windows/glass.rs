@@ -23,9 +23,13 @@ pub trait Backdrop {
         }
         opened
     }
+    /// Style.
     fn style(&self, _client: HWND, _style: &GlassStyle) {}
+    /// Place.
     fn place(&self, client: HWND, shape: Shape, radius: f32);
+    /// Material.
     fn material(&self, client: HWND, material: &GlassMaterial);
+    /// Close.
     fn close(&self, client: HWND);
 }
 

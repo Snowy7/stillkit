@@ -9,6 +9,7 @@ use crate::geom::Rgba;
 use crate::text::TextStyle;
 
 #[derive(Debug, Clone, PartialEq)]
+/// Tokens.
 pub struct Tokens {
     /// Body text.
     pub font: TextStyle,
@@ -16,7 +17,9 @@ pub struct Tokens {
     pub icons: Arc<str>,
     /// Opt into named kit icons in menus; `None` keeps the caller's legacy font glyphs.
     pub icon_set: Option<crate::icons::IconSet>,
+    /// Colors.
     pub colors: Colors,
+    /// Material.
     pub material: Material,
     /// Corner radius of a surface.
     pub radius: f32,
@@ -26,6 +29,7 @@ pub struct Tokens {
     pub shadow: bool,
     /// The theme's content scale, applied on top of the monitor's DPI (0.5..=2).
     pub scale: f32,
+    /// Menu.
     pub menu: MenuMetrics,
     /// Engine glass under the body instead of the tint (`crate::glass`); `None` draws the tint.
     /// Popups fall back to the thread's style ([`crate::glass::style`]) when this is `None`.
@@ -57,7 +61,9 @@ impl Default for Tokens {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Colors.
 pub struct Colors {
+    /// Text content.
     pub text: Rgba,
     /// Disabled text.
     pub text_dim: Rgba,
@@ -65,6 +71,7 @@ pub struct Colors {
     pub hover: Rgba,
     /// Hairlines: borders and separators.
     pub line: Rgba,
+    /// Shadow.
     pub shadow: Rgba,
 }
 
@@ -108,9 +115,13 @@ impl Colors {
 /// stay readable over glass and busy wallpapers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ink {
+    /// Primary.
     pub primary: Rgba,
+    /// Secondary.
     pub secondary: Rgba,
+    /// Tertiary.
     pub tertiary: Rgba,
+    /// Disabled.
     pub disabled: Rgba,
 }
 
@@ -148,6 +159,7 @@ pub enum Step {
 }
 
 impl Step {
+    /// Metrics.
     pub const fn metrics(self) -> (f32, u16) {
         match self {
             Self::Micro => (11.0, 500),
@@ -165,7 +177,9 @@ impl Step {
 /// ones (Segoe UI Variable's optical sizes), or one theme font for both.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Typeface {
+    /// Text content.
     pub text: Arc<str>,
+    /// Display.
     pub display: Arc<str>,
 }
 
@@ -223,7 +237,9 @@ pub struct Material {
 /// A popup menu's metrics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MenuMetrics {
+    /// Row.
     pub row: f32,
+    /// Separator.
     pub separator: f32,
     /// Inner margin of the panel.
     pub pad: f32,
@@ -233,6 +249,7 @@ pub struct MenuMetrics {
     pub arrow: f32,
     /// Between the widest label and the chevron.
     pub gap: f32,
+    /// Min width.
     pub min_width: f32,
     /// Transparent room around the panel for its shadow.
     pub shadow: f32,

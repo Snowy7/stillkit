@@ -107,6 +107,7 @@ path = "examples/bar_spike.rs"
 workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+accesskit_unix = "0.24.1"
 # Vello Hybrid was renamed vello_gpu in 0.3 (same common scene API and wgpu 30).
 vello_hybrid = { package = "vello_gpu", version = "0.3", default-features = false, features = ["std", "wgpu", "text"], optional = true }
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "vulkan"], optional = true }

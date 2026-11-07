@@ -1,12 +1,16 @@
 //! Points, rectangles and colours, in device pixels of a surface's bitmap.
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Point.
 pub struct Point {
+    /// Horizontal coordinate.
     pub x: f32,
+    /// Vertical coordinate.
     pub y: f32,
 }
 
 impl Point {
+    /// Creates a new instance.
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
@@ -15,9 +19,13 @@ impl Point {
 /// An axis-aligned rectangle; `right` and `bottom` are exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Rect {
+    /// Left.
     pub left: f32,
+    /// Top.
     pub top: f32,
+    /// Right.
     pub right: f32,
+    /// Bottom.
     pub bottom: f32,
 }
 
@@ -32,22 +40,27 @@ impl Rect {
         }
     }
 
+    /// Width in device pixels.
     pub fn width(&self) -> f32 {
         self.right - self.left
     }
 
+    /// Height in device pixels.
     pub fn height(&self) -> f32 {
         self.bottom - self.top
     }
 
+    /// Whether there are no entries.
     pub fn is_empty(&self) -> bool {
         self.right <= self.left || self.bottom <= self.top
     }
 
+    /// Contains.
     pub fn contains(&self, p: Point) -> bool {
         p.x >= self.left && p.x < self.right && p.y >= self.top && p.y < self.bottom
     }
 
+    /// Intersects.
     pub fn intersects(&self, other: &Rect) -> bool {
         self.left < other.right
             && other.left < self.right
@@ -65,6 +78,7 @@ impl Rect {
         }
     }
 
+    /// Offset.
     pub fn offset(self, dx: f32, dy: f32) -> Self {
         Self {
             left: self.left + dx,
@@ -94,6 +108,7 @@ impl Rect {
         }
     }
 
+    /// Center.
     pub fn center(&self) -> Point {
         Point::new(
             (self.left + self.right) / 2.0,
@@ -193,13 +208,18 @@ impl Rect {
 /// Whole pixels of a bitmap: what gets redrawn and copied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PixelRect {
+    /// Horizontal coordinate.
     pub x: u32,
+    /// Vertical coordinate.
     pub y: u32,
+    /// Width in device pixels.
     pub width: u32,
+    /// Height in device pixels.
     pub height: u32,
 }
 
 impl PixelRect {
+    /// Full.
     pub fn full(width: u32, height: u32) -> Self {
         Self {
             x: 0,
@@ -209,6 +229,7 @@ impl PixelRect {
         }
     }
 
+    /// To rect.
     pub fn to_rect(self) -> Rect {
         Rect::new(
             self.x as f32,
@@ -222,18 +243,24 @@ impl PixelRect {
 /// A straight-alpha colour (Direct2D brushes take straight alpha; the bitmap is premultiplied).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Rgba {
+    /// Red channel.
     pub r: f32,
+    /// Green channel.
     pub g: f32,
+    /// Blue channel.
     pub b: f32,
+    /// Alpha channel.
     pub a: f32,
 }
 
 impl Rgba {
+    /// Transparent.
     pub const TRANSPARENT: Self = Self::new(0.0, 0.0, 0.0, 0.0);
     /// Invisible but hit-testable. A layered window lets clicks through only where alpha is 0,
     /// so every surface fills its shape with at least this (docs/ui.md, "Hit-testing").
     pub const HIT: Self = Self::new(0.0, 0.0, 0.0, 1.0 / 255.0);
 
+    /// Creates a new instance.
     pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
@@ -248,6 +275,7 @@ impl Rgba {
         )
     }
 
+    /// Sets alpha.
     pub const fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
     }

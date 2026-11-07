@@ -5,13 +5,17 @@ use crate::{DisplayList, Hit, Image, Op, Point, Rect, Ui};
 /// The same uniform transform for pixels, glass, hits and pointer coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct Transform {
+    /// From.
     pub from: Rect,
+    /// To.
     pub to: Rect,
 }
 impl Transform {
+    /// Scale.
     pub fn scale(self) -> f32 {
         self.to.width() / self.from.width().max(1.0)
     }
+    /// Bounds in device pixels.
     pub fn rect(self, rect: Rect) -> Rect {
         let s = self.scale();
         Rect::new(
@@ -21,6 +25,7 @@ impl Transform {
             rect.height() * s,
         )
     }
+    /// Inverse.
     pub fn inverse(self, point: Point) -> Point {
         let s = self.scale().max(0.001);
         Point::new(
@@ -32,16 +37,24 @@ impl Transform {
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Reveal.
 pub enum Reveal {
+    /// Slide.
     Slide,
+    /// Fade.
     Fade,
+    /// Pop.
     Pop,
+    /// Scale.
     Scale,
+    /// Morph.
     Morph,
+    /// None.
     None,
 }
 
 impl Reveal {
+    /// Scales.
     pub fn scales(self) -> bool {
         matches!(self, Self::Pop | Self::Scale | Self::Morph)
     }
@@ -78,13 +91,16 @@ impl Reveal {
     }
 }
 
+/// Snapshot.
 pub struct Snapshot {
+    /// Original.
     pub original: DisplayList,
     image: Arc<Image>,
     size: (u32, u32),
 }
 
 impl Snapshot {
+    /// Creates a new instance.
     pub fn new(ui: &mut Ui, list: DisplayList, size: (u32, u32)) -> anyhow::Result<Self> {
         let image = Arc::new(crate::render(ui, &list, size.0, size.1)?);
         Ok(Self {
@@ -94,6 +110,7 @@ impl Snapshot {
         })
     }
 
+    /// Frame.
     pub fn frame(&self, full: Rect, body: Rect) -> DisplayList {
         let transform = Transform {
             from: full,

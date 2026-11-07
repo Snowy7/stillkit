@@ -18,13 +18,16 @@ use std::cell::RefCell;
 
 /// Per-thread text and image services, usable without a window (any thread).
 pub struct Ui {
+    /// Text content.
     pub text: Text,
 }
 
 impl Ui {
+    /// Creates a new instance.
     pub fn new() -> Result<Self> {
         Ok(Self { text: Text::new()? })
     }
+    /// Isolated.
     pub fn isolated() -> Result<Self> {
         Self::new()
     }
@@ -70,6 +73,7 @@ impl Ui {
 }
 
 impl Image {
+    /// Load.
     pub fn load(ui: &Ui, path: &std::path::Path) -> Result<Self> {
         ui.decode_image(&std::fs::read(path)?, (32768, 32768))
     }
@@ -108,6 +112,7 @@ pub(super) fn srgb() -> CFRetained<CGColorSpace> {
 }
 
 impl Canvas {
+    /// Creates a new instance.
     pub fn new(_: &Ui, width: u32, height: u32) -> Result<Self> {
         ensure!(width > 0 && height > 0 && width <= 32768 && height <= 32768, "invalid bitmap size");
         // SAFETY: CoreGraphics allocates (and zeroes) the pixels; the row size fits the width.
@@ -119,6 +124,7 @@ impl Canvas {
         Ok(Self { ctx, size: (width, height), images: RefCell::default() })
     }
 
+    /// Size.
     pub fn size(&self) -> (u32, u32) {
         self.size
     }
@@ -131,6 +137,7 @@ impl Canvas {
         (unsafe { std::slice::from_raw_parts(data, stride * self.size.1 as usize) }, stride)
     }
 
+    /// Image.
     pub fn image(&self) -> Image {
         let mut pixels = Vec::with_capacity(self.size.0 as usize * self.size.1 as usize * 4);
         let _ = self.read(PixelRect::full(self.size.0, self.size.1), |_, row| pixels.extend_from_slice(row));
@@ -143,6 +150,7 @@ impl Canvas {
         CGBitmapContextCreateImage(Some(&self.ctx))
     }
 
+    /// Draws into the current display list.
     pub fn draw(&self, text: &mut Text, list: &DisplayList, area: PixelRect) -> Result<()> {
         ensure!(area.x + area.width <= self.size.0 && area.y + area.height <= self.size.1, "damage outside bitmap");
         if area.width == 0 || area.height == 0 {
@@ -152,6 +160,7 @@ impl Canvas {
         Ok(())
     }
 
+    /// Reads the requested pixels into the supplied sink.
     pub fn read(&self, area: PixelRect, mut sink: impl FnMut(u32, &[u8])) -> Result<()> {
         ensure!(area.x + area.width <= self.size.0 && area.y + area.height <= self.size.1, "read outside bitmap");
         let (data, stride) = self.rows();

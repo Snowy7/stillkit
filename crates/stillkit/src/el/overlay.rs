@@ -30,9 +30,13 @@ use crate::{Point, Rect};
 /// window (a dialog, toasts), the window edge it sits against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
+    /// Top.
     Top,
+    /// Bottom.
     Bottom,
+    /// Left.
     Left,
+    /// Right.
     Right,
 }
 

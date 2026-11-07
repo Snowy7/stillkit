@@ -7,7 +7,9 @@ use std::sync::Arc;
 /// Windows 11 itself draws it. Other families use their named faces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
+    /// Family.
     pub family: Arc<str>,
+    /// Size.
     pub size: f32,
     /// 100..=900, 400 regular, 600 semibold.
     pub weight: u16,
@@ -21,6 +23,7 @@ pub struct TextStyle {
 pub const VARIABLE: &str = "Segoe UI Variable";
 
 impl TextStyle {
+    /// Creates a new instance.
     pub fn new(family: &str, size: f32) -> Self {
         Self {
             family: family.into(),

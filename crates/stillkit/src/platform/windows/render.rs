@@ -294,6 +294,7 @@ fn sparse_meter_updates_match_a_complete_render() {
 /// The UI of one thread: the factories, the text cache, and what every surface shares.
 /// Create one per UI thread; surfaces and the menu borrow it to draw.
 pub struct Ui {
+    /// Text content.
     pub text: Text,
     d2d: ID2D1Factory,
     wic: IWICImagingFactory,

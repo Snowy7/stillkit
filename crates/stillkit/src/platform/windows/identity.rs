@@ -6,28 +6,11 @@
 //! up by class (`FindWindowW`) sets the same prefix in each of them.
 
 use std::sync::OnceLock;
+pub use crate::identity::{Identity, set_identity};
 
 use windows::core::PCWSTR;
 
-/// An app's names for its windows. See the module docs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Identity {
-    /// The window class prefix, e.g. `"stillkit"`.
-    pub prefix: &'static str,
-    /// Window classes of other windows that live in the desktop band beside this app's
-    /// desktop surfaces (another process's backdrop, say). Desktop surfaces keep their order
-    /// relative to these as to their own.
-    pub desktop_classes: &'static [&'static str],
-}
-
-impl Default for Identity {
-    fn default() -> Self {
-        Self { prefix: "stillkit", desktop_classes: &[] }
-    }
-}
-
 struct Names {
-    identity: Identity,
     surface: Vec<u16>,
     app: Vec<u16>,
     desktop: Vec<u16>,
@@ -42,7 +25,6 @@ fn wide(text: &str) -> Vec<u16> {
 fn names_of(identity: Identity) -> Names {
     let prefix = identity.prefix;
     Names {
-        identity,
         surface: wide(prefix),
         app: wide(&format!("{prefix}.app")),
         desktop: wide(&format!("{prefix}.desktop")),
@@ -50,18 +32,7 @@ fn names_of(identity: Identity) -> Names {
 }
 
 fn names() -> &'static Names {
-    NAMES.get_or_init(|| names_of(Identity::default()))
-}
-
-/// Sets the names for this process's windows. Call it once, before the first window; it fails
-/// (returning the identity in use) when the names were already set or a window already used them.
-pub fn set_identity(identity: Identity) -> Result<(), Identity> {
-    let mut fresh = false;
-    let names = NAMES.get_or_init(|| {
-        fresh = true;
-        names_of(identity)
-    });
-    if fresh || names.identity == identity { Ok(()) } else { Err(names.identity) }
+    NAMES.get_or_init(|| names_of(*crate::identity::current()))
 }
 
 /// The class of [`Surface`](crate::Surface) windows.
@@ -81,8 +52,7 @@ pub(crate) fn desktop_prop() -> PCWSTR {
 
 /// Whether `class` (a window's class name) is one of the identity's desktop classes.
 pub(crate) fn is_desktop_class(class: &[u16]) -> bool {
-    names()
-        .identity
+    crate::identity::current()
         .desktop_classes
         .iter()
         .any(|name| class.iter().copied().eq(name.encode_utf16()))

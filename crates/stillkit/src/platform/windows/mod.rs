@@ -2,6 +2,7 @@
 pub mod a11y;
 pub mod app_window;
 pub mod compose;
+/// Glass services.
 pub mod glass;
 #[cfg(feature = "gpu")]
 pub mod gpu;
@@ -13,17 +14,20 @@ pub mod identity;
 pub mod layered_app;
 pub mod modules;
 pub mod render;
+/// Screen services.
 pub mod screen;
 pub mod surface;
 pub mod system_backdrop;
 pub mod text;
 pub mod text_field;
+/// Timing services.
 pub mod timing;
 pub mod watch;
 pub use render::{Image, Ui};
 pub use surface::{Event, Kind, Surface, SurfaceId, next_event};
 pub use text::Text;
 pub use text_field::TextField;
+/// Icons services.
 pub mod icons;
 pub use render::Canvas as Renderer;
 /// Selected native services (or compile-only stand-ins on unsupported platforms).

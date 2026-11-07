@@ -21,13 +21,19 @@ use crate::geom::{Rect, Rgba};
 /// from the base material so existing kit surfaces retain their look.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlassStyle {
+    /// Brightness.
     pub brightness: f32,
+    /// Saturation.
     pub saturation: f32,
+    /// Smoothing.
     pub smoothing: f32,
+    /// Sheen.
     pub sheen: Option<f32>,
+    /// Depth.
     pub depth: Option<f32>,
     /// Independent bottom inner shadow; zero is off.
     pub inner_shadow: f32,
+    /// Fade ms.
     pub fade_ms: f32,
     /// Resolved opening curve; None preserves the engine's original cubic ease-out.
     pub fade_curve: Option<crate::transition::Easing>,
@@ -68,17 +74,24 @@ pub struct GlassMaterial {
 /// A surface's glass: its body in the surface's pixels, and its corner radius in pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Glass {
+    /// Body.
     pub body: Rect,
+    /// Radius.
     pub radius: f32,
+    /// Material.
     pub material: GlassMaterial,
 }
 
 /// A glass shape on screen: physical virtual-screen pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shape {
+    /// Horizontal coordinate.
     pub x: i32,
+    /// Vertical coordinate.
     pub y: i32,
+    /// Width in device pixels.
     pub width: i32,
+    /// Height in device pixels.
     pub height: i32,
 }
 
