@@ -53,6 +53,16 @@ impl Keyboard {
             );
         }
     }
+    pub fn shift_down(&self) -> bool {
+        // SAFETY: the state is live and the modifier name is a static NUL-terminated string.
+        unsafe {
+            (self.api.xkb_state_mod_name_is_active)(
+                self.state.as_ptr(),
+                c"Shift".as_ptr(),
+                xkb::xkb_state_component::XKB_STATE_MODS_EFFECTIVE,
+            ) > 0
+        }
+    }
     pub fn text(&self, key: u32) -> String {
         let mut bytes = [0u8; 128];
         // SAFETY: a live state and a writable buffer of the stated size are provided.

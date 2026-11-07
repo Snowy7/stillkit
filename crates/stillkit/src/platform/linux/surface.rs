@@ -75,15 +75,15 @@ pub enum Event {
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, VecDeque},
-    os::fd::{AsFd, FromRawFd},
+    os::fd::{AsFd, AsRawFd, FromRawFd},
     rc::Rc,
     time::{Duration, Instant},
 };
 use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
     protocol::{
-        wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry,
-        wl_seat, wl_shm, wl_shm_pool, wl_surface,
+        wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_region,
+        wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
     },
 };
 pub use wayland_protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
@@ -121,6 +121,7 @@ struct Native {
     callback: bool,
     chrome: Vec<(crate::Rect, super::app_window::Chrome)>,
     maximized: bool,
+    size: (u32, u32),
 }
 impl Drop for Native {
     fn drop(&mut self) {
@@ -212,21 +213,52 @@ fn frame(n: &mut Native, q: &QueueHandle<State>, id: SurfaceId) {
         n.callback = true;
     }
 }
-/// Blocks for native input when the queue is empty; idle does no work.
+/// Takes one pending native event without blocking; sleep with `host::wait` when empty.
 pub fn next_event() -> Option<(SurfaceId, Event)> {
     runtime(|r| {
-        loop {
-            r.queue.dispatch_pending(&mut r.state)?;
-            if let Some(e) = r.state.events.pop_front() {
-                return Ok(Some(e));
+        r.queue.dispatch_pending(&mut r.state)?;
+        if r.state.events.is_empty() {
+            r.conn.flush()?;
+            if let Some(guard) = r.queue.prepare_read() {
+                let mut fd = libc::pollfd {
+                    fd: guard.connection_fd().as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: fd points to one initialized pollfd; timeout zero only checks readiness.
+                if unsafe { libc::poll(&mut fd, 1, 0) } > 0 {
+                    guard.read()?;
+                }
             }
-            r.queue.blocking_dispatch(&mut r.state)?;
+            r.queue.dispatch_pending(&mut r.state)?;
         }
+        Ok(r.state.events.pop_front())
     })
     .unwrap_or_else(|e| {
         log::error!("Wayland dispatch: {e}");
         None
     })
+}
+/// Sleeps on the Wayland display fd until an application event is queued. No idle timer.
+pub(super) fn wait() {
+    if let Err(e) = runtime(|r| {
+        loop {
+            r.queue.dispatch_pending(&mut r.state)?;
+            if !r.state.events.is_empty() {
+                return Ok(());
+            }
+            // wayland-client flushes, prepares a read and blocks on the display fd.
+            r.queue.blocking_dispatch(&mut r.state)?;
+        }
+    }) {
+        log::error!("Wayland wait: {e}");
+    }
+}
+pub(super) fn screen_size() -> (i32, i32) {
+    runtime(|r| Ok(r.state.screen_size)).unwrap_or((1920, 1080))
+}
+pub(super) fn shift_down() -> bool {
+    runtime(|r| Ok(r.state.xkb.as_ref().is_some_and(|k| k.shift_down()))).unwrap_or(false)
 }
 pub(crate) fn queue_for(id: SurfaceId, event: Event) {
     queue_event(id.0 as usize, event);
@@ -343,6 +375,7 @@ impl Surface {
                     callback: false,
                     chrome: Vec::new(),
                     maximized: false,
+                    size: (0, 0),
                 },
             );
             while !r.state.windows[&id].configured {
@@ -454,6 +487,15 @@ impl Surface {
                 r.queue.blocking_dispatch(&mut r.state)?;
             }
             let n = r.state.windows.get_mut(&self.id).unwrap();
+            n.size = size;
+            if let Shell::Top(xdg, _) = &n.shell {
+                xdg.set_window_geometry(
+                    0,
+                    0,
+                    (size.0 / n.scale).max(1) as i32,
+                    (size.1 / n.scale).max(1) as i32,
+                );
+            }
             let b = n.buffers.as_mut().unwrap();
             let i = b.busy.iter().position(|v| !*v).unwrap();
             if self.alpha == 255 {
@@ -490,8 +532,56 @@ impl Surface {
     pub fn origin(&self) -> (i32, i32) {
         self.origin
     }
-    pub fn scale(&self) -> u32 {
-        runtime(|r| Ok(r.state.windows[&self.id].scale)).unwrap_or(1)
+    pub fn scale(&self) -> f32 {
+        runtime(|r| Ok(r.state.windows[&self.id].scale as f32)).unwrap_or(1.0)
+    }
+    /// Sets the initial physical client size; Wayland controls the global position.
+    pub fn place(&self, (_, _, width, height): (i32, i32, i32, i32)) {
+        let _ = runtime(|r| {
+            let n = r
+                .state
+                .windows
+                .get_mut(&self.id)
+                .context("surface released")?;
+            n.size = (width.max(1) as u32, height.max(1) as u32);
+            if let Shell::Top(xdg, _) = &n.shell {
+                xdg.set_window_geometry(
+                    0,
+                    0,
+                    (n.size.0 / n.scale).max(1) as i32,
+                    (n.size.1 / n.scale).max(1) as i32,
+                );
+            }
+            Ok(())
+        });
+    }
+    /// Returns the current physical client dimensions.
+    pub fn client_size(&self) -> (u32, u32) {
+        runtime(|r| Ok(r.state.windows[&self.id].size)).unwrap_or((0, 0))
+    }
+    /// Maps the surface; activation remains compositor-controlled (no activation request).
+    pub fn show_active(&self, _: bool) {
+        self.show();
+    }
+    /// Marks an opaque app backing for the compositor; pixels come from the display list.
+    pub fn set_background(&self, color: crate::Rgba) {
+        let _ = runtime(|r| {
+            let n = &r.state.windows[&self.id];
+            if color.a >= 1.0 {
+                let region = r
+                    .state
+                    .compositor
+                    .as_ref()
+                    .context("wl_compositor unavailable")?
+                    .create_region(&r.queue.handle(), ());
+                region.add(0, 0, i32::MAX, i32::MAX);
+                n.surface.set_opaque_region(Some(&region));
+                region.destroy();
+            } else {
+                n.surface.set_opaque_region(None);
+            }
+            Ok(())
+        });
     }
     pub fn animation_frames(&self, duration: Duration) -> AnimationFrames {
         let a = Rc::new(Cell::new(true));
@@ -772,6 +862,9 @@ impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceId> for State {
             } => {
                 if width > 0 && height > 0 {
                     let s = a.windows.get(id).map_or(1, |n| n.scale);
+                    if let Some(n) = a.windows.get_mut(id) {
+                        n.size = (width as u32 * s, height as u32 * s);
+                    }
                     a.events
                         .push_back((*id, Event::Resized(width as u32 * s, height as u32 * s)));
                 }
@@ -856,6 +949,7 @@ impl Dispatch<wl_surface::WlSurface, SurfaceId> for State {
         {
             let scale = factor.max(1) as u32;
             if scale != n.scale {
+                n.size = (n.size.0 / n.scale * scale, n.size.1 / n.scale * scale);
                 n.scale = scale;
                 a.events.push_back((*id, Event::DpiChanged(scale * 96)));
             }
@@ -1106,3 +1200,5 @@ wayland_client::delegate_noop!(State: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
 wayland_client::delegate_noop!(State: ignore xdg_positioner::XdgPositioner);
 wayland_client::delegate_noop!(State: ignore layer_shell::ZwlrLayerShellV1);
+
+wayland_client::delegate_noop!(State: ignore wl_region::WlRegion);

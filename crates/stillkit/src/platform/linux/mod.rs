@@ -1,6 +1,7 @@
 //! CPU rendering and native Wayland surfaces.
 pub mod app_window;
 pub mod glass;
+pub mod host;
 mod keyboard;
 pub mod render;
 pub mod screen;

@@ -8,7 +8,7 @@ fn main() -> anyhow::Result<()> {
         "stillkit · Linux CPU",
         Role::Window,
     )?;
-    let mut scale = window.scale() as f32;
+    let mut scale = window.scale();
     let mut size = ((400. * scale) as u32, (220. * scale) as u32);
     window.set_chrome(&[(
         Rect::new(0., 0., 400. * scale, 28. * scale),
@@ -64,6 +64,7 @@ fn main() -> anyhow::Result<()> {
             )?;
         }
         window.present(&mut ui, (0, 0), size, list)?;
+        stillkit::platform::linux::host::wait();
         match stillkit::next_event() {
             Some((id, event)) if id == window.id() => match event {
                 Event::Close => break,
