@@ -2040,7 +2040,8 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::Line { color, .. }
             | Op::Text { color, .. }
             | Op::Icon { color, .. }
-            | Op::Shadow { color, .. } => *color = color.with_alpha(color.a * by),
+            | Op::Shadow { color, .. }
+            | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
             Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
             Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
             Op::TextField { .. } | Op::Clip { .. } | Op::Unclip => {}

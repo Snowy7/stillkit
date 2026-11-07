@@ -42,6 +42,7 @@ pub mod motion;
 pub use platform::current::render;
 pub mod reveal;
 mod scene;
+mod shadow;
 mod bitmap;
 mod text_style;
 pub mod scroll;

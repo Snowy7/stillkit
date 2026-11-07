@@ -517,6 +517,8 @@ pub(crate) struct Painter {
     continuous: RefCell<HashMap<[u32; 6], ID2D1PathGeometry>>,
     /// Icon outlines on their 24-unit grid, made on first use.
     icons: RefCell<HashMap<crate::icons::Icon, Option<ID2D1PathGeometry>>>,
+    /// Soft shadow masks (A8 bitmaps on this target), made on first use, bounded.
+    shadows: RefCell<crate::shadow::Cache<ID2D1Bitmap>>,
     /// Round caps and joins, for icons.
     round: ID2D1StrokeStyle,
     /// The target's translation while drawing (a GPU update rect's offset in its atlas);
@@ -558,6 +560,7 @@ impl Painter {
                 arcs: RefCell::new(HashMap::new()),
                 continuous: RefCell::new(HashMap::new()),
                 icons: RefCell::new(HashMap::new()),
+                shadows: RefCell::new(crate::shadow::Cache::new(crate::shadow::Cache::<ID2D1Bitmap>::BUDGET)),
                 round,
                 #[cfg(feature = "gpu")]
                 base: std::cell::Cell::new((0.0, 0.0)),
@@ -1156,7 +1159,93 @@ impl Painter {
                         self.fill(rect.inflate(grow).offset(0.0, *drop), radius + grow);
                     }
                 }
+                Op::SoftShadow {
+                    rect,
+                    radius,
+                    blur,
+                    offset,
+                    spread,
+                    color: c,
+                } => {
+                    let (shape, r) = crate::shadow::shape(*rect, *radius, *offset, *spread);
+                    let sigma = crate::shadow::sigma(*blur);
+                    if c.a <= 0.0 || shape.is_empty() {
+                    } else if sigma < 0.25 {
+                        // No blur: the grown shape itself.
+                        brush.SetColor(&color(*c));
+                        self.fill(shape, r);
+                    } else {
+                        self.soft_shadow(shape, r, sigma, *c, damage);
+                    }
+                }
             }
+        }
+    }
+
+    /// Draws the blurred `shape` from its cached 9-slice mask, the slices that meet `damage`.
+    ///
+    /// # Safety
+    /// Must run between `BeginDraw` and `EndDraw`.
+    unsafe fn soft_shadow(&self, shape: Rect, radius: f32, sigma: f32, c: Rgba, damage: Rect) {
+        use windows::Win32::Graphics::Direct2D::D2D1_OPACITY_MASK_CONTENT_GRAPHICS;
+        let Some(plan) = crate::shadow::plan(shape, radius, sigma) else {
+            return;
+        };
+        let mut cache = self.shadows.borrow_mut();
+        // SAFETY: per this function's contract.
+        let made = cache.get(plan.key, |key| unsafe { self.mask(&crate::shadow::shared(key)) });
+        let Some(mask) = made else { return };
+        let t = &self.target;
+        // SAFETY: per this function's contract; the antialias mode is restored.
+        unsafe {
+            self.brush.SetColor(&color(c));
+            // Opacity masks draw only aliased; every slice lies on whole pixels.
+            let mode = t.GetAntialiasMode();
+            t.SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            for (i, (src, dst)) in plan.pieces().enumerate() {
+                if !dst.intersects(&damage) {
+                    continue;
+                }
+                // The middle of a box stretched both ways is full colour: a plain fill.
+                if i == 4 && plan.x.len() == 3 && plan.y.len() == 3 {
+                    t.FillRectangle(&d2d(dst), &self.brush);
+                    continue;
+                }
+                t.FillOpacityMask(
+                    mask,
+                    &self.brush,
+                    D2D1_OPACITY_MASK_CONTENT_GRAPHICS,
+                    Some(&d2d(dst)),
+                    Some(&d2d(src)),
+                );
+            }
+            t.SetAntialiasMode(mode);
+        }
+    }
+
+    /// `mask` as an A8 bitmap on this target.
+    ///
+    /// # Safety
+    /// Must run on the target's thread.
+    unsafe fn mask(&self, mask: &crate::shadow::Mask) -> Option<ID2D1Bitmap> {
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_A8_UNORM;
+        let properties = D2D1_BITMAP_PROPERTIES {
+            pixelFormat: D2D1_PIXEL_FORMAT {
+                format: DXGI_FORMAT_A8_UNORM,
+                alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+            },
+            dpiX: 96.0,
+            dpiY: 96.0,
+        };
+        let size = windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_U {
+            width: mask.width,
+            height: mask.height,
+        };
+        // SAFETY: `alpha` holds width × height bytes, one row of `width` bytes after another.
+        unsafe {
+            self.target
+                .CreateBitmap(size, Some(mask.alpha.as_ptr().cast()), mask.width, &properties)
+                .ok()
         }
     }
 
@@ -1537,6 +1626,138 @@ mod tests {
             old[0], 0,
             "outside the damage: still the old red at half alpha"
         );
+    }
+
+    fn soft(rect: Rect, color: Rgba) -> Op {
+        Op::SoftShadow { rect, radius: 12.0, blur: 24.0, offset: (0.0, 8.0), spread: 0.0, color }
+    }
+
+    #[test]
+    fn a_soft_shadow_draws_its_analytic_mask_in_its_colour() {
+        let mut ui = Ui::new().unwrap();
+        let rect = Rect::new(60.0, 50.0, 300.0, 400.0);
+        let list = DisplayList {
+            ops: vec![soft(rect, Rgba::new(0.0, 0.0, 0.0, 0.4))],
+            ..Default::default()
+        };
+        let image = render(&mut ui, &list, 420, 520).unwrap();
+        // The mask of exactly this shape, placed where the shadow lands (moved down 8).
+        let plan = crate::shadow::plan(rect.offset(0.0, 8.0), 12.0, 12.0).unwrap();
+        let mask = crate::shadow::shared(plan.key);
+        let expected = |x: u32, y: u32| -> u8 {
+            for (src, dst) in plan.pieces() {
+                if dst.contains(crate::Point::new(x as f32 + 0.5, y as f32 + 0.5)) {
+                    let sx = (src.left + (x as f32 - dst.left) * src.width() / dst.width()) as u32;
+                    let sy = (src.top + (y as f32 - dst.top) * src.height() / dst.height()) as u32;
+                    return mask.alpha[(sy * mask.width + sx) as usize];
+                }
+            }
+            0
+        };
+        let mut worst = 0;
+        for y in 0..520 {
+            for x in 0..420 {
+                let want = (expected(x, y) as f32 * 0.4).round() as u8;
+                let [b, g, r, a] = image.pixel(x, y);
+                assert_eq!([b, g, r], [0, 0, 0]);
+                worst = worst.max(a.abs_diff(want));
+            }
+        }
+        assert!(worst <= 1, "worst {worst}");
+        // Full colour under the panel, half on its straight edge, nothing 3σ out.
+        assert_eq!(image.pixel(210, 258)[3], 102);
+        let edge = image.pixel(59, 258)[3] as i32 + image.pixel(60, 258)[3] as i32;
+        assert!((edge - 102).abs() <= 2, "edge {edge}");
+        assert_eq!(image.pixel(60 - 37, 258)[3], 0);
+        assert_eq!(image.pixel(210, 50 + 8 - 37)[3], 0);
+    }
+
+    #[test]
+    fn soft_shadows_of_one_shape_share_a_mask_wherever_and_however_large_they_are() {
+        let ui = Ui::new().unwrap();
+        let mut text = Text::new().unwrap();
+        let canvas = Canvas::new(&ui, 900, 600).unwrap();
+        let black = Rgba::new(0.0, 0.0, 0.0, 0.3);
+        for x in [0.0, 13.5, 240.0] {
+            let list = DisplayList {
+                ops: vec![
+                    soft(Rect::new(40.0 + x, 40.0, 300.0, 400.0), black),
+                    soft(Rect::new(500.0, 60.0 + x, 320.0 + x, 200.0), black),
+                ],
+                ..Default::default()
+            };
+            canvas.draw(&mut text, &list, PixelRect::full(900, 600)).unwrap();
+        }
+        assert_eq!(canvas.paint.shadows.borrow().len(), 1);
+    }
+
+    /// The draw cost of a 300×400 menu's shadow, at 1× and 2×: the first draw (its mask made)
+    /// and a cached one. `cargo test --release -p stillkit --lib shadow_cost -- --ignored
+    /// --nocapture`.
+    #[test]
+    #[ignore = "a measurement"]
+    fn shadow_cost() {
+        let ui = Ui::new().unwrap();
+        let mut text = Text::new().unwrap();
+        for scale in [1.0f32, 2.0] {
+            let (w, h) = ((420.0 * scale) as u32, (560.0 * scale) as u32);
+            let rect = Rect::new(60.0 * scale, 60.0 * scale, 300.0 * scale, 400.0 * scale);
+            let list = |x: f32| DisplayList {
+                ops: vec![Op::SoftShadow {
+                    rect: rect.offset(x, 0.0),
+                    radius: 10.0 * scale,
+                    blur: 24.0 * scale,
+                    offset: (0.0, 8.0 * scale),
+                    spread: 0.0,
+                    color: Rgba::new(0.0, 0.0, 0.0, 0.3),
+                }],
+                ..Default::default()
+            };
+            let canvas = Canvas::new(&ui, w, h).unwrap();
+            let full = PixelRect::full(w, h);
+            let mask = std::time::Instant::now();
+            let plan = crate::shadow::plan(rect.offset(0.0, 8.0 * scale), 10.0 * scale, 12.0 * scale).unwrap();
+            let _ = crate::shadow::mask(plan.key);
+            let mask = mask.elapsed();
+            crate::shadow::MASKS.with_borrow_mut(|c| *c = crate::shadow::Cache::new(1 << 20));
+            let first = std::time::Instant::now();
+            canvas.draw(&mut text, &list(0.0), full).unwrap();
+            let first = first.elapsed();
+            let runs = 200;
+            let cached = std::time::Instant::now();
+            for i in 0..runs {
+                canvas.draw(&mut text, &list((i % 7) as f32), full).unwrap();
+            }
+            let cached = cached.elapsed() / runs;
+            // The same frame with no shadow: what clearing the target costs by itself.
+            let empty = DisplayList::default();
+            let clear = std::time::Instant::now();
+            for _ in 0..runs {
+                canvas.draw(&mut text, &empty, full).unwrap();
+            }
+            let clear = clear.elapsed() / runs;
+            // The stepped Op::Shadow el drew before (spread 16, drop 4).
+            let stepped = DisplayList {
+                ops: vec![Op::Shadow {
+                    rect,
+                    radius: 10.0 * scale,
+                    spread: (16.0 * scale).round(),
+                    drop: (4.0 * scale).round(),
+                    color: Rgba::new(0.0, 0.0, 0.0, 0.3),
+                }],
+                ..Default::default()
+            };
+            let old = std::time::Instant::now();
+            for _ in 0..runs {
+                canvas.draw(&mut text, &stepped, full).unwrap();
+            }
+            let old = old.elapsed() / runs;
+            eprintln!(
+                "{scale}×: mask {} KB in {mask:?}; first draw {first:?}, cached {cached:?}, \
+                 stepped Op::Shadow {old:?} (clearing {w}×{h} alone {clear:?})",
+                plan.key.bytes() / 1024
+            );
+        }
     }
 }
 
