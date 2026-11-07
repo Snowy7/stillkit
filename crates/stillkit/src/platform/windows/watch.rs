@@ -108,7 +108,7 @@ mod tests {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "watch::tests::a_thread_local_watch_can_be_dropped_during_process_exit",
+                "platform::windows::watch::tests::a_thread_local_watch_can_be_dropped_during_process_exit",
                 "--nocapture",
             ])
             .env(CHILD, &root)

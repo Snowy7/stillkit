@@ -8,15 +8,17 @@
 //! [`set_identity`].
 
 mod a11y;
-mod identity;
+pub mod platform;
+use platform::current::identity;
 pub use identity::{Identity, set_identity};
 pub use a11y::{AccessibilityAction, Semantics};
-pub mod app_window;
+pub use platform::current::app_window;
 pub mod calendar;
 pub mod chart;
 pub mod color_row;
-pub mod compose;
+pub use platform::current::compose;
 pub mod controls;
+pub mod damage;
 pub mod focus;
 pub mod geom;
 pub mod glass;
@@ -25,25 +27,29 @@ pub mod golden;
 mod icon_paths;
 pub mod icons;
 pub mod interact;
+// Preserve the two existing public module/type identities.
+#[allow(clippy::duplicate_mod)]
 pub mod interaction_motion;
 pub mod kit;
-pub mod layered_app;
+pub use platform::current::layered_app;
 pub mod layout;
 pub mod menu;
-pub mod modules;
+pub use platform::current::modules;
 pub mod motion;
-mod render;
+pub use platform::current::render;
 pub mod reveal;
 mod scene;
+mod bitmap;
+mod text_style;
 pub mod scroll;
 pub mod sortable;
-mod surface;
-mod text;
-pub mod text_field;
+use platform::current::surface;
+use platform::current::text;
+pub use platform::current::text_field;
 pub mod theme;
 mod tokens;
 pub mod transition;
-mod watch;
+use platform::current::watch;
 
 pub use app_window::{Chrome, Cursor, set_modal_hook};
 pub use geom::{PixelRect, Point, Rect, Rgba};

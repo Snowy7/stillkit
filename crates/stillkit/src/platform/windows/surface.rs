@@ -40,7 +40,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::HSTRING;
 
-use crate::a11y::{A11y, WM_A11Y_ACTION};
+use super::a11y::{A11y, WM_A11Y_ACTION};
 use crate::geom::{PixelRect, Point};
 use crate::render::{Canvas, Ui};
 use crate::scene::{DisplayList, HitId};
@@ -551,19 +551,7 @@ impl Surface {
             self.pixels = Some((Canvas::new(ui, size.0, size.1)?, Dib::new(size.0, size.1)?));
             self.size = size;
         }
-        let regions = if resized {
-            vec![PixelRect::full(size.0, size.1)]
-        } else if sparse {
-            list.damage_regions(&self.shown)
-                .into_iter()
-                .filter_map(|rect| rect.pixels(size.0, size.1))
-                .collect::<Vec<_>>()
-        } else {
-            list.damage(&self.shown)
-                .and_then(|rect| rect.pixels(size.0, size.1))
-                .into_iter()
-                .collect()
-        };
+        let regions = crate::damage::regions(&list, &self.shown, size, resized, sparse);
         let dirty = regions
             .iter()
             .map(|r| r.to_rect())
@@ -575,7 +563,7 @@ impl Surface {
         }
         if dirty.is_some() || origin != self.origin {
             let source = dirty.map(|area| (self.dib_dc(), area, resized));
-            self.update(origin, source)?;
+            crate::platform::Window::present_bitmap(self, origin, source.as_ref().map(|(dc, area, resized)| (dc, *area, *resized)))?;
         }
         self.set_hits(&list);
         self.shown = list;
@@ -1255,4 +1243,13 @@ fn button_of(msg: u32) -> Button {
         WM_RBUTTONDOWN | WM_RBUTTONUP | WM_RBUTTONDBLCLK => Button::Right,
         _ => Button::Middle,
     }
+}
+
+impl crate::platform::Window for Surface {
+    type Bitmap = HDC;
+    fn new(kind: Kind, name: &str, role: Role) -> Result<Self> { Self::new(kind, name, role) }
+    fn present_bitmap(&mut self, origin: (i32, i32), bitmap: Option<(&HDC, PixelRect, bool)>) -> Result<()> {
+        self.update(origin, bitmap.map(|(dc, dirty, resized)| (*dc, dirty, resized)))
+    }
+    fn next_event() -> Option<(SurfaceId, Event)> { next_event() }
 }

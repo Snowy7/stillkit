@@ -658,3 +658,25 @@ widget click, Show Desktop/restore, six new HWNDs after Explorer restart, grid d
 Arabic/CJK Unicode keyboard input. The glass publisher is a stub and these are not merged-shell or
 whole-product numbers. Mixed DPI and actual language-IME composition remain unmeasured. Full evidence
 and remaining gates: [N4 report](../artifacts/n4/report.md).
+
+## Layers
+
+Components, themes, layout, interaction, geometry and `DisplayList` are portable core.
+`damage::regions` shares the pixel-damage policy (including resize and sparse redraw);
+`DisplayList::damage` and `damage_regions` retain the existing operation comparison.
+Text styles and BGRA bitmap data are portable values, separate from native resources.
+
+`platform` defines static contracts: `Backend` selects associated services, `Renderer`
+draws damaged display-list bounds into a CPU bitmap, `TextSystem` owns native formats
+and cached layouts, `Window` presents native bitmaps and supplies events, and `TextInput`
+owns native editing and IME focus. `platform::current` selects Windows or a compile-only
+stub with `cfg`; unsupported native operations fail at runtime. There are no backend
+trait objects. Native handle APIs remain Windows extensions.
+
+Windows implementations live under `platform::windows`; root compatibility exports
+preserve application paths. Accessibility snapshots/tree construction, glass materials,
+menu models/layout/view and icon vector data stay core. Windows owns the accessibility
+adapter, HWND backdrop hook, screen queries, icon font placement and native text/raster
+resources. Golden PNG comparison/IO already uses portable `Image` data; its raster target
+is supplied by the selected renderer. Spring/tween math stays core, while the waitable
+frame timer and DWM refresh query live in the Windows backend.

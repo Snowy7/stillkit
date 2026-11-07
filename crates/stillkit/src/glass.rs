@@ -9,9 +9,7 @@
 //! test) [`available`] is false and views draw their own fill instead.
 
 use std::cell::RefCell;
-use std::rc::Rc;
 
-use windows::Win32::Foundation::HWND;
 
 use crate::geom::{Rect, Rgba};
 
@@ -94,46 +92,9 @@ impl Glass {
     }
 }
 
-/// Where glass requests go: the engine, through the shell's overlay client. Every call is for
-/// `client`, the surface's window.
-pub trait Backdrop {
-    /// Whether glass can show now (the engine runs). Views draw a fill of their own when not.
-    fn available(&self) -> bool;
-    /// Creates the glass under `client`; `false` when it was refused.
-    fn open(&self, client: HWND, shape: Shape, radius: f32, material: &GlassMaterial) -> bool;
-    /// Opens with optional optics; old backdrops can continue implementing only `open`.
-    fn open_styled(
-        &self,
-        client: HWND,
-        shape: Shape,
-        radius: f32,
-        material: &GlassMaterial,
-        style: &GlassStyle,
-    ) -> bool {
-        let opened = self.open(client, shape, radius, material);
-        if opened {
-            self.style(client, style);
-        }
-        opened
-    }
-    fn style(&self, _client: HWND, _style: &GlassStyle) {}
-    fn place(&self, client: HWND, shape: Shape, radius: f32);
-    fn material(&self, client: HWND, material: &GlassMaterial);
-    fn close(&self, client: HWND);
-}
-
-thread_local! {
-    static BACKDROP: RefCell<Option<Rc<dyn Backdrop>>> = const { RefCell::new(None) };
-    /// The material popups use unless their tokens say otherwise (the active style's), or
-    /// `None` for styles without blur (solid, mono), which draw their own fill.
-    static STYLE: RefCell<Option<GlassMaterial>> = const { RefCell::new(None) };
-}
-
-/// Sends this thread's glass requests to `backdrop` from now on.
-pub fn install(backdrop: Rc<dyn Backdrop>) {
-    BACKDROP.with_borrow_mut(|b| *b = Some(backdrop));
-}
-
+pub use crate::platform::current::glass::{Backdrop, install};
+pub(crate) use crate::platform::current::glass::backdrop;
+thread_local! { static STYLE: RefCell<Option<GlassMaterial>> = const { RefCell::new(None) }; }
 /// Sets the popups' material for the active style (`None`: no glass, a drawn fill).
 pub fn set_style(material: Option<GlassMaterial>) {
     STYLE.with_borrow_mut(|s| *s = material);
@@ -147,10 +108,6 @@ pub fn style() -> Option<GlassMaterial> {
 /// Whether a backdrop is installed and can show glass now.
 pub fn available() -> bool {
     backdrop().is_some_and(|b| b.available())
-}
-
-pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
-    BACKDROP.with_borrow(Clone::clone)
 }
 
 #[cfg(test)]

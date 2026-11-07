@@ -35,6 +35,13 @@ use crate::geom::{PixelRect, Rect, Rgba};
 use crate::scene::{ARC_STEP, DisplayList, Op};
 use crate::text::Text;
 
+impl crate::platform::Renderer for Canvas {
+    type Context = Ui;
+    fn new(ui: &Ui, width: u32, height: u32) -> Result<Self> { Self::new(ui, width, height) }
+    fn draw(&self, text: &mut Text, list: &DisplayList, damage: PixelRect) -> Result<()> { self.draw(text, list, damage) }
+    fn read(&self, damage: PixelRect, sink: impl FnMut(u32, &[u8])) -> Result<()> { self.read(damage, sink) }
+}
+
 #[cfg(test)]
 #[test]
 fn a_sparse_read_keeps_row_offsets_inside_one_nonzero_origin_lock() {
@@ -293,44 +300,7 @@ pub struct Ui {
     params: IDWriteRenderingParams,
 }
 
-/// How DirectWrite rasterizes text: always grayscale (layered windows have alpha, so no
-/// ClearType), with fixed parameters rather than the machine's ClearType tuning, so golden
-/// images and every machine look the same. [`TextQuality::default`] is what every surface
-/// uses; the gallery's text lab (`docs/media/native/kit-text.png`) compares the others.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TextQuality {
-    pub gamma: f32,
-    /// Grayscale enhanced contrast: thickens the coverage of light strokes.
-    pub contrast: f32,
-    pub mode: TextMode,
-    /// Hint vertical stems and heights to whole pixels.
-    pub grid_fit: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextMode {
-    /// Subpixel positions, antialiased in both directions (DirectWrite's default above 12 px).
-    NaturalSymmetric,
-    /// Subpixel positions, antialiased horizontally only.
-    Natural,
-    /// Whole-pixel advances and full hinting, as GDI.
-    GdiClassic,
-}
-
-impl Default for TextQuality {
-    /// Chosen in the text lab (docs/ui.md, "Text"): Windows' grayscale defaults (gamma 1.8,
-    /// grayscale contrast 1.0) with vertical hinting. The old parameters set contrast 0.5
-    /// through the ClearType-only field, which drew light text thin and grey on glass.
-    fn default() -> Self {
-        Self {
-            gamma: 1.8,
-            contrast: 1.0,
-            mode: TextMode::NaturalSymmetric,
-            grid_fit: true,
-        }
-    }
-}
-
+pub use crate::bitmap::{TextQuality, TextMode};
 impl TextQuality {
     fn params(self, text: &Text) -> Result<IDWriteRenderingParams> {
         let mode: DWRITE_RENDERING_MODE1 = match self.mode {
@@ -450,14 +420,7 @@ impl Ui {
     }
 }
 
-/// A premultiplied BGRA image, top-down, `width * 4` bytes per row.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Image {
-    pub width: u32,
-    pub height: u32,
-    pub pixels: Vec<u8>,
-}
-
+pub use crate::bitmap::Image;
 impl Image {
     /// Decode a cached app icon or user image to premultiplied BGRA with Windows WIC.
     pub fn load(ui: &Ui, path: &Path) -> Result<Self> {
@@ -501,28 +464,19 @@ impl Image {
         }
     }
 
-    /// The `[b, g, r, a]` of a pixel.
-    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
-        let at = ((y * self.width + x) * 4) as usize;
-        [
-            self.pixels[at],
-            self.pixels[at + 1],
-            self.pixels[at + 2],
-            self.pixels[at + 3],
-        ]
-    }
+
 }
 
 /// Draws `list` into a new `width`×`height` image exactly as a surface shows it.
 pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
-    let canvas = Canvas::new(ui, width, height)?;
+    let canvas = <Canvas as crate::platform::Renderer>::new(ui, width, height)?;
     let full = PixelRect::full(width, height);
-    canvas.draw(&mut ui.text, list, full)?;
+    crate::platform::Renderer::draw(&canvas, &mut ui.text, list, full)?;
     // EndDraw committed the picture to WIC. Release source copies before allocating
     // the returned pixels; a one-shot raster never draws those bitmaps again.
     canvas.images.borrow_mut().clear();
     let mut pixels = vec![0u8; (width * height * 4) as usize];
-    canvas.read(full, |row, bytes| {
+    crate::platform::Renderer::read(&canvas, full, |row, bytes| {
         let at = row as usize * width as usize * 4;
         pixels[at..at + bytes.len()].copy_from_slice(bytes);
     })?;
@@ -534,7 +488,7 @@ pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Resul
 }
 
 /// A WIC bitmap and the software Direct2D target drawing into it.
-pub(crate) struct Canvas {
+pub struct Canvas {
     bitmap: IWICBitmap,
     target: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
@@ -1577,3 +1531,4 @@ fn bounded_canvas_bands_preserve_partial_damage_and_the_last_short_band() {
         .unwrap();
     assert_eq!(heights, [7, 7, 6]);
 }
+
