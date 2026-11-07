@@ -81,7 +81,9 @@ fn view(s: &State, case: usize) -> El<State> {
                 |s: &mut State| s.choice = 1,
             )
             .build(),
+        // Pinned: CI machines (Windows Server) run with animations off, which would freeze it.
         9 => Spinner::new("Loading", s.phase)
+            .reduced_motion(false)
             .visible(!s.hidden)
             .on_tick(|s: &mut State| s.phase += 1)
             .build(),

@@ -1172,6 +1172,12 @@ mod tests {
 
     #[test]
     fn long_menus_fit_the_monitor_and_keyboard_selection_scrolls_into_view() {
+        // A menu opens real popup windows: on Linux that needs a running compositor, which a
+        // headless CI machine doesn't have.
+        if cfg!(target_os = "linux") && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            eprintln!("skipped: no Wayland compositor");
+            return;
+        }
         let mut ui = Ui::new().unwrap();
         let mut menu = Menu::new("Long menu test").unwrap();
         menu.push_panel(
