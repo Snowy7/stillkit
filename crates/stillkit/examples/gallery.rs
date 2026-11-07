@@ -29,8 +29,20 @@ fn main() -> anyhow::Result<()> {
         .map_or_else(|| PathBuf::from("docs/media/native"), PathBuf::from);
     std::fs::create_dir_all(&out)?;
     let mut ui = Ui::new()?;
-    let wallpaper = std::fs::read("themes/rain-city/preview.jpg")?;
-    let backdrop = cover(&ui.decode_image(&wallpaper, (W * 2, H * 2))?, W, H);
+    let backdrop = match std::fs::read("themes/rain-city/preview.jpg") {
+        Ok(wallpaper) => cover(&ui.decode_image(&wallpaper, (W * 2, H * 2))?, W, H),
+        #[cfg(target_os = "linux")]
+        Err(_) => {
+            // The extracted library does not include mypaper's rain-city theme.
+            let pixels=(0..H).flat_map(|y|(0..W).flat_map(move |x| {
+                let t=(x+y) as f32/(W+H) as f32;
+                [(75.+65.*t) as u8,(48.+50.*t) as u8,(30.+35.*t) as u8,255]
+            })).collect();
+            Image { width:W,height:H,pixels }
+        }
+        #[cfg(not(target_os = "linux"))]
+        Err(error) => return Err(error.into()),
+    };
     let blurred = blur(&backdrop, 18);
     for style in Style::ALL {
         for scheme in [Scheme::Dark, Scheme::Light] {
@@ -730,10 +742,17 @@ mod mix_goldens {
         let mut ui = Ui::new()?;
         for scheme in [Scheme::Light, Scheme::Dark] {
             let image = mix_page(&mut ui, scheme)?;
+            // Native text rasterization differs; retain each backend's own reference pixels.
+            let directory = if cfg!(target_os = "linux") {
+                "../../docs/media/native/linux"
+            } else {
+                "tests/golden"
+            };
             stillkit::golden::check(
                 &image,
                 &Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(format!("tests/golden/kit-mix-{}.png", scheme_name(scheme))),
+                    .join(directory)
+                    .join(format!("kit-mix-{}.png", scheme_name(scheme))),
             )?;
         }
         Ok(())

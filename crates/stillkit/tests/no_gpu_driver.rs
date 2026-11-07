@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! Plan Rule 1: drawing with `stillkit` loads no GPU vendor driver. An integration test, so
 //! it runs in a process of its own with nothing else loaded.
 

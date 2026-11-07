@@ -72,6 +72,18 @@ path = "examples/bar_spike.rs"
 [lints]
 workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+vello_cpu = { version = "0.3", default-features = false, features = ["std", "text", "u8_pipeline"] }
+cosmic-text = { version = "0.19", features = ["peniko"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+memmap2 = "0.9"
+libc = "0.2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+xkbcommon-dl = "0.4"
+skrifa = "0.44"
+
 [[example]]
 name = "gallery"
 test = true
