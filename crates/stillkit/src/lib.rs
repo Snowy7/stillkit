@@ -17,6 +17,7 @@ pub mod chart;
 pub mod color_row;
 pub mod compose;
 pub mod controls;
+pub mod el;
 pub mod focus;
 pub mod geom;
 pub mod glass;
