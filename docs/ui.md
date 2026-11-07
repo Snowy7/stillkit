@@ -971,6 +971,170 @@ Clippy with GPU, and Windows MSVC all-target checking pass. Linux emits the eigh
 accessibility dead-code warnings, with no new warnings. Evidence and the reproduction
 script live in `docs/media/native/linux/gpu/` and `measure_gpu.py`.
 
+## macOS backend
+
+macOS selects `platform::macos`. **It is compile-checked only** (`aarch64-apple-darwin`, with
+and without `stillkit/gpu`, from Windows, 2026-11-07); nothing in it has run on a Mac yet.
+The checklist at the end of this section is what has to run before anyone relies on it.
+
+### What it does
+
+- **CPU renderer.** CoreGraphics into a `CGBitmapContext` (sRGB, premultiplied BGRA in
+  memory, the crate's `Image` layout), with a top-left user space. A frame clears and draws
+  only the damaged rectangle, skipping ops whose bounds miss it. Every `Op` draws: fills,
+  strokes, continuous corners, lines, arcs (from twelve o'clock, clockwise), the bundled
+  Lucide icons (round caps and joins, SVG arcs converted exactly), text and emphasis
+  (italic through CoreText's slant trait, strike as on Linux), images and rounded images
+  (crop mapped like Direct2D's brush, cached as `CGImage`s for the frames that draw them),
+  ring shadows, marker clips and retained clipped groups (antialiased rounded clips). Strokes
+  have flat caps, as Direct2D draws them. A private `soft_shadow` helper casts a CSS box
+  shadow exactly (`CGContextSetShadowWithColor`, cast from a shape drawn outside the bitmap,
+  the box clipped out); it gets wired to `Op::SoftShadow` once that op exists.
+- **Text.** CoreText, one `CTLine` per hard line, cached per thread (512 strings, like the
+  other backends). The system UI family (`SF Pro`, also `.AppleSystemUIFont` and
+  `system-ui`) and any family that isn't installed (Segoe UI Variable, the Windows
+  default) is SF Pro at the asked weight (`NSFont systemFontOfSize:weight:`, interpolated
+  between AppKit's named weights, so 600 is semibold). Installed families match their
+  nearest face by family and weight trait. Tracking is `kCTKernAttributeName`. The box is
+  ascent + descent + leading a line, and widths include trailing spaces, as DirectWrite
+  measures. Fonts aren't smoothed (a transparent bitmap has nothing to smooth against).
+  Caret stops are `CTLineGetOffsetForStringIndex`; `fit` uses the line's own hit test.
+  Images decode with ImageIO (upright, fitted, never enlarged).
+- **Presenting.** Each surface's content view is a layer-backed `NSView` subclass
+  (`StillkitView`) whose layer's `contents` is the bitmap as a `CGImage`
+  (`CGBitmapContextCreateImage`, copy-on-write, so the next draw copies only the pages it
+  touches), at the window's backing scale, gravity top-left. The view never draws itself.
+- **Windows.** `App`: an `NSWindow` with a full-size content view, a transparent and
+  untitled title bar (traffic lights kept), min size in points, in the Dock.
+  `set_chrome`: the caption drags (`performWindowDragWithEvent`; double-click zooms) where
+  no hit item is under the pointer; app-drawn minimize, zoom and close parts work too.
+  `Popup`: a borderless non-activating `NSPanel` at `NSPopUpMenuWindowLevel` that becomes
+  key only with `activate` (`take_focus`). `Bar`: the same at `NSStatusWindowLevel`, on all
+  Spaces, beside full-screen apps (`FullScreenAuxiliary`), out of the window cycle.
+  `DesktopChild`: a desktop-level window (`kCGDesktopWindowLevel + 1`: above the
+  picture, under the icons), on all Spaces; `parent` means nothing here. All but `App` are
+  transparent with no system shadow; clicks pass through fully transparent pixels (AppKit's
+  default for transparent windows) and `set_click_through(true)` passes all of them.
+  `set_alpha` is the window's `alphaValue` (no redraw). The app is an accessory (no Dock icon)
+  until an `App` window exists.
+- **Host and event loop.** `host::wait` is `nextEventMatchingMask` until
+  `NSDate.distantFuture`: nothing wakes an idle app. `wake_at` turns that date into the
+  deadline (the run loop's own timeout, no timer object). `animation_frames` queues
+  `Event::Frame` at the main screen's refresh interval (`maximumFramesPerSecond`, 120 Hz on
+  ProMotion) through the same timeout, only while a producer lives. `screen_size`,
+  `screen_at` (each screen's visible frame, without the menu bar and Dock), `shift_down`,
+  `modifiers` and `reduced_motion` (`NSWorkspace accessibilityDisplayShouldReduceMotion`,
+  read live) are implemented; reduce-motion and light/dark changes queue `SettingChanged`.
+  Screen pixels run from the primary screen's top-left at its backing scale.
+- **Input.** Pointer press, release, double-click, move, drag (the press's view keeps the
+  pointer), leave, right and middle buttons, and the wheel: 120 a notch for wheels, trackpad
+  points 1:1 (`120 / NOTCH` per point, so they glide without the notch spring). Keys map
+  `kVK_*` codes to the virtual keys `Event::Key` carries; letters and digits come from the
+  layout's own character. **Command is `Modifiers::ctrl`** (Command-C copies, Command-Z
+  undoes, as Ctrl does elsewhere), Option is `alt`, Control is `meta`.
+- **Text input.** The view is the `NSTextInputClient`: keys go through
+  `interpretKeyEvents` (dead keys, input methods), commits arrive as `Event::Char`, the
+  marked text as `Event::Preedit` (`ime::preedit`), drawn inline by `el`. `el`'s runtime
+  tells the view the focused field's caret each frame (`ime::follow`); the candidate window
+  opens there (`firstRectForCharacterRange`), and focus leaving a field discards the
+  composition. While composing, keys belong to the input method (no `Event::Key`).
+  Shortcuts (Command, Control) type nothing. The legacy `TextField` value
+  (`Op::TextField`) stores text and takes basic keys, as on Linux.
+- **Clipboard.** `clipboard::System` is the general `NSPasteboard`, plain text; `el::run`
+  gives it to the runtime.
+- **Accessibility.** `accesskit_macos`'s subclassing adapter on the view, fed the same tree
+  as Windows (`a11y::Snapshot`): hits, focus, semantics, reorder actions and rich actions
+  (`take_accessibility_action`). It stays inactive until VoiceOver asks. Key-window changes
+  update its focus state.
+- **Overlays.** `el::run` shows escaping overlays in popup surfaces on macOS, as on Windows.
+- **Glass, CPU mode.** `glass::install_system()` gives CPU surfaces the system's frost when
+  no provider is installed (an installed one always wins): an `NSGlassEffectView` (macOS 26)
+  or an `HUDWindow` `NSVisualEffectView` behind the window, under the content view, shaped
+  to the glass body and rounded by its radius, tinted with the material's tint (natively on
+  the glass view, as a layer over the visual effect view) and fading with clarity (alpha
+  `1 - 0.6 × clarity`). No lens (refraction, rim); that is GPU mode's. Off by default, so
+  CPU goldens and views without glass don't change.
+- **GPU mode** (`gpu` feature only). Vello Hybrid on Metal (wgpu, `Backends::METAL`, the
+  low-power adapter) for `Render::Gpu`, with glyphs as CoreText outlines
+  (`CTFontCreatePathForGlyph`) so layout and glyphs match the CPU renderer without a second
+  font stack; the device is made by the first GPU request and shared per thread. wgpu puts a
+  `CAMetalLayer` on the view. In-process glass is `stillkit-glass`, the Linux path's own
+  layer (`linux/gpu_glass.rs`, included); it refracts a client bitmap
+  (`set_glass_backdrop`) or a generated pattern, since the desktop isn't readable without
+  Screen Recording permission. Animating glass presents from the wait's frame timeout.
+- **Headless.** `render()` and goldens use the CoreGraphics renderer (Vello Hybrid when
+  the thread renders on the GPU). Goldens are per OS: `tests/golden/macos/` (empty until
+  blessed on a Mac).
+
+### Decisions
+
+CoreGraphics and CoreText, not Vello CPU and cosmic-text: the platform's own text (SF Pro,
+its weights, CoreText shaping) at no extra font payload. CPU mode makes **no Metal device**:
+nothing on the CPU path calls `MTLCreateSystemDefaultDevice`, and layer contents are
+composited by the window server. wgpu isn't compiled without `gpu`. All AppKit work needs the
+main thread: `Surface::new` refuses elsewhere; text, rendering and images work on any thread.
+Callbacks from AppKit only queue events and never run while the backend holds a borrow, so
+re-entrant calls (VoiceOver actions, live resize) are safe.
+
+### Not done
+
+No main menu (Command-Q, Edit menu); global coordinates convert at the primary screen's
+scale, so mixed-scale screens may misplace popups; no window cursor rects (the cursor is set
+on pointer moves); the diagonal resize cursor is the arrow; optical size isn't passed to SF
+Pro; no desktop capture for GPU glass; no file watching (`FileWatch` is empty); live resize
+redraws only through `set_modal_hook`; text-run accessibility (lines, words) is Windows-only.
+
+### To test on the Mac
+
+Run from the repo root, on Apple silicon and (if one is at hand) an Intel Mac.
+
+1. **Build, tests, goldens.** `cargo test -p stillkit --features golden,serde` and
+   `cargo test --workspace --features stillkit/golden,stillkit/serde,stillkit/gpu`. The
+   golden checks fail until blessed: `STILLKIT_BLESS=1 cargo test -p stillkit --features
+   golden`, then look at every PNG in `crates/stillkit/tests/golden/macos/` before committing.
+   The renderer tests (`platform::macos::render::tests`) check clips, damage patches, image
+   alpha and that 600 is between 400 and 700.
+2. **Gallery.** `cargo run --release -p stillkit --example gallery -- docs/media/native/macos`
+   (an out dir, so the Windows pages aren't overwritten). Compare each page with
+   `docs/media/native/kit-*.png`: text sits on the same lines, SF Pro weights read right,
+   icons, arcs (clockwise from twelve), rounded image crops and shadows match.
+3. **el examples.** `cargo run --release -p stillkit --example el_hello`, then `el_text`,
+   `el_overlays`, `el_scroll`, `el_motion`, `el_sound`. Check: the window centres, the
+   title area drags and double-click zooms, traffic lights work, clicks on controls inside
+   the top 28 pt reach the app (not AppKit's title bar), resizing keeps content top-left
+   (if it sticks bottom-left, the layer gravity needs flipping), Retina is sharp, closing
+   quits, overlays open as popups at the right place and take clicks, Tab and arrows move
+   focus, trackpad and wheel scroll in the right direction, `--reduced` and System Settings'
+   Reduce motion both stop motion, switching light/dark redraws.
+4. **Keys and clipboard.** In `el_text`: typing, Backspace, Delete, Home/End, Shift+arrows,
+   Command-A/C/X/V/Z and Command-Shift-Z, Option dead keys (Option-E then E types é), Escape
+   doesn't close popups by itself, no beeps.
+5. **IME.** Japanese (Romaji) and Pinyin input sources in `el_text`: the composition
+   shows inline, the candidate window opens at the caret (and follows it), Return commits,
+   Escape cancels, clicking another field discards the composition.
+6. **VoiceOver.** Command-F5 over `el_hello` and `el_overlays`: every control is read with
+   its role and state, VO-Space presses buttons, sliders step with VO-arrows, focus follows,
+   status messages are announced.
+7. **No Metal device in CPU mode.** `cargo test -p stillkit --test macos_no_gpu_driver` (it
+   shows a popup for half a second). Also, with `el_hello` running:
+   `vmmap <pid> | grep -iE 'AGXMetal|MTLDriver|GLEngine'` prints nothing, and Activity
+   Monitor's GPU column (or `sudo powermetrics --samplers gpu_power`) shows no GPU time.
+   With `STILLKIT_RENDER=gpu` the same `vmmap` lists the AGX driver.
+8. **Idle and footprint.** Release `el_hello`, settled 10 s, then over 30 s:
+   `footprint <pid>` (physical footprint) at both ends; `top -l 2 -s 30 -pid <pid> -stats
+   pid,cpu,idlew,mem` shows 0 % CPU and no idle wake-ups; `sudo powermetrics --samplers tasks
+   -i 30000 -n 1` agrees. Record them here as the Linux section does.
+9. **Window kinds.** A `Bar` stays over a full-screen app and on every Space; a
+   `DesktopChild` sits under the desktop icons and over the picture; a non-activating popup
+   never steals the key window; clicks pass through its transparent pixels.
+10. **Glass.** With `glass::install_system()`: frost under a popup's glass body, rounded,
+    tinted, following moves (macOS 26 shows Liquid Glass, older systems the HUD material).
+    GPU mode (`--features stillkit/gpu`, `STILLKIT_RENDER=gpu`): `gallery` and `el_*` draw
+    the same as CPU, the Metal layer is transparent where nothing draws (if it's black, the
+    layer's `opaque` needs clearing), and glass springs settle and stop presenting.
+11. **Mixed screens.** A Retina laptop with a 1× external screen: windows and popups land
+    where asked, and moving a window between them sends `DpiChanged` and redraws sharply.
+
 ## Looks
 
 A look bundles independent values in `stillkit::theme`: `Material`, `Shape`,
