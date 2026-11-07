@@ -25,11 +25,24 @@ const TIMER_BASE: usize = 0x50000;
 
 // The SDK metadata omits textserv.h's UUIDs (windows-rs emits IID=0). Keep its complete ABI,
 // with the real host UUID and base UUID for QueryInterface.
-windows::core::imp::define_interface!(TextHost, HostVTable, 0x13e670f5_1a5a_11cf_abeb_00aa00b65ea1);
+/// Internal RichEdit host interface with the SDK's real host UUID.
+#[repr(transparent)]
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct TextHost(IUnknown);
+// SAFETY: the transparent IUnknown wrapper and HostVTable retain textserv.h's ITextHost2 ABI.
+unsafe impl Interface for TextHost {
+    type Vtable = HostVTable;
+    const IID: GUID = GUID::from_u128(0x13e670f5_1a5a_11cf_abeb_00aa00b65ea1);
+}
+impl std::fmt::Debug for TextHost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("TextHost").field(&Interface::as_raw(self)).finish()
+    }
+}
 impl windows::core::RuntimeName for TextHost {}
 #[repr(C)]
 /// Host vtable.
-pub struct HostVTable {
+pub(crate) struct HostVTable {
     base: ITextHost2_Vtbl,
 }
 impl HostVTable {

@@ -7,7 +7,7 @@ Reviewed against the mypaper shell, Studio and Files source in its original chec
 - `Identity { prefix, desktop_classes }` and `set_identity -> Result<(), Identity>` are portable. Root and backend identity import paths share one type. Windows preserves `<prefix>`, `<prefix>.app`, `<prefix>.desktop` and desktop ordering; Linux uses prefix as Wayland app_id. No X11 backend exists. macOS accepts configuration without renaming the bundle.
 - `interaction_motion` is the single defining module. `interact::motion` is a compatibility re-export of the same module and types, not a second compiled file. mypaper shell flyouts and their kit adapter use `interact::motion::InteractionMotion`; that exact path remains compatible. There are no direct interaction_motion imports in mypaper.
 - `controls` is doc-hidden with an explicit legacy note. It exists for mypaper Studio's old immediate-mode controls. Its public items remain callable. `kit`, `Frame`, chart helpers, calendar and the root drawing primitives remain visible: examples and/or stillkit-kit use them, so they are not exclusively legacy APIs.
-- Existing public paths were retained after the consumer search. No existing item was narrowed merely because it looked low-level: backend contracts are documented in docs/ui.md, and platform hooks support native integration. New identity internals are `pub(crate)`; the Linux adapter and its methods are `pub(super)`, with no new public accessibility configuration API.
+- The macro-generated Windows TextHost COM wrapper and HostVTable are now crate-private after confirming no mypaper, kit, example or guide consumers. The transparent IUnknown layout, vtable and UUID remain identical. Other existing public paths were retained after the consumer search. No existing item was narrowed merely because it looked low-level: backend contracts are documented in docs/ui.md, and platform hooks support native integration. New identity internals are `pub(crate)`; the Linux adapter and its methods are `pub(super)`, with no new public accessibility configuration API.
 - `#![warn(missing_docs)]` now checks the crate. Missing comments on exported types, fields, variants, constants and methods were filled across core and native backend alternatives. Changes under `el` are documentation only. No stillkit-kit source was changed.
 
 ## 0.2 migration/deprecation plan
@@ -25,7 +25,7 @@ On m6u test Orca/AT-SPI discovery; latest tree on initial/late activation; label
 Each entry uses a source line to distinguish same-named fields and inherent methods. Root `pub use` entries define the supported short import paths. Feature/test-gated declarations are retained in the inventory; availability follows their source cfg attributes. Empty backend compatibility modules are included.
 
 
-Inventory: 2051 explicit public declarations/re-exports across all backend alternatives.
+Inventory: 2050 explicit public declarations/re-exports across all backend alternatives.
 
 
 ### a11y.rs
@@ -2295,22 +2295,21 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 ### platform/windows/text_field.rs
 
 ```rust
-32: pub struct HostVTable {
-91: pub struct TextField {
-113: pub fn new(window: HWND, rect: Rect, multiline: bool, size: f32, color: Rgba) -> Result<Self> {
-192: pub fn caret(&self) -> Option<Rect> {
-199: pub fn revision(&self) -> u64 {
-205: pub fn set_style(&self, style: &crate::TextStyle, color: Rgba) {
-224: pub fn set_rect(&self, rect: Rect) {
-237: pub fn set_text(&self, text: &str) -> Result<()> {
-245: pub fn text(&self) -> Result<String> {
-254: pub fn select_all(&self) {
-258: pub fn select_range(&self, range: std::ops::Range<u32>) {
-263: pub fn request_redraw(&self) {
-269: pub fn prepare(&self) -> Result<()> {
-276: pub fn focus(&self) {
-291: pub fn blur(&self) {
-330: pub fn multiline(&self) -> bool {
+104: pub struct TextField {
+126: pub fn new(window: HWND, rect: Rect, multiline: bool, size: f32, color: Rgba) -> Result<Self> {
+205: pub fn caret(&self) -> Option<Rect> {
+212: pub fn revision(&self) -> u64 {
+218: pub fn set_style(&self, style: &crate::TextStyle, color: Rgba) {
+237: pub fn set_rect(&self, rect: Rect) {
+250: pub fn set_text(&self, text: &str) -> Result<()> {
+258: pub fn text(&self) -> Result<String> {
+267: pub fn select_all(&self) {
+271: pub fn select_range(&self, range: std::ops::Range<u32>) {
+276: pub fn request_redraw(&self) {
+282: pub fn prepare(&self) -> Result<()> {
+289: pub fn focus(&self) {
+304: pub fn blur(&self) {
+343: pub fn multiline(&self) -> bool {
 ```
 
 
