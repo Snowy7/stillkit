@@ -332,7 +332,7 @@ impl Surface {
         // CPU surface never touches it. Without one the surface draws on the CPU.
         #[cfg(feature = "gpu")]
         let gpu = render
-            .resolve(crate::glass::wanted(), crate::glass::backdrop().is_some())
+            .resolve(crate::glass::wanted(), crate::glass::cpu_backdrop())
             == crate::platform::Render::Gpu
             && super::gpu::device().is_some();
         #[cfg(not(feature = "gpu"))]
@@ -485,13 +485,24 @@ impl Surface {
     }
 
     /// Whether glass can show under this surface now: in-process glass on a GPU surface, else
-    /// the thread's external backdrop ([`crate::glass::available`]).
+    /// the thread's backdrop ([`crate::glass::available`]). The system backdrop never serves a
+    /// CPU app window: it draws opaque, so frost under it could not show.
     pub fn glass_available(&self) -> bool {
         #[cfg(feature = "gpu")]
         if self.gpu.is_some() {
             return super::gpu_glass::device().is_some();
         }
-        crate::glass::available()
+        self.backdrop().is_some_and(|b| b.available())
+    }
+
+    /// Where this CPU surface's glass goes: the thread's backdrop, but never the system one for
+    /// an app window.
+    fn backdrop(&self) -> Option<Rc<dyn crate::glass::Backdrop>> {
+        if self.shared.app.is_some() {
+            crate::glass::installed()
+        } else {
+            crate::glass::backdrop()
+        }
     }
 
     pub fn id(&self) -> SurfaceId {
@@ -531,7 +542,7 @@ impl Surface {
             }
             return;
         }
-        let (Some(new), Some(backdrop)) = (glass, crate::glass::backdrop()) else {
+        let (Some(new), Some(backdrop)) = (glass, self.backdrop()) else {
             self.close_glass();
             return;
         };
@@ -554,7 +565,7 @@ impl Surface {
         }
         if self.glass_style.replace(style) != style
             && self.glass_open.get()
-            && let Some(backdrop) = crate::glass::backdrop()
+            && let Some(backdrop) = self.backdrop()
         {
             backdrop.style(self.hwnd, &style);
         }
@@ -642,7 +653,7 @@ impl Surface {
         if self.gpu.is_some() {
             return self.sync_glass();
         }
-        if let (Some(glass), Some(backdrop)) = (self.glass.get(), crate::glass::backdrop()) {
+        if let (Some(glass), Some(backdrop)) = (self.glass.get(), self.backdrop()) {
             let shape = glass.shape(self.origin);
             let opened = backdrop.open_styled(
                 self.hwnd,
@@ -661,7 +672,7 @@ impl Surface {
             return self.sync_glass();
         }
         if self.glass_open.replace(false)
-            && let Some(backdrop) = crate::glass::backdrop()
+            && let Some(backdrop) = self.backdrop()
         {
             backdrop.close(self.hwnd);
         }
@@ -1143,7 +1154,7 @@ impl Surface {
         // windows land in the same composition frame.
         if origin != self.origin
             && self.glass_open.get()
-            && let (Some(glass), Some(backdrop)) = (self.glass.get(), crate::glass::backdrop())
+            && let (Some(glass), Some(backdrop)) = (self.glass.get(), self.backdrop())
         {
             backdrop.place(self.hwnd, glass.shape(origin), glass.radius);
         }
@@ -1323,6 +1334,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         unsafe {
             (*(lparam.0 as *mut windows::Win32::UI::WindowsAndMessaging::WINDOWPOS)).flags |=
                 windows::Win32::UI::WindowsAndMessaging::SWP_NOZORDER;
+        }
+    }
+    // The system backdrop's frost window stays directly under its surface.
+    if msg == windows::Win32::UI::WindowsAndMessaging::WM_WINDOWPOSCHANGED && lparam.0 != 0 {
+        // SAFETY: WM_WINDOWPOSCHANGED provides a live WINDOWPOS.
+        let flags = unsafe { (*(lparam.0 as *const windows::Win32::UI::WindowsAndMessaging::WINDOWPOS)).flags };
+        if !flags.contains(windows::Win32::UI::WindowsAndMessaging::SWP_NOZORDER) {
+            super::glass::system().follow(hwnd);
         }
     }
     let id = shared.id;

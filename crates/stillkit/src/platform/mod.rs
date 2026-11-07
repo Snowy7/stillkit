@@ -56,25 +56,29 @@ pub trait TextInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Render {
     /// Software Direct2D on a WIC bitmap, in a per-pixel-alpha layered window: no GPU device in
-    /// the process. Glass, if any, comes from an external [`Backdrop`](crate::glass::Backdrop).
+    /// the process. Glass, if any, comes from a [`Backdrop`](crate::glass::Backdrop): an
+    /// installed one, else (Windows) the system backdrop's frost, drawn by DWM.
     #[default]
     Cpu,
     /// Hardware Direct2D on a DirectComposition surface, with in-process Liquid Glass on the
     /// same adapter on Windows; Vello Hybrid and Vulkan on Linux. Needs the `gpu` feature;
     /// unsupported platforms fall back to `Cpu`.
     Gpu,
-    /// `Cpu` unless the surface wants glass ([`crate::glass::set_style`] holds a material) and no
-    /// external backdrop is installed; then `Gpu` (if the `gpu` feature is on).
+    /// `Cpu` unless the surface wants glass ([`crate::glass::set_style`] holds a material) that
+    /// no backdrop draws in full on the CPU ([`crate::glass::cpu_backdrop`]: none is installed,
+    /// and the system backdrop is unavailable or the material is lensed); then `Gpu` (if the
+    /// `gpu` feature is on).
     Auto,
 }
 
 impl Render {
-    /// The mode a new surface uses: `Cpu` or `Gpu`, never `Auto`.
-    pub fn resolve(self, wants_glass: bool, external_backdrop: bool) -> Render {
+    /// The mode a new surface uses: `Cpu` or `Gpu`, never `Auto`. `cpu_backdrop` says a
+    /// backdrop draws the wanted glass for a CPU surface ([`crate::glass::cpu_backdrop`]).
+    pub fn resolve(self, wants_glass: bool, cpu_backdrop: bool) -> Render {
         let gpu = cfg!(all(any(windows, target_os = "linux"), feature = "gpu"));
         match self {
             Render::Gpu if gpu => Render::Gpu,
-            Render::Auto if gpu && wants_glass && !external_backdrop => Render::Gpu,
+            Render::Auto if gpu && wants_glass && !cpu_backdrop => Render::Gpu,
             _ => Render::Cpu,
         }
     }

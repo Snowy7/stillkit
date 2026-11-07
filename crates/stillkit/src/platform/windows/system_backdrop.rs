@@ -1,0 +1,333 @@
+//! The built-in CPU-mode backdrop (docs/ui.md, "System backdrop"): DWM's own host backdrop blur
+//! (the acrylic blur of what is behind a window) under a surface's body, through
+//! Windows.UI.Composition. DWM draws the blur out of process, so no GPU device or vendor driver
+//! loads here (`tests/no_gpu_driver.rs`).
+//!
+//! Each surface with glass gets a frost window directly under it, the size of its body: no
+//! redirection bitmap, click-through, never activated, topmost when the surface is. Its
+//! [`DesktopWindowTarget`] holds one visual clipped to the body's rounded rect: the blur and, over
+//! it, the material's tint. It is placed before every move of its surface (as the engine's glass
+//! windows are), and put back under it when the surface's z-order changes ([`follow`]). The frost
+//! can't live in the surface's own window: DWM composes a layered window's visuals over its
+//! pixels whatever the target's `isTopmost` says (measured), and the blur is opaque.
+//!
+//! Nothing is made until the first surface opens glass, and the windows, visuals and compositor
+//! all go when the last one closes. What it can't do: lenses and rims (a lensed material gets the
+//! frost alone), liquid merging, choosing the blur radius (the system's), and app windows (they
+//! are opaque on the CPU). It needs Windows 11 and Settings' "Transparency effects"; without
+//! either, [`available`](Backdrop::available) is false and views draw their fill.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+
+use anyhow::{Context, Result};
+use windows::System::DispatcherQueueController;
+use windows::UI::Color;
+use windows::UI::Composition::Desktop::DesktopWindowTarget;
+use windows::UI::Composition::{CompositionColorBrush, Compositor, ContainerVisual, SpriteVisual};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Registry::{
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW,
+};
+use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
+use windows::Win32::System::WinRT::{
+    CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE, GetWindowLongPtrW, HTTRANSPARENT,
+    MA_NOACTIVATE, RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_NCHITTEST,
+    WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+};
+use windows::core::{BOOL, Interface, w};
+use windows_numerics::Vector2;
+
+use super::glass::Backdrop;
+use crate::glass::{GlassMaterial, Shape};
+
+/// The provider of one UI thread ([`crate::glass`] uses it when no backdrop is installed).
+#[derive(Default)]
+pub struct SystemBackdrop {
+    /// Made on the first open, dropped when the last frost closes.
+    live: RefCell<Option<Live>>,
+    /// A failed open (no compositor, a refused target): views draw their fill from then on.
+    failed: Cell<bool>,
+}
+
+struct Live {
+    compositor: Compositor,
+    /// By client window.
+    frosts: HashMap<isize, Frost>,
+}
+
+/// One surface's frost. Kept, hidden, while closed and others are open.
+struct Frost {
+    window: HWND,
+    _target: DesktopWindowTarget,
+    body: ContainerVisual,
+    blur: SpriteVisual,
+    tint: CompositionColorBrush,
+    open: bool,
+}
+
+thread_local! {
+    /// The thread's dispatcher queue, which Windows.UI.Composition needs. Made once and kept:
+    /// it is a few kilobytes, and a thread can't make a second one while the first shuts down.
+    static QUEUE: RefCell<Option<DispatcherQueueController>> = const { RefCell::new(None) };
+}
+
+impl SystemBackdrop {
+    /// Whether any frost is open (the compositor is up).
+    pub fn active(&self) -> bool {
+        self.live.borrow().is_some()
+    }
+
+    /// The frost window under `client`, while one is open.
+    pub fn window(&self, client: HWND) -> Option<HWND> {
+        let live = self.live.borrow();
+        live.as_ref()?.frosts.get(&(client.0 as isize)).filter(|f| f.open).map(|f| f.window)
+    }
+
+    /// Puts `client`'s frost back directly under it (its z-order changed).
+    pub fn follow(&self, client: HWND) {
+        if let Some(window) = self.window(client) {
+            // SAFETY: two windows of this thread; z-order only.
+            let _ = unsafe { SetWindowPos(window, Some(client), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+        }
+    }
+
+    fn try_open(&self, client: HWND, shape: Shape, radius: f32, material: &GlassMaterial) -> Result<()> {
+        let mut live = self.live.borrow_mut();
+        if live.is_none() {
+            ensure_queue()?;
+            *live = Some(Live { compositor: Compositor::new().context("Compositor")?, frosts: HashMap::new() });
+        }
+        let live = live.as_mut().expect("made above");
+        let key = client.0 as isize;
+        if !live.frosts.contains_key(&key) {
+            let frost = Frost::new(&live.compositor, client)?;
+            live.frosts.insert(key, frost);
+        }
+        let frost = live.frosts.get_mut(&key).expect("inserted above");
+        frost.material(material)?;
+        frost.place(&live.compositor, client, shape, radius)?;
+        // SAFETY: our own window, shown without activation.
+        let _ = unsafe { ShowWindow(frost.window, SW_SHOWNOACTIVATE) };
+        frost.open = true;
+        Ok(())
+    }
+}
+
+impl Backdrop for SystemBackdrop {
+    fn available(&self) -> bool {
+        !self.failed.get() && supported() && transparency()
+    }
+
+    fn open(&self, client: HWND, shape: Shape, radius: f32, material: &GlassMaterial) -> bool {
+        match self.try_open(client, shape, radius, material) {
+            Ok(()) => true,
+            Err(e) => {
+                log::warn!("system backdrop: {e:#}");
+                self.failed.set(true);
+                self.close(client);
+                false
+            }
+        }
+    }
+
+    fn place(&self, client: HWND, shape: Shape, radius: f32) {
+        let live = self.live.borrow();
+        let Some(live) = live.as_ref() else { return };
+        if let Some(frost) = live.frosts.get(&(client.0 as isize))
+            && let Err(e) = frost.place(&live.compositor, client, shape, radius)
+        {
+            log::warn!("system backdrop: {e:#}");
+        }
+    }
+
+    fn material(&self, client: HWND, material: &GlassMaterial) {
+        let live = self.live.borrow();
+        if let Some(frost) = live.as_ref().and_then(|l| l.frosts.get(&(client.0 as isize)))
+            && let Err(e) = frost.material(material)
+        {
+            log::warn!("system backdrop: {e:#}");
+        }
+    }
+
+    fn close(&self, client: HWND) {
+        let mut live = self.live.borrow_mut();
+        let Some(l) = live.as_mut() else { return };
+        if let Some(frost) = l.frosts.get_mut(&(client.0 as isize)) {
+            // SAFETY: our own window.
+            let _ = unsafe { ShowWindow(frost.window, SW_HIDE) };
+            frost.open = false;
+        }
+        // The last one closed: the windows, visuals and compositor all go.
+        if l.frosts.values().all(|f| !f.open) {
+            *live = None;
+        }
+    }
+}
+
+impl Frost {
+    fn new(compositor: &Compositor, client: HWND) -> Result<Self> {
+        // SAFETY: a read of our own window's style.
+        let topmost = unsafe { WINDOW_EX_STYLE(GetWindowLongPtrW(client, GWL_EXSTYLE) as u32) }.contains(WS_EX_TOPMOST);
+        let window = create_window(topmost)?;
+        match Self::build(compositor, window) {
+            Ok((target, body, blur, tint)) => Ok(Self { window, _target: target, body, blur, tint, open: false }),
+            Err(e) => {
+                // SAFETY: the window made above, on this thread.
+                let _ = unsafe { DestroyWindow(window) };
+                Err(e)
+            }
+        }
+    }
+
+    fn build(compositor: &Compositor, window: HWND) -> Result<(DesktopWindowTarget, ContainerVisual, SpriteVisual, CompositionColorBrush)> {
+        let enable = BOOL::from(true);
+        // SAFETY: our own window; the attribute is a BOOL of the size given.
+        unsafe {
+            DwmSetWindowAttribute(window, DWMWA_USE_HOSTBACKDROPBRUSH, (&raw const enable).cast(), size_of::<BOOL>() as u32)
+        }
+        .context("DWMWA_USE_HOSTBACKDROPBRUSH")?;
+        let interop: ICompositorDesktopInterop = compositor.cast()?;
+        // SAFETY: a window of this thread, which also owns the compositor.
+        let target = unsafe { interop.CreateDesktopWindowTarget(window, true) }.context("desktop window target")?;
+        let body = compositor.CreateContainerVisual()?;
+        body.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+        let blur = compositor.CreateSpriteVisual()?;
+        blur.SetBrush(&compositor.CreateHostBackdropBrush()?)?;
+        blur.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+        let tint = compositor.CreateColorBrush()?;
+        let stain = compositor.CreateSpriteVisual()?;
+        stain.SetBrush(&tint)?;
+        stain.SetRelativeSizeAdjustment(Vector2 { X: 1.0, Y: 1.0 })?;
+        let children = body.Children()?;
+        children.InsertAtTop(&blur)?;
+        children.InsertAtTop(&stain)?;
+        target.SetRoot(&body)?;
+        Ok((target, body, blur, tint))
+    }
+
+    /// Moves the frost window to `shape` (screen px), directly under `client`, and clips it to
+    /// the rounded body.
+    fn place(&self, compositor: &Compositor, client: HWND, shape: Shape, radius: f32) -> Result<()> {
+        let (w, h) = (shape.width as f32, shape.height as f32);
+        let r = radius.clamp(0.0, w.min(h) / 2.0);
+        let corner = Vector2 { X: r, Y: r };
+        self.body.SetClip(&compositor.CreateRectangleClipWithSidesAndRadius(0.0, 0.0, w, h, corner, corner, corner, corner)?)?;
+        // SAFETY: two windows of this thread.
+        unsafe { SetWindowPos(self.window, Some(client), shape.x, shape.y, shape.width, shape.height, SWP_NOACTIVATE) }?;
+        Ok(())
+    }
+
+    /// The tint over the frost, as it is given (its alpha is the stain's strength). No frost at
+    /// all (`blur` under half a pixel) is clear glass: the tint alone over what is behind.
+    fn material(&self, material: &GlassMaterial) -> Result<()> {
+        let t = material.tint;
+        let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        self.tint.SetColor(Color { A: byte(t.a), R: byte(t.r), G: byte(t.g), B: byte(t.b) })?;
+        self.blur.SetIsVisible(material.blur >= 0.5)?;
+        Ok(())
+    }
+}
+
+impl Drop for Frost {
+    fn drop(&mut self) {
+        // SAFETY: our own window, on its thread.
+        let _ = unsafe { DestroyWindow(self.window) };
+    }
+}
+
+unsafe extern "system" fn frost_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        // Never hit or activated: clicks belong to the surface above, or pass through.
+        WM_NCHITTEST => LRESULT(HTTRANSPARENT as isize),
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        // SAFETY: default handling of the message we were called with.
+        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+/// A hidden frost window: composition only, click-through (layered and transparent).
+fn create_window(topmost: bool) -> Result<HWND> {
+    let class = w!("stillkit.frost");
+    // SAFETY: plain Win32 registration (a second one fails harmlessly) and creation on this thread.
+    unsafe {
+        let instance = GetModuleHandleW(None)?;
+        RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(frost_proc), hInstance: instance.into(), lpszClassName: class, ..Default::default() });
+        let mut ex = WS_EX_NOREDIRECTIONBITMAP | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+        if topmost {
+            ex |= WS_EX_TOPMOST;
+        }
+        CreateWindowExW(ex, class, w!("frost"), WS_POPUP, 0, 0, 1, 1, None, None, Some(instance.into()), None).context("frost window")
+    }
+}
+
+fn ensure_queue() -> Result<()> {
+    if windows::System::DispatcherQueue::GetForCurrentThread().is_ok() {
+        return Ok(());
+    }
+    QUEUE.with_borrow_mut(|queue| {
+        if queue.is_none() {
+            let options = DispatcherQueueOptions {
+                dwSize: size_of::<DispatcherQueueOptions>() as u32,
+                threadType: DQTYPE_THREAD_CURRENT,
+                apartmentType: DQTAT_COM_NONE,
+            };
+            // SAFETY: a plain options struct; the controller lives as long as this thread.
+            *queue = Some(unsafe { CreateDispatcherQueueController(options) }.context("dispatcher queue")?);
+        }
+        Ok(())
+    })
+}
+
+/// Windows 11 (build 22000): host backdrop brushes for Win32 windows and rounded rectangle clips.
+fn supported() -> bool {
+    static BUILD: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *BUILD.get_or_init(|| {
+        let mut text = [0u16; 16];
+        let mut len = size_of_val(&text) as u32;
+        // SAFETY: a string value into a buffer of the stated byte length.
+        let ok = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"),
+                w!("CurrentBuildNumber"),
+                RRF_RT_REG_SZ,
+                None,
+                Some(text.as_mut_ptr().cast()),
+                Some(&mut len),
+            )
+        };
+        if ok.is_err() {
+            return 0;
+        }
+        let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
+        String::from_utf16_lossy(&text[..end]).parse().unwrap_or(0)
+    }) >= 22000
+}
+
+/// Settings › Personalization › Colors › Transparency effects. Read on every call: views ask
+/// while they build a frame, and it is one registry read.
+fn transparency() -> bool {
+    let mut value = 1u32;
+    let mut len = size_of::<u32>() as u32;
+    // SAFETY: a DWORD value into a local of the stated size.
+    let ok = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"),
+            w!("EnableTransparency"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&raw mut value).cast()),
+            Some(&mut len),
+        )
+    };
+    ok.is_err() || value != 0
+}

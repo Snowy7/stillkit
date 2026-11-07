@@ -1,8 +1,8 @@
 use crate::glass::{GlassMaterial, GlassStyle, Shape};
 use std::{cell::RefCell, rc::Rc};
 use windows::Win32::Foundation::HWND;
-/// Where glass requests go: the engine, through the shell's overlay client. Every call is for
-/// `client`, the surface's window.
+/// Where glass requests go: the engine, through the shell's overlay client, or the built-in
+/// system backdrop ([`super::system_backdrop`]). Every call is for `client`, the surface's window.
 pub trait Backdrop {
     /// Whether glass can show now (the engine runs). Views draw a fill of their own when not.
     fn available(&self) -> bool;
@@ -31,14 +31,33 @@ pub trait Backdrop {
 
 thread_local! {
     static BACKDROP: RefCell<Option<Rc<dyn Backdrop>>> = const { RefCell::new(None) };
-
+    static SYSTEM: Rc<super::system_backdrop::SystemBackdrop> = Rc::default();
 }
 
-/// Sends this thread's glass requests to `backdrop` from now on.
+/// Sends this thread's glass requests to `backdrop` from now on. An installed backdrop always
+/// wins over the built-in system one, available or not (mypaper's engine).
 pub fn install(backdrop: Rc<dyn Backdrop>) {
     BACKDROP.with_borrow_mut(|b| *b = Some(backdrop));
 }
 
-pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
+/// The installed backdrop, if any.
+pub(crate) fn installed() -> Option<Rc<dyn Backdrop>> {
     BACKDROP.with_borrow(Clone::clone)
+}
+
+/// Where this thread's glass goes: the installed backdrop, else the system one (which makes
+/// nothing until a surface opens glass on it).
+pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
+    installed().or_else(|| Some(system() as Rc<dyn Backdrop>))
+}
+
+/// This thread's built-in system backdrop, whether or not it is in use.
+pub fn system() -> Rc<super::system_backdrop::SystemBackdrop> {
+    SYSTEM.with(Rc::clone)
+}
+
+/// Whether the system backdrop shows `material` in full: it is available, and the material has
+/// no lens (it would get the frost alone).
+pub(crate) fn system_serves(material: &GlassMaterial) -> bool {
+    !material.lensed() && SYSTEM.with(|s| s.available())
 }

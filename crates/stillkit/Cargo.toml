@@ -65,6 +65,14 @@ features = [
   "Win32_System_Variant",
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
+  # The CPU-mode system backdrop (`system_backdrop`): DWM's host backdrop blur through
+  # Windows.UI.Composition, and the transparency setting it follows.
+  "System",
+  "UI_Composition",
+  "UI_Composition_Desktop",
+  "Win32_System_Registry",
+  "Win32_System_WinRT",
+  "Win32_System_WinRT_Composition",
 ]
 
 [dev-dependencies]
