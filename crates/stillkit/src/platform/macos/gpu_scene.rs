@@ -172,11 +172,12 @@ pub(super) fn draw_ops(
                 p.line_to((to.x as f64, to.y as f64));
                 path(ctx, &p, *width, *color, false);
             }
-            Op::Arc { center, radius, sweep, width, color } => {
+            Op::Arc { center, radius, start, sweep, width, color } => {
+                // Kurbo's angles run from three o'clock, clockwise in y-down space.
                 let arc = kurbo::Arc::new(
                     (center.x as f64, center.y as f64),
                     (*radius as f64, *radius as f64),
-                    -std::f64::consts::FRAC_PI_2,
+                    -std::f64::consts::FRAC_PI_2 + *start as f64,
                     (*sweep as f64).min(std::f64::consts::TAU),
                     0.,
                 );

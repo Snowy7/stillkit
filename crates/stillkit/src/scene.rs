@@ -38,10 +38,12 @@ pub enum Op {
         italic: bool,
         strike: bool,
     },
-    /// A clockwise circular arc from twelve o'clock, in radians. Full turns draw an ellipse.
+    /// A clockwise circular arc of `sweep` radians, starting `start` radians clockwise from
+    /// twelve o'clock (0: twelve, π/2: three...). Full turns draw an ellipse. Flat ends.
     Arc {
         center: Point,
         radius: f32,
+        start: f32,
         sweep: f32,
         width: f32,
         color: Rgba,
@@ -359,6 +361,7 @@ fn arc_change(old: &Op, new: &Op) -> Option<Rect> {
         Op::Arc {
             center: a,
             radius: ar,
+            start: from,
             sweep: before,
             width: aw,
             color: ac,
@@ -366,6 +369,7 @@ fn arc_change(old: &Op, new: &Op) -> Option<Rect> {
         Op::Arc {
             center: b,
             radius: br,
+            start: to,
             sweep: after,
             width: bw,
             color: bc,
@@ -375,6 +379,7 @@ fn arc_change(old: &Op, new: &Op) -> Option<Rect> {
         return None;
     };
     if a != b
+        || from != to
         || ar != br
         || aw != bw
         || ac != bc
@@ -388,15 +393,15 @@ fn arc_change(old: &Op, new: &Op) -> Option<Rect> {
     let start = (before.min(*after).max(0.0) / ARC_STEP).floor() * ARC_STEP;
     let end =
         ((before.max(*after).max(0.0) / ARC_STEP).ceil() * ARC_STEP).min(std::f32::consts::TAU);
+    // Angles from twelve o'clock: the changed stretch runs from `from + start` to `from + end`,
+    // and reaches out as far as the quarter points inside it.
+    let from = from.rem_euclid(std::f32::consts::TAU);
+    let (start, end) = (from + start, from + end);
     let point = |angle: f32| Point::new(a.x + ar * angle.sin(), a.y - ar * angle.cos());
     let first = point(start);
     let mut rect = Rect::new(first.x, first.y, 0.0, 0.0);
-    for angle in [
-        end,
-        std::f32::consts::FRAC_PI_2,
-        std::f32::consts::PI,
-        3.0 * std::f32::consts::FRAC_PI_2,
-    ] {
+    let quarters = (0..=12).map(|k| k as f32 * std::f32::consts::FRAC_PI_2 - std::f32::consts::TAU);
+    for angle in std::iter::once(end).chain(quarters) {
         if angle >= start && angle <= end {
             let p = point(angle);
             rect.left = rect.left.min(p.x);
@@ -509,6 +514,7 @@ mod tests {
         let arc = |sweep| Op::Arc {
             center: Point::new(50.0, 50.0),
             radius: 40.0,
+            start: 0.0,
             sweep,
             width: 3.0,
             color: Rgba::HIT,
@@ -520,6 +526,22 @@ mod tests {
         assert!(regions[0].width() < 20.0 && regions[0].height() < 40.0);
         assert!(regions[0].left > 80.0 && regions[0].top > 30.0);
         assert_eq!(before.damage_regions(&after), regions);
+
+        // From 7:30 the same growth lands up and to the left of the centre (past 9 o'clock).
+        let from = |sweep| Op::Arc {
+            center: Point::new(50.0, 50.0),
+            radius: 40.0,
+            start: 1.25 * std::f32::consts::PI,
+            sweep,
+            width: 3.0,
+            color: Rgba::HIT,
+        };
+        let before = list(vec![from(0.20 * std::f32::consts::TAU)]);
+        let after = list(vec![from(0.21 * std::f32::consts::TAU)]);
+        let regions = after.damage_regions(&before);
+        assert_eq!(regions.len(), 1);
+        assert!(regions[0].right < 50.0 && regions[0].bottom < 50.0, "{:?}", regions[0]);
+        assert!(regions[0].width() < 40.0 && regions[0].height() < 40.0);
     }
 
     #[test]

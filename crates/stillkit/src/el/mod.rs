@@ -51,6 +51,7 @@ mod layout;
 mod overlay;
 mod png;
 mod runtime;
+mod rotate;
 mod scroll;
 pub mod token;
 

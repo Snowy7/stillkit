@@ -230,6 +230,7 @@ fn sparse_meter_updates_match_a_complete_render() {
             Op::Arc {
                 center: crate::Point::new(60.0, 60.0),
                 radius: 40.0,
+                start: 0.0,
                 sweep: std::f32::consts::TAU,
                 width: 3.0,
                 color: Rgba::rgb8([70, 80, 90], 1.0),
@@ -237,6 +238,7 @@ fn sparse_meter_updates_match_a_complete_render() {
             Op::Arc {
                 center: crate::Point::new(60.0, 60.0),
                 radius: 40.0,
+                start: 0.0,
                 sweep: fraction * std::f32::consts::TAU,
                 width: 3.0,
                 color: Rgba::rgb8([130, 190, 255], 1.0),
@@ -513,7 +515,7 @@ pub(crate) struct Painter {
     pub(crate) target: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
     images: RefCell<HashMap<usize, (Arc<Image>, ID2D1Bitmap)>>,
-    arcs: RefCell<HashMap<[u32; 4], ID2D1PathGeometry>>,
+    arcs: RefCell<HashMap<[u32; 5], ID2D1PathGeometry>>,
     continuous: RefCell<HashMap<[u32; 6], ID2D1PathGeometry>>,
     /// Icon outlines on their 24-unit grid, made on first use.
     icons: RefCell<HashMap<crate::icons::Icon, Option<ID2D1PathGeometry>>>,
@@ -927,6 +929,7 @@ impl Painter {
                 Op::Arc {
                     center,
                     radius,
+                    start,
                     sweep,
                     width,
                     color: c,
@@ -958,6 +961,7 @@ impl Painter {
                             center.x.to_bits(),
                             center.y.to_bits(),
                             radius.to_bits(),
+                            start.to_bits(),
                             sweep.to_bits(),
                         ];
                         let mut arcs = self.arcs.borrow_mut();
@@ -967,8 +971,8 @@ impl Painter {
                         {
                             sink.BeginFigure(
                                 Vector2 {
-                                    X: center.x,
-                                    Y: center.y - radius,
+                                    X: center.x + radius * start.sin(),
+                                    Y: center.y - radius * start.cos(),
                                 },
                                 D2D1_FIGURE_BEGIN_HOLLOW,
                             );
@@ -976,7 +980,7 @@ impl Painter {
                             // pixel before the changing final segment.
                             let count = (sweep / ARC_STEP).ceil() as u32;
                             for segment in 1..=count {
-                                let angle = (segment as f32 * ARC_STEP).min(*sweep);
+                                let angle = start + (segment as f32 * ARC_STEP).min(*sweep);
                                 sink.AddArc(&D2D1_ARC_SEGMENT {
                                     point: Vector2 {
                                         X: center.x + radius * angle.sin(),

@@ -270,14 +270,15 @@ pub enum ArcStart {
 }
 
 impl ArcStart {
-    /// Quarter turns clockwise from twelve o'clock.
-    pub(crate) fn quarters(self) -> u8 {
-        match self {
-            Self::Top => 0,
-            Self::Right => 1,
-            Self::Bottom => 2,
-            Self::Left => 3,
-        }
+    /// Radians clockwise from twelve o'clock.
+    pub(crate) fn angle(self) -> f32 {
+        let quarters = match self {
+            Self::Top => 0.0,
+            Self::Right => 1.0,
+            Self::Bottom => 2.0,
+            Self::Left => 3.0,
+        };
+        quarters * std::f32::consts::FRAC_PI_2
     }
 }
 
@@ -350,7 +351,8 @@ pub(crate) struct Range {
 pub(crate) struct ArcLook {
     /// How much of the span is filled, 0..=1.
     pub fraction: f32,
-    pub start: ArcStart,
+    /// Radians clockwise from twelve o'clock.
+    pub start: f32,
     /// Of a whole turn, 0..=1.
     pub span: f32,
     pub stroke: Len,
@@ -454,6 +456,10 @@ pub(crate) struct Anim {
     pub motion: Option<Motion>,
     pub instant: bool,
     pub transition: Option<Transition>,
+    /// Radians clockwise about its centre, at draw time ([`El::rotate`]).
+    pub rotate: f32,
+    /// One turn every this long while it is visible ([`El::spin`]).
+    pub spin: Option<Duration>,
 }
 
 #[derive(Default, Clone)]
@@ -638,7 +644,7 @@ pub fn paint<S>(painter: impl Fn(&mut Frame, Rect, HitId) + 'static) -> El<S> {
 pub fn arc<S>(fraction: f32) -> El<S> {
     new(What::Arc(ArcLook {
         fraction: if fraction.is_nan() { 0.0 } else { fraction.clamp(0.0, 1.0) },
-        start: ArcStart::Top,
+        start: 0.0,
         span: 1.0,
         stroke: super::token::RING,
         track: Some(super::token::FILL),
@@ -1018,9 +1024,15 @@ impl<S> El<S> {
     // ---- Arcs -----------------------------------------------------------------------------
 
     /// Where an [`arc`] starts; it runs clockwise from there.
-    pub fn arc_start(mut self, start: ArcStart) -> Self {
+    pub fn arc_start(self, start: ArcStart) -> Self {
+        self.arc_angle(start.angle())
+    }
+
+    /// Where an [`arc`] starts, in radians clockwise from twelve o'clock: `1.25 * PI` is
+    /// half past seven, the start of a gauge spanning three quarters (`.arc_span(0.75)`).
+    pub fn arc_angle(mut self, radians: f32) -> Self {
         if let What::Arc(a) = &mut self.what {
-            a.start = start;
+            a.start = if radians.is_finite() { radians.rem_euclid(std::f32::consts::TAU) } else { 0.0 };
         }
         self
     }
@@ -1083,6 +1095,29 @@ impl<S> El<S> {
     /// springs along the element's [`motion`](Self::motion) like any other.
     pub fn focus_within(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
         self.within = Some(style(el()).look);
+        self
+    }
+
+    /// Turns the element and everything in it `radians` clockwise about its centre, at draw
+    /// time: layout keeps its upright box, while what it draws, its hits (their bounding box)
+    /// and its damage are turned. With [`motion`](Self::motion) the angle springs (it snaps
+    /// under reduced motion): a disclosure chevron, `.rotate(if open { FRAC_PI_2 } else { 0.0 })`.
+    /// Arcs, lines, circles and icons turn exactly (an icon is drawn as its stroked outline
+    /// while turned; filled icons stay upright), and boxes at quarter turns; text, images
+    /// and boxes at other angles keep upright, about the turned centre.
+    pub fn rotate(mut self, radians: f32) -> Self {
+        self.anim.rotate = if radians.is_finite() { radians } else { 0.0 };
+        self
+    }
+
+    /// Spins the element clockwise, one turn every `period`, on top of its
+    /// [`rotate`](Self::rotate): a spinner (an [`arc`] with a short span), indeterminate
+    /// progress. It moves only while it is visible: laid out, not scrolled out of its scroll
+    /// views, not under an open dialog, its window shown ([`super::Runtime::set_visible`]),
+    /// and not under reduced motion (where it holds still at its rest angle). Frames run only
+    /// while something visible spins; the view never runs for it.
+    pub fn spin(mut self, period: Duration) -> Self {
+        self.anim.spin = (!period.is_zero()).then_some(period);
         self
     }
 

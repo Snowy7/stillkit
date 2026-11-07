@@ -265,6 +265,13 @@ pub struct Runtime<S> {
     withins: Vec<u64>,
     /// Those of them holding focus now (innermost first).
     within_on: Vec<u64>,
+    // ---- Spinning (`El::spin`) -------------------------------------------------------
+    /// Each spinner's turn when it last showed, by identity.
+    spins: HashMap<u64, f32>,
+    /// Whether the last paint had something visible spinning.
+    spinning: bool,
+    /// Whether the window shows ([`Runtime::set_visible`]).
+    visible: bool,
 }
 
 impl<S: 'static> Runtime<S> {
@@ -340,6 +347,9 @@ impl<S: 'static> Runtime<S> {
             pointing: None,
             withins: Vec::new(),
             within_on: Vec::new(),
+            spins: HashMap::new(),
+            spinning: false,
+            visible: true,
         };
         runtime.frame(Duration::ZERO);
         Ok(runtime)
@@ -402,7 +412,7 @@ impl<S> Runtime<S> {
         // the frame after a hover, press or Tab is never a still one.
         let lead = f64::from(self.time_scale) / 60.0;
         let glowing = self.sync_feedback(self.anim.t - lead);
-        if moved || glowing || !left.is_empty() || scrolled || self.caret_on() != self.caret_shown {
+        if moved || glowing || self.spinning || !left.is_empty() || scrolled || self.caret_on() != self.caret_shown {
             self.stale_paint = true;
         }
         if !self.stale_paint {
@@ -613,6 +623,7 @@ impl<S> Runtime<S> {
         self.ghosts.retain(|g| ids.contains(&g.parent) && !ids.contains(&g.id));
         let ghosts: HashSet<u64> = self.ghosts.iter().map(|g| g.id).collect();
         self.anim.retain(|id| ids.contains(&id) || ghosts.contains(&id));
+        self.spins.retain(|id, _| ids.contains(id));
         let prev: HashSet<u64> = self.laid.iter().map(|l| l.id).collect();
         self.anim.retarget(&laid, &targets, &prev, mode);
         self.laid = laid;
@@ -824,6 +835,12 @@ impl<S> Runtime<S> {
             actives: Vec::new(),
             pressable: 0,
             through: Vec::new(),
+            clip: Rect::new(0.0, 0.0, self.size.0 as f32, self.size.1 as f32),
+            modal: self.layers.iter().find(|l| l.kind == Kind::Dialog).map(|l| l.at),
+            reduced: self.anim.reduced,
+            hidden: !self.visible,
+            spins: &mut self.spins,
+            spinning: false,
         };
         self.caret_shown = walk.caret.is_some();
         let mut f = Frame::new(&mut self.ui.text, &self.theme, self.scale, &self.ix);
@@ -835,6 +852,8 @@ impl<S> Runtime<S> {
         let mut list = f.list;
         list.focus = self.ix.focus;
         let (mut nav, mut semantics, mut escaped) = (walk.nav, walk.semantics, walk.escaped);
+        let (actives, through, spinning) = (walk.actives, walk.through, walk.spinning);
+        self.spinning = spinning;
         // A modal dialog is all there is to point at, focus and read.
         if let Some(n) = walk.inert {
             list.hits.drain(..n);
@@ -845,7 +864,7 @@ impl<S> Runtime<S> {
             }
         }
         // Active descendants by key, among the hits the list ends with.
-        for (hit, key) in walk.actives {
+        for (hit, key) in actives {
             let active = self.index_of_key(&key).map(|i| self.laid[i].hit);
             let Some(active) = active.filter(|a| list.hits.iter().any(|h| h.id == *a)) else { continue };
             for (_, semantic) in semantics.iter_mut().filter(|(id, _)| *id == hit) {
@@ -859,9 +878,9 @@ impl<S> Runtime<S> {
             self.semantics = semantics;
             self.semantics_sent = false;
         }
-        self.pointing = (!walk.through.is_empty()).then(|| DisplayList {
+        self.pointing = (!through.is_empty()).then(|| DisplayList {
             ops: Vec::new(),
-            hits: list.hits.iter().filter(|h| !walk.through.contains(&h.id)).cloned().collect(),
+            hits: list.hits.iter().filter(|h| !through.contains(&h.id)).cloned().collect(),
             focus: list.focus,
         });
         self.window_list = self.cut_popups(&list, &escaped);
@@ -1357,7 +1376,11 @@ impl<S> Runtime<S> {
     /// The system's reduced-motion setting ([`super::reduced_motion`]; the window host sets
     /// it): spatial travel snaps, while opacity, colour and presence take a short fade.
     pub fn set_reduced_motion(&mut self, reduced: bool) {
-        self.anim.reduced = reduced;
+        if reduced != self.anim.reduced {
+            self.anim.reduced = reduced;
+            // Spinners stop or start.
+            self.stale_paint = true;
+        }
     }
 
     pub fn reduced_motion(&self) -> bool {
@@ -1367,7 +1390,20 @@ impl<S> Runtime<S> {
     /// Whether anything is still moving, leaving or scrolling (a scrollbar waiting to fade
     /// counts): the host keeps frames coming while it is, and none once it settles.
     pub fn animating(&self) -> bool {
-        self.anim.moving() || !self.ghosts.is_empty() || self.scrolling || self.feedback.moving()
+        self.anim.moving() || !self.ghosts.is_empty() || self.scrolling || self.feedback.moving() || self.spinning
+    }
+
+    /// Whether the window shows (the host says when it is hidden or, where the platform tells,
+    /// occluded): spinners ([`El::spin`]) hold still while it doesn't, and ask for no frames.
+    pub fn set_visible(&mut self, visible: bool) {
+        if visible != self.visible {
+            self.visible = visible;
+            self.stale_paint = true;
+        }
+    }
+
+    pub fn visible(&self) -> bool {
+        self.visible
     }
 
     pub fn theme(&self) -> &Theme {
@@ -1706,6 +1742,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]
                 .max(0.0),
             shadow: if look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
+            angle: el.anim.rotate,
             motion,
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
@@ -1819,6 +1856,38 @@ struct Walk<'a, S> {
     pressable: usize,
     /// Hits the pointer goes through (announced content inside a control).
     through: Vec<HitId>,
+    // ---- Spinning (`El::spin`) -------------------------------------------------------
+    /// What can show here: the window, cut to the scroll views around.
+    clip: Rect,
+    /// Elements before this place in `laid` are under an open dialog.
+    modal: Option<usize>,
+    /// Reduced motion: spinners rest at their own angle.
+    reduced: bool,
+    /// The window is hidden: spinners hold where they are.
+    hidden: bool,
+    /// Each spinner's turn when it last showed, by identity.
+    spins: &'a mut HashMap<u64, f32>,
+    /// Whether something visible spins (frames keep coming).
+    spinning: bool,
+}
+
+/// A spinner's turn now, radians: moving along the clock while it can be seen (live, inside
+/// the window and its scroll views, above any open dialog, the window shown, motion not
+/// reduced), else holding where it last showed (at rest under reduced motion).
+fn spin<S>(w: &mut Walk<S>, id: u64, index: usize, rect: Rect, live: bool, period: Duration) -> f32 {
+    if w.reduced {
+        return 0.0;
+    }
+    let seen = live && !w.hidden && w.modal.is_none_or(|m| index >= m) && !rect.is_empty() && rect.intersects(&w.clip);
+    if !seen {
+        return w.spins.get(&id).copied().unwrap_or(0.0);
+    }
+    w.spinning = true;
+    let turns = (w.t / period.as_secs_f64()).fract() as f32;
+    // To a thousandth of a radian: a still frame repaints nothing new.
+    let angle = (turns * TAU * 1000.0).round() / 1000.0;
+    w.spins.insert(id, angle);
+    angle
 }
 
 /// An entry painted for a popup surface: its identity, ops and hits in the list.
@@ -1995,6 +2064,11 @@ fn paint_el<S>(
     let outer = scroll.map(|_| std::mem::take(&mut f.list.ops));
     let (first_hit, first_stop) = (f.list.hits.len(), w.nav.len());
     let scene = w.scene;
+    // What a scroll view's content can show is cut to it.
+    let clip = w.clip;
+    if scroll.is_some() {
+        w.clip = w.clip.intersect(rect);
+    }
     for (n, child) in el.children.iter().enumerate() {
         if live && !scene.ghosts.is_empty() {
             scene.paint(f, w, me.id, n, false);
@@ -2003,6 +2077,7 @@ fn paint_el<S>(
         paint_el(f, w, laid, poses, child, i, live, inner);
         w.pressable -= usize::from(enabled && live);
     }
+    w.clip = clip;
     if live && !scene.ghosts.is_empty() {
         scene.paint(f, w, me.id, el.children.len(), true);
     }
@@ -2035,6 +2110,19 @@ fn paint_el<S>(
     }
     if controls {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
+    }
+    // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
+    let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
+    if angle != 0.0 {
+        let c = rect.center();
+        let turn = super::rotate::Turn::new(Point::new(c.x.round(), c.y.round()), angle);
+        if !turn.none() {
+            let drawn = f.list.ops.split_off(start);
+            f.list.ops.extend(turn.ops(drawn));
+            for h in &mut f.list.hits[hits..] {
+                h.rect = turn.bounds(h.rect);
+            }
+        }
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
@@ -2108,59 +2196,32 @@ fn paint_arc(f: &mut Frame, rect: Rect, a: &ArcLook, value: f32, ink: Rgba) {
     if radius <= 0.0 {
         return;
     }
-    let q = a.start.quarters();
     let span = a.span * TAU;
     if let Some(track) = a.track {
-        stroke_arc(f, center, radius, width, q, span, track.resolve(f.theme));
+        stroke_arc(f, center, radius, width, a.start, span, track.resolve(f.theme));
     }
-    stroke_arc(f, center, radius, width, q, value.clamp(0.0, 1.0) * span, ink);
+    stroke_arc(f, center, radius, width, a.start, value.clamp(0.0, 1.0) * span, ink);
 }
 
-/// A clockwise arc of `sweep` radians from `q` quarter turns past twelve o'clock, with round
-/// caps unless it closes. `Op::Arc` always starts at twelve: a later start draws the arc up to
-/// its end clipped to the quarters it covers (exact, since quarter edges are radial), then
-/// any part past twelve as an arc of its own.
-fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, q: u8, sweep: f32, color: Rgba) {
+/// A clockwise arc of `sweep` radians from `start` radians past twelve o'clock, with round
+/// caps unless it closes.
+fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, start: f32, sweep: f32, color: Rgba) {
     let sweep = sweep.min(TAU);
     if sweep <= 0.0 || color.a <= 0.0 {
         return;
     }
-    let arc = |sweep: f32| Op::Arc {
+    f.push(Op::Arc {
         center,
         radius,
+        start,
         sweep,
         width,
         color,
-    };
-    let start = f32::from(q) * FRAC_PI_2;
-    let end = start + sweep;
-    if q == 0 {
-        f.push(arc(sweep));
-    } else {
-        let big = radius + width + 2.0;
-        let (cx, cy) = (center.x, center.y);
-        let right_bottom = Rect::new(cx, cy, big, big);
-        let left = Rect::new(cx - big, cy - big, big, 2.0 * big);
-        let top_left = Rect::new(cx - big, cy - big, big, big);
-        let clips: &[Rect] = match q {
-            1 => &[right_bottom, left],
-            2 => &[left],
-            _ => &[top_left],
-        };
-        let source: Arc<[Op]> = vec![arc(end.min(TAU))].into();
-        for &rect in clips {
-            f.push(Op::Clipped {
-                rect,
-                ops: source.clone(),
-            });
-        }
-        if end > TAU {
-            f.push(arc(end - TAU));
-        }
-    }
+    });
     if sweep >= TAU - 1e-4 {
         return;
     }
+    let end = start + sweep;
     // Round caps. On a quarter only the half beyond the arc's end draws (the end's edge is
     // radial, so the quarter's axis cuts it exactly), so a translucent stroke doesn't darken
     // where cap and stroke overlap; elsewhere the whole disc.
@@ -2178,21 +2239,27 @@ fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, q: u8, swee
         radius: width / 2.0,
         color,
     };
+    // The quarter an angle lies on, if it does.
+    let quarter = |angle: f32| {
+        let k = angle / FRAC_PI_2;
+        ((k - k.round()).abs() < 1e-4).then(|| (k.round() as i64).rem_euclid(4) as u8)
+    };
     let at = point(start);
-    f.push(Op::Clipped {
-        rect: before(at, q),
-        ops: vec![disc(at)].into(),
-    });
-    let quarters = end / FRAC_PI_2;
-    let at = point(end);
-    if (quarters - quarters.round()).abs() < 1e-4 {
-        // Past an end on quarter k is before a start on the opposite quarter.
-        f.push(Op::Clipped {
-            rect: before(at, quarters.round() as u8 + 2),
+    match quarter(start) {
+        Some(q) => f.push(Op::Clipped {
+            rect: before(at, q),
             ops: vec![disc(at)].into(),
-        });
-    } else {
-        f.push(disc(at));
+        }),
+        None => f.push(disc(at)),
+    }
+    let at = point(end);
+    match quarter(end) {
+        // Past an end on quarter k is before a start on the opposite quarter.
+        Some(q) => f.push(Op::Clipped {
+            rect: before(at, q + 2),
+            ops: vec![disc(at)].into(),
+        }),
+        None => f.push(disc(at)),
     }
 }
 

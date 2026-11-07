@@ -39,21 +39,26 @@ notes area).
 | `text(s)` | one line in a type role (`.font(TextRole)`), cut with an ellipsis; `.wrap(lines)` wraps |
 | `icon(Icon)` | a vector icon filling its square box (`token::ICON` unless sized) |
 | `image(Arc<Image>)` | a bitmap at its own size unless sized; rounded with `.radius` |
-| `arc(fraction)` | a ring or meter: a circle fitting its box, `fraction` of its span filled in `color` (`token::ACCENT`) over a track (`.track(paint)`, `token::FILL`; `.no_track()`), stroked `token::RING` wide (`.stroke(len)`) with round caps; `.arc_start(ArcStart::Top \| Right \| Bottom \| Left)` and `.arc_span(0..=1)` (`Left` with `0.5` is a semicircle meter); with motion the fraction springs |
+| `arc(fraction)` | a ring or meter: a circle fitting its box, `fraction` of its span filled in `color` (`token::ACCENT`) over a track (`.track(paint)`, `token::FILL`; `.no_track()`), stroked `token::RING` wide (`.stroke(len)`) with round caps; `.arc_start(ArcStart::Top \| Right \| Bottom \| Left)` or any start, `.arc_angle(radians)` clockwise from twelve (`1.25 * PI` is half past seven), and `.arc_span(0..=1)` (`Left` with `0.5` is a semicircle meter; 7:30 with `0.75` a gauge); with motion the fraction springs |
 | `paint(\|f, rect, id\| ..)` | draws with the kit (`Frame`) into its laid-out rect; `id` is the element's hit id, so a kit control drawn here hovers, presses and focuses like any element |
 | `text_input(key)`, `text_area(key)` | a text field: one line, or wrapped lines that scroll; see [Text fields](#text-fields) |
 
 - **Layout:** `w`, `h`, `size`, `w_full`, `h_full`, `grow`, `min_*`, `max_*`, `gap`, `pad`,
-  `pad_x`, `pad_y`, `align` (cross axis), `justify` (main axis), `absolute(x, y)`.
+  `pad_x`, `pad_y`, `align` (cross axis), `justify` (main axis), `absolute(x, y)`. Every box
+  is a containing block: an absolute child is placed from its parent's corner and its
+  `w_full`/`h_full` are the parent's box, padding included (as CSS's), at any depth.
 - **Style:** `fill`, `color` (text and icon ink), `radius` (clamped to a capsule), `shadow`
   (the theme's soft shadow at `ShadowLevel::Raised`), `shadow_level(ShadowLevel::Menu)` (a
   menu's, a dialog's...), `box_shadow(SoftShadow)` (a custom one), `opacity` (the element and
-  everything in it). A popup's window grows by its shadows' reach.
+  everything in it), `focus_within(|el| el.fill(..))` (a look while focus is on or in it). A
+  popup's window grows by its shadows' reach.
+- **Transform:** `rotate(radians)` and `spin(period)`. See [Rotation and
+  spinners](#rotation-and-spinners).
 - **Semantics:** `key`, `role`, `label`, `checked`, `disabled`, `focusable`, `description`,
-  `value` (the value as text, "40%"), `selected`, `expanded`, `range(min, max, step, value)`.
-  See [Accessibility values](#accessibility-values).
-- **Keyboard:** `focus_group(Orientation)`, `select_follows_focus()`. See
-  [Keys and focus](#keys-and-focus).
+  `value` (the value as text, "40%"), `selected`, `expanded`, `range(min, max, step, value)`,
+  `invalid(bool)`, `active_descendant(key)`. See [Accessibility values](#accessibility-values).
+- **Keyboard:** `focus_group(Orientation)`, `select_follows_focus()`; `tx.focus(key)`,
+  `tx.blur()`. See [Keys and focus](#keys-and-focus).
 - **Scrolling:** `scroll(Axis::Vertical | Horizontal)`. See [Scroll views](#scroll-views).
 - **Overlays:** `overlay(popover(..) | menu(..) | dialog(..) | toasts(..))`, `tooltip(text)`.
   See [Overlays](#overlays).
@@ -69,7 +74,8 @@ notes area).
   `on_input(|s, text: &str| ..)` and `on_submit(|s, text: &str| ..)` (text fields),
   `on_context_menu(|s, x, y| ..)` (secondary click or the Menu key, design px in the window)
   and `on_timeout(after, |s| ..)` (once, `after` the element appears).
-  `tx.scroll_into_view(key)` shows an element once the view has run.
+  `tx.scroll_into_view(key)` shows an element once the view has run; `tx.focus(key)` and
+  `tx.blur()` move keyboard focus then.
 
 Lengths are design pixels (`f32`) or theme tokens (`token::PAD`, `token::CONTROL`,
 `token::RADIUS_CARD`...); colours are `Rgba` or tokens (`token::LABEL`, `token::CARD`...). Make
@@ -94,10 +100,23 @@ laid out, so a new theme (`Runtime::set_theme`) restyles without running the vie
    `role` or `label`; their role, label and checked state are what assistive technology
    reads. Hit ids are stable hashes of the identity. Only interactive ones are
    `Hit::actionable`, so hover and focus skip a labelled heading, which is still announced
-   (not as disabled).
+   (not as disabled). Announced content inside an enabled control (a table's cells in their
+   row) keeps its own hit for assistive technology, but the pointer goes through it: hover,
+   presses and tooltips land on the control. A control inside a control still takes its own.
 
 Focus rings come from the theme's `FocusRing` (width and gap in design px, the accent at its
-opacity); the default ring draws exactly what `Frame::focus_ring` does.
+opacity); the default ring, at rest, draws exactly what `Frame::focus_ring` does.
+
+**Interaction feedback eases** (`el/feedback.rs`): hover and press washes ease in and out
+along the theme's `motion.interactive` spring (critically damped, so a wash never
+overshoots), and a focus ring fades up while growing from the box's edge out to its gap
+(along the same spring). Feedback starts one display frame in, so the frame after a hover,
+press or Tab already shows it moving. It runs on the runtime clock (time scale included) and
+never runs the view; an entry exists only while a control is hot or easing back, so a settled
+window asks for no frames. Reduced motion lands every change at once. Kit controls drawn
+through `paint` draw their own washes, which still snap. `tests/el_focus.rs` checks the
+easing, its end (no frames, no timer), reduced motion, focus by key, focus-within, the new
+semantics and cells passing presses to their row.
 
 The keyed diff is recorded in `Runtime::changes()`: every keyed element that came, went, moved
 or changed its fill or opacity, with its previous and target layout snapshot.
@@ -129,6 +148,33 @@ view never runs for animation, and `Runtime::animating()` says whether anything 
 - On screen, positions are whole device pixels and colours 8-bit steps, so the slow tail of
   a spring repaints identical lists, which the surface does not draw. Damage during an
   animation covers only the ops that moved (`tests/el_motion.rs` checks the knob and the card).
+
+## Rotation and spinners
+
+```rust
+icon(Icon::ChevronRight).rotate(if s.open { FRAC_PI_2 } else { 0.0 }).animate()  // a disclosure
+arc(0.25).size(20.0).no_track().spin(Duration::from_secs(1))                   // a spinner
+```
+
+- **`.rotate(radians)`** turns the element and its subtree clockwise about its centre at
+  draw time: layout keeps the upright box, while its ops, its hits (their bounding box) and so
+  its damage are turned. With motion the angle springs (it snaps under reduced motion). The
+  renderers have no transform: `el/rotate.rs` maps each op onto a turned op of its own kind.
+  Arcs (their start), lines and circles turn exactly at any angle, every box at quarter
+  turns, and icons are drawn as their stroked outline (lines with round joins and caps) while
+  turned. Text, images, filled icons and boxes at other angles stay upright about their
+  turned centre, and a clip at another angle grows to the turned box.
+- **`.spin(period)`** adds a turn every `period` on the runtime clock. A spinner moves only
+  while it can be seen: laid out and live (not leaving), inside the window and every scroll
+  view around it, not under an open dialog, its window shown (`Runtime::set_visible`; the
+  host follows `Event::VisibilityChanged` on Windows and macOS), and motion not reduced
+  (there it rests at its own angle). Otherwise it holds where it was, and frames run only
+  while something visible spins, so a spinner scrolled away, under a dialog or in a hidden
+  window leaves no ticker. Its angle moves in thousandths of a radian. The view never runs.
+
+`tests/el_spin.rs` checks the spinner's clock, every stop and the ticker's end, a turned box's
+drawing, hits, pixels and damage, a chevron springing a quarter turn as its outline, and an arc
+from half past seven, by its pixels.
 
 `tests/golden/el-motion-*.png` are frame strips (0.1, 0.15, 0.2, 0.3, 0.45 and 1.5 s after a
 click at 0.1 s), made through the same path as
@@ -232,15 +278,32 @@ hidden in a scroll view are reached, and focus arriving there scrolls them into 
 handlers run as the key arrives (after any queued presses), not at the next frame, so they can
 say whether they used it.
 
+**Focus by key.** `tx.focus(key)` (from any handler) and `Runtime::focus(key)` (from the
+host) move focus to the first focusable element keyed `key` once the view has run, and scroll
+it into view; `tx.blur()` and `Runtime::blur()` take it away. A key handler's move shows the
+ring; others keep whether it showed. A key no enabled, focusable element has leaves focus
+where it is. A tree's Left to its parent and Right into its first child, a search field's
+Escape, a combobox's Down into its list are each one call.
+
+**Focus-within.** `.focus_within(|el| el.fill(token::FILL))` gives an element another look
+(fill, colour, radius, shadow, opacity below 1) while focus is on it or anywhere inside it.
+Focus moving in and out retargets its look without running the view, springing along its
+motion.
+
 ## Accessibility values
 
 `Runtime::semantics()` holds what each hit item says beyond its name, role and checked state,
 and `Runtime::present` hands it to the surface (`Surface::set_accessibility_semantics`), so
 `Hit` stays as it was. A `range` is `Semantics::Range` (UI Automation's RangeValue, with
 increment, decrement and set when it steps); `description`, `value`, `selected` and
-`expanded` are one `Semantics::Detail`. `--tree` dumps them too: `range` (`[min, max,
-value]`), `value`, `description`, `selected`, `expanded`, and `scroll` (a scroll view's
-offset, design px).
+`expanded` are one `Semantics::Detail`, with `invalid` (`El::invalid`: AccessKit's
+invalid, for a field with an error; pair it with a description saying why) and
+`active_descendant` (`El::active_descendant(key)`: the hit of the first element keyed `key`,
+such as a combobox's highlighted row in its list overlay, which assistive technology reads as
+if it had focus while the field keeps it; left out while that element has no hit in the
+list). `--tree` dumps them too: `range` (`[min, max, value]`), `value`, `description`,
+`selected`, `expanded`, `scroll` (a scroll view's offset, design px), `invalid` and
+`active_descendant` (the key).
 
 ## Scroll views
 
@@ -430,8 +493,13 @@ use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x,
     trigger, not with its selected item over it.
   - Overlays aren't capped to the window or screen: give a long one `max_h` and a scroll
     view.
-- Arcs start on a quarter turn: `Op::Arc` always starts at twelve, and later starts are clipped
-  from it. A free start angle (a 7:30 gauge) needs a start on `Op::Arc` in every renderer.
+- Rotation has no renderer transform: text, images, filled icons and boxes at angles other
+  than quarter turns stay upright (see [Rotation and spinners](#rotation-and-spinners)). A
+  turned icon is its outline in lines and discs, so a translucent ink darkens slightly where
+  they overlap. A transform op (or a rotation on `Op::Icon`) would make every op exact.
+- `spin` is the one continuous channel (a turn); indeterminate bars that slide need a clip
+  builder and a `continuous` phase, not there yet. Linux doesn't tell the host when the window
+  is hidden, so spinners there stop only for the other reasons.
 - Scroll views have no rubber band, snapping, `Both` axis or momentum beyond a notch's glide;
   Shift+wheel does not scroll sideways (the event carries no modifiers).
 - Shared-element motion (`matched`), finite sequences, and theme elevation (the shadow colour

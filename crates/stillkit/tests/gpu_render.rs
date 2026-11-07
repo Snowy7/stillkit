@@ -34,7 +34,7 @@ fn page(ui: &mut Ui) -> DisplayList {
             Op::Text { rect: Rect::new(36.0, 34.0, w, h), text: "Liquid glass, partial redraw".into(), style: text, color: ink },
             Op::Icon { rect: Rect::new(36.0, 70.0, 24.0, 24.0), icon: Icon::Play, weight: 1.6, color: ink },
             Op::Icon { rect: Rect::new(70.0, 70.0, 24.0, 24.0), icon: Icon::Shuffle, weight: 1.6, color: ink },
-            Op::Arc { center: Point::new(250.0, 90.0), radius: 22.0, sweep: 4.0, width: 4.0, color: Rgba::new(0.2, 0.55, 1.0, 1.0) },
+            Op::Arc { center: Point::new(250.0, 90.0), radius: 22.0, start: 0.0, sweep: 4.0, width: 4.0, color: Rgba::new(0.2, 0.55, 1.0, 1.0) },
             Op::Line { from: Point::new(36.0, 110.0), to: Point::new(284.0, 110.0), width: 1.0, color: Rgba::new(1.0, 1.0, 1.0, 0.2) },
             Op::RoundedImage { rect: Rect::new(36.0, 124.0, 56.0, 56.0), image, opacity: 1.0, source: None, radius: 12.0 },
             Op::RoundedClipped {

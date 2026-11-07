@@ -393,6 +393,9 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                     rt.preedit(&text, cursor);
                 }
                 Event::SettingChanged => rt.set_reduced_motion(args.reduced || reduced_motion()),
+                // Spinners hold still while the window is hidden (Linux doesn't say).
+                #[cfg(any(windows, target_os = "macos"))]
+                Event::VisibilityChanged => rt.set_visible(surface.is_visible()),
                 // A slider's increment or a new value comes with its invoke.
                 Event::Invoke(hit) => match surface.take_accessibility_action(hit) {
                     Some(action) => {
