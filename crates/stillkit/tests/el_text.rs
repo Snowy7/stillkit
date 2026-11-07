@@ -241,6 +241,20 @@ fn a_secure_field_shows_bullets_and_tells_no_text() {
     // A plain field tells its text, and takes a new one from assistive technology.
     let name = rt.list().hits.iter().find(|h| h.label.as_ref() == "Name").unwrap().id;
     assert!(rt.semantics().iter().any(|(id, s)| *id == name && *s == Semantics::Text("clip".into())));
+    let runs = rt.semantics().iter().find_map(|(id, s)| match s {
+        Semantics::Field(t) if *id == name => Some(t.clone()),
+        _ => None,
+    });
+    let runs = runs.expect("the field's lines, by character");
+    assert_eq!(runs.lines.len(), 1);
+    assert_eq!(&*runs.lines[0].text, "clip");
+    assert_eq!(runs.lines[0].chars.len(), 4);
+    assert!(runs.lines[0].chars.windows(2).all(|w| w[1].0 > w[0].0), "characters left to right");
+    assert_eq!((runs.anchor, runs.caret), ((0, 4), (0, 4)), "the caret after the paste");
+    assert!(
+        !rt.semantics().iter().any(|(_, s)| matches!(s, Semantics::Field(t) if t.lines.iter().any(|l| l.text.contains('h')))),
+        "the password has no runs"
+    );
     assert!(rt.accessibility_action(name, &AccessibilityAction::SetText("Grace".into())));
     rt.frame(FRAME);
     assert_eq!(rt.state().name, "Grace");

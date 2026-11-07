@@ -1762,6 +1762,9 @@ fn paint_el<S>(
                 // What assistive technology reads and sets; a secure field tells nothing.
                 if live && !spec.secure {
                     w.semantics.push((me.hit, Semantics::Text(field.ed.text.as_str().into())));
+                    if let Some(text) = field.accessible(scroll_y) {
+                        w.semantics.push((me.hit, Semantics::Field(Arc::new(text))));
+                    }
                 }
             }
         }

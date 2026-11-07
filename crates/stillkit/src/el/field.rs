@@ -185,6 +185,35 @@ impl Field {
         }
     }
 
+    /// The field's lines, characters and selection for assistive technology (`scroll_y` a text
+    /// area's offset). `None` while an IME composes (its text isn't the field's yet).
+    pub fn accessible(&self, scroll_y: f32) -> Option<crate::FieldText> {
+        let look = self.look.as_ref().filter(|_| self.ed.preedit.is_none())?;
+        let top = self.top(Some(look)) - scroll_y;
+        let left = look.content.left - self.scroll_x;
+        let lines = self
+            .shape
+            .lines
+            .iter()
+            .enumerate()
+            .map(|(n, l)| crate::TextLine {
+                text: self.ed.text.get(l.start..l.end).unwrap_or("").into(),
+                rect: Rect::new(left, top + n as f32 * self.shape.line, l.width(), self.shape.line),
+                chars: l.stops.windows(2).map(|w| (w[0].1, w[1].1 - w[0].1)).collect(),
+            })
+            .collect();
+        let place = |at: usize| {
+            let n = self.shape.line_of(at);
+            let k = self.shape.lines.get(n).map_or(0, |l| l.stops.iter().filter(|s| s.0 < at).count());
+            (n, k)
+        };
+        Some(crate::FieldText {
+            lines,
+            anchor: place(self.ed.anchor),
+            caret: place(self.ed.caret),
+        })
+    }
+
     /// The caret moved or the text changed: the blink restarts.
     pub fn touch(&mut self, now: Duration) {
         self.blink = now;
