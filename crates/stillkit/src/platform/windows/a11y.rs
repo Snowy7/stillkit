@@ -191,7 +191,9 @@ impl ActionHandler for Actions {
             }
         }
         let kind = match request.action {
-            Action::Click => 0,
+            // A trigger's Expand and Collapse are its press: UI Automation shows such a control
+            // as ExpandCollapse, which hides Invoke.
+            Action::Click | Action::Expand | Action::Collapse => 0,
             Action::Focus => 1,
             Action::SetValue | Action::Increment | Action::Decrement | Action::CustomAction => 0,
             _ => return,
@@ -267,6 +269,37 @@ mod tests {
         assert!(!first.is_disabled());
         assert!(tree.nodes[2].1.is_disabled());
         assert_eq!(tree.nodes[2].1.label(), Some("item 2"));
+    }
+
+    /// A trigger with `expanded` is an ExpandCollapse control in UI Automation: it must offer
+    /// the action that changes its state, which `do_action` turns into its press.
+    #[test]
+    fn triggers_offer_expand_when_closed_and_collapse_when_open() {
+        let trigger = Hit {
+            id: 0,
+            rect: Rect::new(0.0, 0.0, 80.0, 24.0),
+            role: Role::Button,
+            label: "Share".into(),
+            enabled: true,
+            actionable: true,
+            checked: None,
+        };
+        for (open, offered, absent) in
+            [(false, Action::Expand, Action::Collapse), (true, Action::Collapse, Action::Expand)]
+        {
+            let detail = crate::a11y::Detail { expanded: Some(open), ..Default::default() };
+            let tree = Snapshot {
+                role: Role::Window,
+                name: "app".into(),
+                hits: vec![trigger.clone()],
+                focus: None,
+                semantics: vec![(0, Semantics::Detail(detail))],
+            }
+            .tree();
+            let node = &tree.nodes[1].1;
+            assert_eq!(node.is_expanded(), Some(open));
+            assert!(node.supports_action(offered) && !node.supports_action(absent));
+        }
     }
 
     /// AccessKit aborts the process on a duplicate child or a focus outside the tree (the

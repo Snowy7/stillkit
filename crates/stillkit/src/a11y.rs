@@ -183,6 +183,9 @@ impl Snapshot {
                         }
                         if let Some(expanded) = detail.expanded {
                             node.set_expanded(expanded);
+                            // A trigger opens and closes with its press; offer only the one
+                            // that changes something, so a client's Expand never closes it.
+                            node.add_action(if expanded { Action::Collapse } else { Action::Expand });
                         }
                         if let Some(popup) = detail.popup {
                             node.set_has_popup(popup);
