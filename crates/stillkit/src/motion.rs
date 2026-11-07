@@ -84,6 +84,62 @@ impl Spring {
         x as f32
     }
 
+    /// The displacement from rest and the velocity `t` seconds after letting go at displacement
+    /// `d0` moving at `v0` (units per second). Exact in every damping regime, so a value
+    /// retargeted mid-flight restarts from its true position and velocity:
+    /// [`at`](Self::at)`(t) == 1 - released(1.0, 0.0, t).0`.
+    pub fn released(&self, d0: f32, v0: f32, t: f32) -> (f32, f32) {
+        let (m, k, c) = (
+            f64::from(self.mass),
+            f64::from(self.stiffness),
+            f64::from(self.damping),
+        );
+        let (d0, v0, t) = (f64::from(d0), f64::from(v0), f64::from(t));
+        let w0 = (k / m).sqrt();
+        let zeta = c / (2.0 * (k * m).sqrt());
+        let (d, v) = if (zeta - 1.0).abs() < 1e-6 {
+            let b = v0 + w0 * d0;
+            let e = (-w0 * t).exp();
+            (e * (d0 + b * t), e * (b - w0 * (d0 + b * t)))
+        } else if zeta < 1.0 {
+            let a = zeta * w0;
+            let wd = w0 * (1.0 - zeta * zeta).sqrt();
+            let b = (v0 + a * d0) / wd;
+            let (e, (sin, cos)) = ((-a * t).exp(), (wd * t).sin_cos());
+            (
+                e * (d0 * cos + b * sin),
+                e * ((wd * b - a * d0) * cos - (a * b + wd * d0) * sin),
+            )
+        } else {
+            let root = (zeta * zeta - 1.0).sqrt();
+            let (r1, r2) = (-w0 * (zeta - root), -w0 * (zeta + root));
+            let a = (v0 - r2 * d0) / (r1 - r2);
+            let b = d0 - a;
+            let (e1, e2) = ((r1 * t).exp(), (r2 * t).exp());
+            (a * e1 + b * e2, a * r1 * e1 + b * r2 * e2)
+        };
+        (d as f32, v as f32)
+    }
+
+    /// The same spring with no overshoot: damping raised to critical when it is below.
+    /// Colours and opacity move along this, so they never pass their target.
+    pub fn calm(self) -> Self {
+        let critical = 2.0 * (self.stiffness * self.mass).sqrt();
+        Self {
+            damping: self.damping.max(critical),
+            ..self
+        }
+    }
+
+    /// The same curve `by` times as fast (the same bounce, `1 / by` of the settle time).
+    pub fn faster(self, by: f32) -> Self {
+        Self {
+            stiffness: self.stiffness * by * by,
+            damping: self.damping * by,
+            ..self
+        }
+    }
+
     /// Seconds until the spring stays within `epsilon` of rest (sampled every millisecond,
     /// at most 3 s).
     pub fn settle(&self, epsilon: f32) -> f32 {
@@ -169,5 +225,32 @@ mod tests {
         assert_eq!(tween.value(later), 0.0);
     }
 
+    #[test]
+    fn released_matches_the_step_response_and_its_own_velocity() {
+        for spring in [
+            Spring::DEFAULT,
+            Spring::BOUNCY,
+            Spring::new(1.0, 100.0, 20.0),
+            Spring::new(1.0, 100.0, 40.0),
+        ] {
+            let (d, v) = spring.released(3.0, -40.0, 0.0);
+            assert!((d - 3.0).abs() < 1e-5 && (v + 40.0).abs() < 1e-3, "{spring:?}");
+            for ms in [0u16, 30, 120, 400] {
+                let t = f32::from(ms) / 1000.0;
+                let (d, _) = spring.released(1.0, 0.0, t);
+                assert!((1.0 - d - spring.at(t)).abs() < 1e-5, "{spring:?} at {t}");
+                // The velocity is the slope of the position.
+                let h = 1e-3;
+                let (a, _) = spring.released(3.0, -40.0, t);
+                let (b, _) = spring.released(3.0, -40.0, t + h);
+                let (_, v) = spring.released(3.0, -40.0, t + h / 2.0);
+                assert!(((b - a) / h - v).abs() < 0.05 * v.abs().max(1.0), "{spring:?} at {t}");
+            }
+        }
+        let calm = Spring::BOUNCY.calm();
+        assert!((0..1000).all(|ms| calm.at(ms as f32 / 1000.0) <= 1.0 + 1e-6));
+        let fast = Spring::DEFAULT.faster(2.0);
+        assert!((fast.settle(0.001) * 2.0 - Spring::DEFAULT.settle(0.001)).abs() < 0.01);
+    }
 
 }

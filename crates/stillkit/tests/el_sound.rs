@@ -27,7 +27,7 @@ fn by_hand(ui: &mut Ui, t: &Theme, s: f32, m: &Sound) -> DisplayList {
     f.label(title.left, title.top, "Sound", TextRole::Title2, t.color.label, title.width());
     let (row, rest) = rest.take_top(f.px(t.metrics.control), f.px(8.0));
     f.slider(VOLUME, row, m.level, "Volume", Some(Icon::Volume(2)));
-    let (row, _) = rest.take_top(f.px(t.metrics.item), 0.0);
+    let (row, _) = rest.take_top(f.px(t.metrics.row_single), 0.0);
     f.switch(MUTE, row.right, row.center().y, m.muted, "Mute", true);
     f.list
 }

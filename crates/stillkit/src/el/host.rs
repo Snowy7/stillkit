@@ -1,12 +1,14 @@
 //! Hosting a view: [`run`] opens a surface and drives a [`Runtime`] from its events, asleep
-//! in the message wait whenever nothing happens (no timer, no ticker). The same binary is the
-//! agent tooling, headless on a virtual clock:
+//! in the message wait whenever nothing happens. Display-rate frames
+//! ([`Surface::animation_frames`]) run only while something animates, and stop when it
+//! settles. The same binary is the agent tooling, headless on a virtual clock:
 //!
 //! ```text
 //! app --snap out.png [--scale 2] [--at 1.5]   render the frame at T seconds
 //! app --tree out.json                          dump every element (key, path, role, rect...)
 //! app --script s.json [--snap ..] [--tree ..]  replay timed input first
 //! app --inactive                               a window that never takes the focus
+//! app --reduced                                reduced motion, whatever the system says
 //! ```
 //!
 //! Scripts and dumps use design pixels. A script is a JSON array of steps, each with an `at`
@@ -22,8 +24,8 @@ use anyhow::{Context, Result, bail};
 
 use super::json::{Json, parse, quote};
 use super::{El, Runtime};
-use crate::{Chrome, Event, Kind, Rect, Rgba, Surface, Theme, next_event};
-use crate::platform::current::host::{screen_size, shift_down, wait};
+use crate::platform::current::host::{reduced_motion, screen_size, shift_down, wait};
+use crate::{AnimationFrames, Chrome, Event, Kind, Rect, Rgba, Surface, Theme, next_event};
 
 /// An app to [`run`]: its window and its view.
 pub struct App<S, V> {
@@ -188,6 +190,7 @@ struct Args {
     scale: Option<f32>,
     at: Option<Duration>,
     inactive: bool,
+    reduced: bool,
 }
 
 impl Args {
@@ -202,7 +205,8 @@ impl Args {
                 "--scale" => out.scale = Some(value()?.parse()?),
                 "--at" => out.at = Some(Duration::from_secs_f64(value()?.parse()?)),
                 "--inactive" => out.inactive = true,
-                other => bail!("unknown flag {other} (--snap, --tree, --script, --scale, --at, --inactive)"),
+                "--reduced" => out.reduced = true,
+                other => bail!("unknown flag {other} (--snap, --tree, --script, --scale, --at, --inactive, --reduced)"),
             }
         }
         Ok(out)
@@ -236,6 +240,7 @@ fn headless<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Arg
     let opaque = matches!(app.kind, Kind::App { .. }).then(|| backing(&app.theme));
     let mut rt = Runtime::new(app.state, app.view, app.theme, device(app.size, s), s)?;
     rt.set_background(opaque);
+    rt.set_reduced_motion(args.reduced);
     match &args.script {
         Some(path) => {
             let text = std::fs::read_to_string(path).with_context(|| path.display().to_string())?;
@@ -272,6 +277,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     let opaque = is_app.then(|| backing(&app.theme));
     let mut rt = Runtime::new(app.state, app.view, app.theme, size, s)?;
     rt.set_background(opaque);
+    rt.set_reduced_motion(args.reduced || reduced_motion());
     rt.frame(Duration::ZERO);
     if let Some(backing) = opaque {
         surface.set_background(backing);
@@ -289,6 +295,8 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
         _ => surface.show(),
     }
     let started = Instant::now();
+    // Display-rate frames, only while something animates: dropping them stops the producer.
+    let mut frames: Option<(AnimationFrames, Instant)> = None;
     // Events our own calls queued (showing, presenting) wait here instead of in the queue.
     let mut held = next_event();
     loop {
@@ -301,9 +309,11 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
             }
             match event {
                 Event::Close => return Ok(()),
+                Event::Frame => {}
                 Event::Resized(w, h) => rt.resize((w, h)),
                 Event::DpiChanged(dpi) => rt.set_scale(dpi as f32 / 96.0),
                 Event::Key(0x09) => rt.tab(shift_down()),
+                Event::SettingChanged => rt.set_reduced_motion(args.reduced || reduced_motion()),
                 event => rt.handle(&event),
             }
         }
@@ -311,9 +321,17 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
             chrome(&surface, &rt);
             rt.present(&mut surface, origin)?;
         }
+        if !rt.animating() {
+            frames = None;
+        } else if frames.as_ref().is_none_or(|(_, since)| since.elapsed() >= FRAMES) {
+            frames = Some((surface.animation_frames(FRAMES), Instant::now()));
+        }
         held = next_event();
     }
 }
+
+/// How long one frame producer runs before it is renewed (if anything still moves).
+const FRAMES: Duration = Duration::from_secs(10);
 
 /// The top-left that centres `size` on the primary screen.
 fn centred((w, h): (u32, u32)) -> (i32, i32) {

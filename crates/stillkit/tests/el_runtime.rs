@@ -107,7 +107,7 @@ fn tab_focuses_the_switch_and_enter_presses_it() {
 #[test]
 fn a_snapshot_renders_at_the_requested_scale() {
     let mut rt = runtime(2.0);
-    rt.update(|s| s.on = true);
+    rt.update_instant(|s| s.on = true); // the settled frame: the knob springs otherwise
     rt.frame(FRAME);
     let image = rt.snap().unwrap();
     assert_eq!((image.width, image.height), (640, 360));
@@ -138,4 +138,26 @@ fn a_script_replays_on_the_virtual_clock_and_the_tree_dumps_it() {
     assert!(tree.contains(r#""key":"switch","path":"/switch","role":"Switch","label":"Light""#), "{tree}");
     assert!(tree.contains(r#""text":"The light is on""#), "{tree}");
     assert!(tree.contains(r#""key":"knob","path":"/switch/knob""#), "{tree}");
+}
+
+#[test]
+fn a_label_with_a_role_is_announced_enabled_but_takes_no_focus_or_hover() {
+    use stillkit::el::{El, col, el, text};
+    fn view(_: &()) -> El<()> {
+        col()
+            .child(text("Sound").role(Role::Heading).key("title"))
+            .child(el().key("go").size(20.0).label("Go").on_press(|_: &mut ()| {}))
+    }
+    let mut rt = Runtime::new((), view, theme(), (200, 100), 1.0).unwrap();
+    let title = rt.list().hits.iter().find(|h| &*h.label == "Sound").cloned().unwrap();
+    assert!(title.enabled && !title.actionable, "{title:?}");
+    let at = rt.find("title").unwrap().center();
+    rt.pointer_move(at.x, at.y);
+    assert!(!rt.frame(FRAME), "no hover on a label");
+    rt.tab(false);
+    rt.frame(FRAME);
+    assert!(rt.presented("go").unwrap().focused, "Tab lands on the button");
+    rt.tab(false);
+    rt.frame(FRAME);
+    assert!(rt.presented("go").unwrap().focused, "and only on it");
 }

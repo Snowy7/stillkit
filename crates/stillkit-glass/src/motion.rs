@@ -13,7 +13,7 @@ use std::f32::consts::TAU;
 /// flatter, over-damped curve.
 ///
 /// ```
-/// use liquid_rust::Spring;
+/// use stillkit_glass::Spring;
 /// assert_eq!(Spring::SNAPPY.bounce, 0.15);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]

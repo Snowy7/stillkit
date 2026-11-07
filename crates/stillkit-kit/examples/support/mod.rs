@@ -148,6 +148,7 @@ pub fn component(i: usize, s: &State, disabled: bool) -> El<State> {
             .build()
             .key("target"),
         17 => CalendarMonth::new(2026, 11)
+            .today(7)
             .selected(s.day)
             .key("target")
             .disabled(disabled)
@@ -287,6 +288,7 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
                 }
                 rt.frame(Duration::ZERO);
             }
+            rt.frame(Duration::from_secs(2));
             paste(&mut sheet, &rt.snap()?, state as u32 * 280, y);
             y += cell_height(i);
         }

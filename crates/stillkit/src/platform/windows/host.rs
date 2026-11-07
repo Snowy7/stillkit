@@ -41,3 +41,9 @@ fn pump(millis: u32) {
         }
     }
 }
+
+/// Whether the user asked for less motion (Settings > Accessibility > Visual effects >
+/// Animation effects off, `SPI_GETCLIENTAREAANIMATION`).
+pub fn reduced_motion() -> bool {
+    !super::screen::animations_enabled()
+}

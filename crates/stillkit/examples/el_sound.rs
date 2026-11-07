@@ -29,7 +29,7 @@ pub fn view(s: &Sound) -> El<Sound> {
         )
         .child(
             row()
-                .h(token::ITEM)
+                .h(token::ROW_SINGLE)
                 .align(Align::Center)
                 .child(text("Mute").grow(1.0))
                 .child(

@@ -2,8 +2,8 @@
 
 use crate::scene::{Hit, HitId};
 
-/// The next enabled hit item after `current` going `delta` (+1 next, -1 previous), wrapping
-/// around; with no `current`, the first (or last). `None` when nothing is enabled.
+/// The next actionable hit item after `current` going `delta` (+1 next, -1 previous), wrapping
+/// around; with no `current`, the first (or last). `None` when nothing is actionable.
 pub fn step(hits: &[Hit], current: Option<HitId>, delta: i32) -> Option<HitId> {
     let count = hits.len() as i32;
     if count == 0 {
@@ -13,7 +13,7 @@ pub fn step(hits: &[Hit], current: Option<HitId>, delta: i32) -> Option<HitId> {
     let start = position.map_or(if delta > 0 { -1 } else { count }, |i| i as i32);
     (1..=count)
         .map(|n| &hits[(start + delta * n).rem_euclid(count) as usize])
-        .find(|h| h.enabled)
+        .find(|h| h.actionable)
         .map(|h| h.id)
 }
 
@@ -32,6 +32,7 @@ mod tests {
                 role: accesskit::Role::MenuItem,
                 label: "".into(),
                 enabled,
+                actionable: enabled,
                 checked: None,
             })
             .collect()
@@ -48,5 +49,12 @@ mod tests {
         assert_eq!(step(&hits, Some(0), -1), Some(30), "wraps up");
         assert_eq!(step(&[], None, 1), None);
         assert_eq!(step(&self::hits(&[false]), None, 1), None);
+    }
+
+    #[test]
+    fn enabled_labels_that_do_nothing_are_not_focus_stops() {
+        let mut hits = hits(&[true, true]);
+        hits[1].actionable = false;
+        assert_eq!(step(&hits, Some(0), 1), Some(0), "the label is skipped");
     }
 }

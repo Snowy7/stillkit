@@ -223,6 +223,7 @@ mod tests {
             role: Role::Button,
             label: "before".into(),
             enabled: true,
+            actionable: true,
             checked: None,
         }];
         assert!(a11y.update(&hits, None).is_none());
@@ -247,6 +248,7 @@ mod tests {
             role: Role::MenuItem,
             label: format!("item {id}").into(),
             enabled,
+            actionable: enabled,
             checked,
         };
         let snapshot = Snapshot {
@@ -277,6 +279,7 @@ mod tests {
             role: Role::Button,
             label: label.into(),
             enabled: true,
+            actionable: true,
             checked: None,
         };
         let mut snapshot = Snapshot {
@@ -326,6 +329,7 @@ mod tests {
             role: Role::Button,
             label: format!("hit {id}").into(),
             enabled: true,
+            actionable: true,
             checked: None,
         };
         let mut a11y = A11y::deferred(hwnd, Role::Pane, "calendar".into());
@@ -350,6 +354,7 @@ mod semantic_tests {
             role,
             label: "control".into(),
             enabled: true,
+            actionable: true,
             checked: None,
         };
         let snapshot = Snapshot {
@@ -413,6 +418,7 @@ mod semantic_tests {
                 role: Role::Button,
                 label: "Undo".into(),
                 enabled: false,
+                actionable: false,
                 checked: None,
             }],
             focus: None,

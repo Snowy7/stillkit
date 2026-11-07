@@ -94,7 +94,7 @@ pub struct Shadow {
 ///
 /// Start from a preset and adjust:
 /// ```
-/// use liquid_rust::{Color, Material};
+/// use stillkit_glass::{Color, Material};
 /// let primary = Material::tinted(Color::BLUE);
 /// let quiet = Material { frost: 10.0, ..Material::clear() };
 /// assert!(primary.tint.is_some() && quiet.frost == 10.0);

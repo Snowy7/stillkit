@@ -243,8 +243,18 @@ tx.set_theme(Theme::one_ui(..))                      // live switch; colours spr
 <h2>Progress</h2>
 <ul>
   <li><strong>Phase 0: done.</strong> <code>Snowy7/stillkit</code> is private, with 109 commits of history. mypaper branch <code>t3/0d9e3250</code> (<code>9ce3cd86</code>) builds on it under its old crate name, so no call site changed; <code>set_identity</code> keeps its window class names. Against untouched <code>main</code>, shell, Studio and Files fail the same tests (11 + 4, all already failing on <code>main</code>) with identical golden pixel diffs.</li>
-  <li><strong>Running:</strong> phase 1 (platform seam), phase 3 (element tree and agent tooling), and the looks as mixable parts, each on its own stillkit branch.</li>
-  <li><strong>macOS spike:</strong> waits for the MacBook.</li>
+  <li><strong>Merged into stillkit main:</strong>
+    <ul>
+      <li>phase 1, the platform seam;</li>
+      <li>the looks as mixable parts;</li>
+      <li>phase 3, the element tree and agent tooling (hello idles at 4.99 MB, 0 wakes);</li>
+      <li>the Linux backend (GNOME hello at 5.7 MB, 0 CPU);</li>
+      <li>phase 5 v1, the <code>stillkit-kit</code> components: 14 done, 3 partial;</li>
+      <li><code>stillkit-glass</code>.</li>
+    </ul>
+    mypaper's tests are unchanged after each merge.</li>
+  <li><strong>Running:</strong> phase 4 (animation runtime) and render modes with in-process glass on Windows.</li>
+  <li><strong>macOS spike:</strong> paused while Islam uses the MacBook; its draft favours CoreGraphics + CoreText.</li>
 </ul>
 
 <h3 id="linux">Linux spike (m6u, GNOME 50.1 Wayland)</h3>
@@ -263,6 +273,44 @@ tx.set_theme(Theme::one_ui(..))                      // live switch; colours spr
   <li><strong>GNOME has no layer-shell:</strong> a real bar or overlay there needs a GNOME Shell extension. KDE and wlroots have wlr-layer-shell. X11 uses dock windows and struts.</li>
   <li>IME: text-input-v3 in Mutter and KWin, IBus as fallback. Accessibility: AccessKit's AT-SPI adapter. Blur: KDE's blur protocol; newer Mutter has <code>ext-background-effect-v1</code>, not yet on this host.</li>
 </ul>
+
+<h2>Render modes and glass (added 2026-11-07)</h2>
+<p>Liquid Glass is now stillkit's own: <code>crates/stillkit-glass</code> is liquid-rust by al1h3n (MIT OR Apache-2.0, credited), with mypaper's speedups. It already does liquid merging (a smooth signed-distance union per container) and morphs. mypaper never wired those up.</p>
+<table>
+  <tr><th>Mode</th><th>UI drawn by</th><th>Glass</th><th>Cost</th></tr>
+  <tr><td><strong>Cpu</strong> (default)</td><td>software renderer, as today</td><td>a GPU process that already exists (mypaper's engine, a shared glass host), else none</td><td>about 5–8 MB, no driver</td></tr>
+  <tr><td><strong>Gpu</strong></td><td>hardware Direct2D on Windows; <code>vello_hybrid</code> on Linux and macOS</td><td><code>stillkit-glass</code> on the same device, in-process</td><td>about 150–240 MB of driver memory</td></tr>
+  <tr><td><strong>Auto</strong></td><td colspan="3">No glass: Cpu. Glass and an existing GPU process to reuse: Cpu with that process. Otherwise Gpu, because a separate process would pay the same driver cost. The rule is confirmed by measurement before it is fixed.</td></tr>
+</table>
+<p>Both modes keep damage-only redraw and zero idle work. Golden tests run on the CPU path; GPU output is checked against it within a small tolerance.</p>
+<div class="answer">
+  <p><strong>Final acceptance (Islam, 2026-11-07):</strong> every combination works with no issues. That means CPU alone, GPU alone, and CPU and GPU together, which is a per-surface choice inside one process. Glass comes from a separate process when one exists, or in-process.</p>
+  <p><strong>mypaper must not get slower or bigger, and lower is better.</strong> It stays in CPU mode, and nothing GPU-related compiles or loads unless a surface asks for it.</p>
+  <p>Gate before mypaper's branch merges: a live before/after on the same PC against <code>main</code>, using <code>measure.ps1</code> and the shell's own counters. It covers:</p>
+  <ul>
+    <li>shell idle private memory and CPU;</li>
+    <li>bar redraw median and p95;</li>
+    <li>menu open time;</li>
+    <li>first paint;</li>
+    <li>idle wakes.</li>
+  </ul>
+</div>
+
+<h2>Next phases</h2>
+<ol>
+  <li><strong>Element-tree features the components need:</strong> key handlers and focus groups, value semantics for screen readers, theme focus rings, an arc primitive, a scroll viewport, then anchored overlays and native text input.</li>
+  <li><strong>Component wave 2</strong>, toward Rune's ~34 kit modules:
+    <ul>
+      <li>menu and context menu, popover, tooltip, select and combobox, dialog and sheet, toast, command palette;</li>
+      <li>tabs, accordion, stepper, table, tree, text field and area, search;</li>
+      <li>date and colour pickers, sidebar and toolbar, chart, sortable list, avatar, skeleton, spinner, ring;</li>
+      <li>motion on every component;</li>
+      <li>fixes from the first gallery (calendar, badge, radio alignment).</li>
+    </ul>
+  </li>
+  <li><strong>Glass through the hook:</strong> containers (liquid merging) and morph targets, so neighbouring glass fuses and a button can morph into its menu.</li>
+  <li><strong>GPU mode on Linux and macOS</strong> (<code>vello_hybrid</code>), and the macOS backend once the MacBook is free (its spike leans to CoreGraphics + CoreText).</li>
+</ol>
 
 <h2>Risks</h2>
 <ul>

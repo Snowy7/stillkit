@@ -12,7 +12,7 @@
 //!
 //! ```no_run
 //! # fn demo(device: &wgpu::Device, queue: &wgpu::Queue, content: &wgpu::TextureView, target: &wgpu::TextureView) {
-//! use liquid_rust::{Frame, Glass, Material, Rect, Renderer, Scene};
+//! use stillkit_glass::{Frame, Glass, Material, Rect, Renderer, Scene};
 //!
 //! let mut scene = Scene::new();
 //! let bar = scene.add_container(16.0, 0);
