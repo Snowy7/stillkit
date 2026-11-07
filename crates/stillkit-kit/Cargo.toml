@@ -1,0 +1,17 @@
+[package]
+name = "stillkit-kit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Declarative components for stillkit"
+
+[dependencies]
+stillkit = { path = "../stillkit" }
+
+[dev-dependencies]
+stillkit = { path = "../stillkit", features = ["golden"] }
+anyhow.workspace = true
+
+[lints]
+workspace = true
