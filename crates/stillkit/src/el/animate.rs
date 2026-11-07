@@ -35,6 +35,8 @@ pub(crate) struct Target {
     pub radius: f32,
     /// The theme's shadow at this strength (0 or 1).
     pub shadow: f32,
+    /// An arc's filled fraction (0 for everything else).
+    pub value: f32,
     /// Its own or an ancestor's spring; `None` lands at once.
     pub motion: Option<Spring>,
     /// What presence moves along: its motion, or the theme's open spring.
@@ -89,6 +91,8 @@ pub(crate) struct Pose {
     /// Local (before `xf.s`).
     pub radius: f32,
     pub shadow: f32,
+    /// An arc's filled fraction now.
+    pub value: f32,
 }
 
 impl Pose {
@@ -112,14 +116,14 @@ pub(crate) enum Mode {
 
 /// A value of `N` components springing toward `target`.
 #[derive(Debug, Clone, Copy)]
-struct Prop<const N: usize> {
-    target: [f32; N],
-    moving: Option<Moving<N>>,
+pub(crate) struct Prop<const N: usize> {
+    pub(crate) target: [f32; N],
+    pub(crate) moving: Option<Moving<N>>,
 }
 
 /// Where a moving [`Prop`] was let go: its displacement and velocity at `start`.
 #[derive(Debug, Clone, Copy)]
-struct Moving<const N: usize> {
+pub(crate) struct Moving<const N: usize> {
     d0: [f32; N],
     v0: [f32; N],
     start: f64,
@@ -127,7 +131,7 @@ struct Moving<const N: usize> {
 }
 
 impl<const N: usize> Prop<N> {
-    fn at(target: [f32; N]) -> Self {
+    pub(crate) fn at(target: [f32; N]) -> Self {
         Self {
             target,
             moving: None,
@@ -148,13 +152,13 @@ impl<const N: usize> Prop<N> {
         (x, v)
     }
 
-    fn value(&self, t: f64) -> [f32; N] {
+    pub(crate) fn value(&self, t: f64) -> [f32; N] {
         self.sample(t).0
     }
 
     /// Heads for `target` from where it is at `t`, with its velocity, along `spring`; with no
     /// spring, lands on it. An unchanged target keeps its flight.
-    fn set(&mut self, target: [f32; N], spring: Option<Spring>, t: f64) {
+    pub(crate) fn set(&mut self, target: [f32; N], spring: Option<Spring>, t: f64) {
         if target == self.target {
             return;
         }
@@ -173,7 +177,7 @@ impl<const N: usize> Prop<N> {
 
     /// Lands it once every component is within `eps` of its target and slower than `10 eps`
     /// per second. Returns whether it still moves.
-    fn settle(&mut self, t: f64, eps: f32) -> bool {
+    pub(crate) fn settle(&mut self, t: f64, eps: f32) -> bool {
         let Some(m) = self.moving else { return false };
         let (x, v) = self.sample(t);
         let rest = (0..N).all(|i| (x[i] - self.target[i]).abs() < eps && v[i].abs() < eps * 10.0);
@@ -196,6 +200,7 @@ struct Track {
     opacity: Prop<1>,
     radius: Prop<1>,
     shadow: Prop<1>,
+    value: Prop<1>,
     /// 1 shown, 0 away.
     presence: Prop<1>,
     transition: Option<Transition>,
@@ -214,6 +219,7 @@ impl Track {
             opacity: Prop::at([target.opacity]),
             radius: Prop::at([target.radius]),
             shadow: Prop::at([target.shadow]),
+            value: Prop::at([target.value]),
             presence: Prop::at([1.0]),
             transition: target.transition,
             open: target.open,
@@ -233,6 +239,7 @@ impl Track {
         self.opacity.set([target.opacity], fade, t);
         self.radius.set([target.radius], spatial, t);
         self.shadow.set([target.shadow], fade, t);
+        self.value.set([target.value], spatial, t);
         self.transition = target.transition;
         self.open = target.open;
         if self.leaving {
@@ -257,6 +264,7 @@ impl Track {
             self.opacity.settle(t, color),
             self.radius.settle(t, 0.1),
             self.shadow.settle(t, color),
+            self.value.settle(t, 1.0 / 2048.0),
             self.presence.settle(t, color),
         ]
         .contains(&true)
@@ -269,6 +277,7 @@ impl Track {
             || self.opacity.moving.is_some()
             || self.radius.moving.is_some()
             || self.shadow.moving.is_some()
+            || self.value.moving.is_some()
             || self.presence.moving.is_some()
     }
 }
@@ -349,13 +358,15 @@ impl Animator {
         self.tracks.values().any(Track::moving)
     }
 
-    /// What every laid-out element shows now, in the same order.
-    pub fn poses(&self, laid: &[Laid], targets: &[Target]) -> Vec<Pose> {
+    /// What every laid-out element shows now, in the same order. `scrolled` gives each scroll
+    /// view's offset (by its place in `laid`, whole device px): its children move back by it.
+    pub fn poses(&self, laid: &[Laid], targets: &[Target], scrolled: &HashMap<usize, Point>) -> Vec<Pose> {
         let mut out: Vec<Pose> = Vec::with_capacity(laid.len());
         for (l, target) in laid.iter().zip(targets) {
-            let parent = l.parent.and_then(|p| out.get(p));
-            let (origin, xf) = parent.map_or((Point::new(0.0, 0.0), Xf::ID), |p| {
-                (Point::new(p.local.left, p.local.top), p.xf)
+            let parent = l.parent.and_then(|p| out.get(p).map(|pose| (p, pose)));
+            let (origin, xf) = parent.map_or((Point::new(0.0, 0.0), Xf::ID), |(p, pose)| {
+                let by = scrolled.get(&p).copied().unwrap_or(Point::new(0.0, 0.0));
+                (Point::new(pose.local.left - by.x, pose.local.top - by.y), pose.xf)
             });
             let pose = match self.tracks.get(&l.id) {
                 Some(track) => self.pose(track, origin, xf),
@@ -368,6 +379,7 @@ impl Animator {
                     opacity: target.opacity,
                     radius: target.radius,
                     shadow: target.shadow,
+                    value: target.value,
                 },
             };
             out.push(Pose {
@@ -400,6 +412,11 @@ impl Animator {
             opacity: scalar(&track.opacity) * fade,
             radius: track.radius.value(t)[0].max(0.0),
             shadow: scalar(&track.shadow),
+            // An arc's sweep to a thousandth of a turn, so its slow tail repaints nothing new.
+            value: match track.value.moving {
+                Some(_) => (track.value.value(t)[0].clamp(0.0, 1.0) * 1000.0).round() / 1000.0,
+                None => track.value.target[0],
+            },
         }
     }
 

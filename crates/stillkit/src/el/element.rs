@@ -120,11 +120,13 @@ impl Transition {
     }
 }
 
-/// What a handler can ask of the frame its change lands in ([`El::on_press_with`]).
+/// What a handler can ask of the frame its change lands in ([`El::on_press_with`],
+/// [`El::on_key`]).
 #[derive(Default)]
 pub struct Tx {
     pub(crate) instant: bool,
     pub(crate) theme: Option<Theme>,
+    pub(crate) reveal: Vec<Key>,
 }
 
 impl Tx {
@@ -136,6 +138,90 @@ impl Tx {
     /// A new look for the whole view; colours spring across where elements have motion.
     pub fn set_theme(&mut self, theme: Theme) {
         self.theme = Some(theme);
+    }
+
+    /// Once the view has run, scrolls every scroll view around the element keyed `key` just
+    /// enough to show it (a row just added, a search hit).
+    pub fn scroll_into_view(&mut self, key: impl Into<Key>) {
+        self.reveal.push(key.into());
+    }
+}
+
+/// A key going down, as [`El::on_key`] sees it: a virtual-key code (`Event::Key`), with names
+/// for the common ones. Match on the names: `KeyCode::ENTER => ..`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct KeyCode(pub u16);
+
+impl KeyCode {
+    pub const BACKSPACE: Self = Self(0x08);
+    pub const TAB: Self = Self(0x09);
+    pub const ENTER: Self = Self(0x0D);
+    pub const ESCAPE: Self = Self(0x1B);
+    pub const SPACE: Self = Self(0x20);
+    pub const PAGE_UP: Self = Self(0x21);
+    pub const PAGE_DOWN: Self = Self(0x22);
+    pub const END: Self = Self(0x23);
+    pub const HOME: Self = Self(0x24);
+    pub const LEFT: Self = Self(0x25);
+    pub const UP: Self = Self(0x26);
+    pub const RIGHT: Self = Self(0x27);
+    pub const DOWN: Self = Self(0x28);
+    pub const DELETE: Self = Self(0x2E);
+
+    /// A letter or digit key (`KeyCode::of('A')`): its virtual-key code is the upper-case
+    /// ASCII character.
+    pub const fn of(c: char) -> Self {
+        Self(c.to_ascii_uppercase() as u16)
+    }
+}
+
+/// Whether a key handler used the key ([`El::on_key`]); an unused key goes on to the
+/// element's built-in keys (a range, a group, a scroll view) and then its parent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handled {
+    Yes,
+    No,
+}
+
+impl From<bool> for Handled {
+    fn from(used: bool) -> Self {
+        if used { Self::Yes } else { Self::No }
+    }
+}
+
+/// A direction: a scroll view's ([`El::scroll`]) or a focus group's ([`El::focus_group`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Axis {
+    Horizontal,
+    Vertical,
+}
+
+/// The arrows a focus group moves along ([`El::focus_group`]).
+pub type Orientation = Axis;
+
+/// Where an arc starts ([`arc`], [`El::arc_start`]); it runs clockwise from there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArcStart {
+    /// Twelve o'clock: a ring.
+    #[default]
+    Top,
+    /// Three o'clock.
+    Right,
+    /// Six o'clock.
+    Bottom,
+    /// Nine o'clock: with half a turn of span, a semicircle meter.
+    Left,
+}
+
+impl ArcStart {
+    /// Quarter turns clockwise from twelve o'clock.
+    pub(crate) fn quarters(self) -> u8 {
+        match self {
+            Self::Top => 0,
+            Self::Right => 1,
+            Self::Bottom => 2,
+            Self::Left => 3,
+        }
     }
 }
 
@@ -181,6 +267,32 @@ pub(crate) enum Flow {
 pub(crate) type Press<S> = Box<dyn Fn(&mut S, &mut Tx)>;
 /// A drag handler ([`El::on_drag`]): the pointer's place across the box, 0..=1 each way.
 pub(crate) type Drag<S> = Box<dyn Fn(&mut S, f32, f32)>;
+/// A key handler ([`El::on_key`]).
+pub(crate) type OnKey<S> = Box<dyn Fn(&mut S, KeyCode, &mut Tx) -> Handled>;
+/// A range's step handler ([`El::on_step`]): the change in value.
+pub(crate) type OnStep<S> = Box<dyn Fn(&mut S, f64)>;
+
+/// A range's values ([`El::range`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Range {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+    pub value: f64,
+}
+
+/// An arc's look ([`arc`]).
+#[derive(Clone, Copy)]
+pub(crate) struct ArcLook {
+    /// How much of the span is filled, 0..=1.
+    pub fraction: f32,
+    pub start: ArcStart,
+    /// Of a whole turn, 0..=1.
+    pub span: f32,
+    pub stroke: Len,
+    /// The unfilled rest of the span; `None` draws no track.
+    pub track: Option<Paint>,
+}
 
 pub(crate) enum What {
     /// `el()`, `row()`, `col()` and `grid(..)`: a container.
@@ -194,6 +306,7 @@ pub(crate) enum What {
     Icon(Icon),
     Image(Arc<Image>),
     Paint(Painter),
+    Arc(ArcLook),
 }
 
 #[derive(Default, Clone, Copy)]
@@ -238,10 +351,24 @@ pub(crate) struct Sem {
     pub checked: Option<bool>,
     pub disabled: bool,
     pub focusable: bool,
+    pub range: Option<Range>,
+    pub description: Option<Arc<str>>,
+    /// The value read as text ("40%", "Medium").
+    pub value: Option<Arc<str>>,
+    pub selected: Option<bool>,
+    pub expanded: Option<bool>,
 }
 
-/// One element of a view: a box, text, icon, image or kit painting, with its children.
-/// Build with [`el`], [`row`], [`col`], [`text`], [`icon`], [`image`] and [`paint`].
+/// A roving focus group ([`El::focus_group`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Group {
+    pub axis: Axis,
+    /// Arrows also press the member they land on (radio groups, segmented controls).
+    pub follow: bool,
+}
+
+/// One element of a view: a box, text, icon, image, arc or kit painting, with its children.
+/// Build with [`el`], [`row`], [`col`], [`text`], [`icon`], [`image`], [`arc`] and [`paint`].
 pub struct El<S> {
     pub(crate) what: What,
     pub(crate) key: Option<Key>,
@@ -251,6 +378,11 @@ pub struct El<S> {
     pub(crate) anim: Anim,
     pub(crate) on_press: Option<Press<S>>,
     pub(crate) on_drag: Option<Drag<S>>,
+    pub(crate) on_key: Option<OnKey<S>>,
+    pub(crate) on_step: Option<OnStep<S>>,
+    pub(crate) group: Option<Group>,
+    /// A scroll view along this axis ([`El::scroll`]); boxes only.
+    pub(crate) scroll: Option<Axis>,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -270,6 +402,10 @@ fn new<S>(what: What) -> El<S> {
         anim: Anim::default(),
         on_press: None,
         on_drag: None,
+        on_key: None,
+        on_step: None,
+        group: None,
+        scroll: None,
         children: Vec::new(),
     }
 }
@@ -318,6 +454,21 @@ pub fn image<S>(image: Arc<Image>) -> El<S> {
 /// ..))`. Size it (`w`, `h`, `w_full`, `grow`); it has no size of its own.
 pub fn paint<S>(painter: impl Fn(&mut Frame, Rect, HitId) + 'static) -> El<S> {
     new(What::Paint(Box::new(painter)))
+}
+
+/// A circular arc filled `fraction` (0..=1) of the way round, clockwise from twelve o'clock,
+/// over a track: a ring or a meter. It is a circle fitting its box ([`super::token::ICON`]
+/// across unless sized), stroked [`super::token::RING`] wide with round caps; its ink is
+/// [`El::color`] ([`super::token::ACCENT`] by default), its track [`El::track`]. With
+/// [`El::motion`] the fraction springs too.
+pub fn arc<S>(fraction: f32) -> El<S> {
+    new(What::Arc(ArcLook {
+        fraction: if fraction.is_nan() { 0.0 } else { fraction.clamp(0.0, 1.0) },
+        start: ArcStart::Top,
+        span: 1.0,
+        stroke: super::token::RING,
+        track: Some(super::token::FILL),
+    }))
 }
 
 impl<S> El<S> {
@@ -519,6 +670,120 @@ impl<S> El<S> {
         self
     }
 
+    /// Extra help assistive technology reads after the label ("Applies to every display").
+    pub fn description(mut self, description: impl Into<Arc<str>>) -> Self {
+        self.sem.description = Some(description.into());
+        self
+    }
+
+    /// The value as assistive technology reads it ("40%", "Medium"), for a range or any
+    /// control showing a value.
+    pub fn value(mut self, value: impl Into<Arc<str>>) -> Self {
+        self.sem.value = Some(value.into());
+        self
+    }
+
+    /// For the members of a list, tab bar or segmented control: whether this one is chosen.
+    /// A focus group's Tab lands on its selected (or checked) member.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.sem.selected = Some(selected);
+        self
+    }
+
+    /// For disclosures (a menu button, a section): whether what it shows is open.
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.sem.expanded = Some(expanded);
+        self
+    }
+
+    /// A value from `min` to `max` in steps of `step` (sliders, steppers): announced as a
+    /// range, and stepped from the keyboard and assistive technology through
+    /// [`on_step`](Self::on_step). The role defaults to a slider.
+    pub fn range(mut self, min: f64, max: f64, step: f64, value: f64) -> Self {
+        let (min, max) = if min <= max { (min, max) } else { (max, min) };
+        let step = if step.is_finite() && step > 0.0 { step } else { (max - min) / 100.0 };
+        let value = if value.is_nan() { min } else { value.clamp(min, max) };
+        self.sem.range = Some(Range { min, max, step, value });
+        self
+    }
+
+    /// Makes the element a roving focus group: Tab stops on it once (on its selected or
+    /// checked member, else the first), arrows along `orientation` move between its enabled
+    /// members, wrapping, and Home and End go to the ends. Members are the focusable elements
+    /// inside it (not those inside a nested group).
+    pub fn focus_group(mut self, orientation: Orientation) -> Self {
+        self.group = Some(Group {
+            axis: orientation,
+            follow: self.group.is_some_and(|g| g.follow),
+        });
+        self
+    }
+
+    /// In a [`focus_group`](Self::focus_group), arrows also press the member they land on, so
+    /// selection follows focus (radio groups, segmented controls).
+    pub fn select_follows_focus(mut self) -> Self {
+        let axis = self.group.map_or(Axis::Horizontal, |g| g.axis);
+        self.group = Some(Group { axis, follow: true });
+        self
+    }
+
+    // ---- Scrolling ------------------------------------------------------------------------
+
+    /// Makes a box a scroll view along `axis`: its children lay out at their own length on
+    /// that axis and are clipped to the box (hits too). The wheel, Page Up and Page Down
+    /// (while focus is inside), and arrows, Space, Home and End (while the view itself has
+    /// focus) scroll it along the theme's scroll spring; keyboard focus moving onto a hidden
+    /// child scrolls it into view. An overlay scrollbar shows while it scrolls and fades
+    /// after the theme's `scrollbar_idle`. Scrolling never runs the view. Give the box a size
+    /// (`h`, `grow`, `max_h`) for it to be smaller than its content.
+    pub fn scroll(mut self, axis: Axis) -> Self {
+        self.scroll = Some(axis);
+        self
+    }
+
+    // ---- Arcs -----------------------------------------------------------------------------
+
+    /// Where an [`arc`] starts; it runs clockwise from there.
+    pub fn arc_start(mut self, start: ArcStart) -> Self {
+        if let What::Arc(a) = &mut self.what {
+            a.start = start;
+        }
+        self
+    }
+
+    /// How much of a turn an [`arc`] spans (its track), `0..=1`: `0.5` from
+    /// [`ArcStart::Left`] is a semicircle meter. A whole turn by default.
+    pub fn arc_span(mut self, span: f32) -> Self {
+        if let What::Arc(a) = &mut self.what {
+            a.span = if span.is_nan() { 1.0 } else { span.clamp(0.0, 1.0) };
+        }
+        self
+    }
+
+    /// An [`arc`]'s stroke width ([`super::token::RING`] by default).
+    pub fn stroke(mut self, width: impl Into<Len>) -> Self {
+        if let What::Arc(a) = &mut self.what {
+            a.stroke = width.into();
+        }
+        self
+    }
+
+    /// An [`arc`]'s track colour ([`super::token::FILL`] by default).
+    pub fn track(mut self, track: impl Into<Paint>) -> Self {
+        if let What::Arc(a) = &mut self.what {
+            a.track = Some(track.into());
+        }
+        self
+    }
+
+    /// An [`arc`] with no track: only its filled part draws.
+    pub fn no_track(mut self) -> Self {
+        if let What::Arc(a) = &mut self.what {
+            a.track = None;
+        }
+        self
+    }
+
     // ---- Motion ---------------------------------------------------------------------------
 
     /// Animates the element and everything in it along `motion` (a [`Spring`] or a theme
@@ -575,9 +840,40 @@ impl<S> El<S> {
         self
     }
 
+    /// Runs on `&mut S` when a key goes down while focus is on the element or inside it, the
+    /// innermost first: `on_key(|s, key, tx| match key { KeyCode::DELETE => { ..; Handled::Yes }
+    /// _ => Handled::No })`. A used key re-runs the view and goes no further; an unused one
+    /// goes on to the element's built-in keys (a range, a group, a scroll view), then its
+    /// parent, then the defaults (Enter and Space press, arrows move focus). Return
+    /// `Handled::No` without changing the state. It runs as the key arrives, after any
+    /// handlers already queued. A key handler alone does not make an element focusable.
+    pub fn on_key(mut self, handler: impl Fn(&mut S, KeyCode, &mut Tx) -> Handled + 'static) -> Self {
+        self.on_key = Some(Box::new(handler));
+        self
+    }
+
+    /// Runs on `&mut S` when the keyboard or assistive technology steps a
+    /// [`range`](Self::range), with the change in value (the new value less the shown one,
+    /// within `min..=max`): Right and Up add a step, Left and Down take one, Page Up and Page
+    /// Down a tenth of the range (whole steps), Home and End go to the ends. Add it to the
+    /// state: `on_step(|s, delta| s.level += delta)`. The view then runs again.
+    pub fn on_step(mut self, handler: impl Fn(&mut S, f64) + 'static) -> Self {
+        self.on_step = Some(Box::new(handler));
+        self
+    }
+
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
-        self.on_press.is_some() || self.on_drag.is_some() || self.sem.focusable
+        self.on_press.is_some()
+            || self.on_drag.is_some()
+            || self.on_step.is_some()
+            || self.sem.focusable
+            || self.scroll.is_some() && matches!(self.what, What::Box(_))
+    }
+
+    /// Whether it is a scroll view (only boxes scroll).
+    pub(crate) fn scrolls(&self) -> Option<Axis> {
+        self.scroll.filter(|_| matches!(self.what, What::Box(_)))
     }
 
     /// Whether it gets a hit item at all: interactive, or carrying semantics of its own.
