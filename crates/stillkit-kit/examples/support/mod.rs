@@ -141,12 +141,16 @@ pub fn component(i: usize, s: &State, disabled: bool) -> El<State> {
             Icon::Folder,
         )
         .build(),
-        16 => TextFieldFrame::new("Search")
-            .placeholder("Search your library")
-            .value(if s.on { "Nature" } else { "" })
-            .disabled(disabled)
-            .build()
-            .key("target"),
+        16 => {
+            #[allow(deprecated)]
+            let legacy = TextFieldFrame::new("Search")
+                .placeholder("Search your library")
+                .value(if s.on { "Nature" } else { "" })
+                .disabled(disabled)
+                .build()
+                .key("target");
+            legacy
+        },
         17 => CalendarMonth::new(2026, 11)
             .today(7)
             .selected(s.day)

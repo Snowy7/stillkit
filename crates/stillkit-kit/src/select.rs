@@ -4,7 +4,7 @@ use crate::{Change, Icon, Menu, MenuItem};
 use std::sync::Arc;
 use stillkit::el::{Align, El, Handled, KeyCode, icon, row, text, token};
 use stillkit::{Role, TextRole};
-/// A trigger and a match-width radio menu. Down opens too, because el has no modifier data.
+/// A trigger and match-width radio menu with character typeahead.
 pub struct Select<S> {
     label: Arc<str>,
     options: Vec<Arc<str>>,
@@ -64,6 +64,9 @@ impl<S: 'static> Select<S> {
             .open(self.open && !self.disabled);
         let value = self.options.get(self.selected).cloned().unwrap_or_default();
         let (press, down) = (self.toggle.clone(), self.toggle);
+        let options = self.options.clone();
+        let change = self.change.clone();
+        let selected = self.selected;
         let open = self.open;
         let disabled = self.disabled;
         row()
@@ -91,6 +94,15 @@ impl<S: 'static> Select<S> {
                 } else {
                     Handled::No
                 }
+            })
+            .on_char(move |s, c, tx| {
+                let mods = tx.modifiers();
+                if disabled || mods.ctrl || mods.alt || mods.meta || c.is_control() { return Handled::No; }
+                for offset in 1..=options.len() {
+                    let i = (selected.wrapping_add(offset)) % options.len();
+                    if options[i].to_lowercase().starts_with(&c.to_lowercase().to_string()) { change(s, i); return Handled::Yes; }
+                }
+                Handled::No
             })
             .overlay(overlay)
     }

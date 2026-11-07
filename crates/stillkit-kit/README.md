@@ -23,7 +23,7 @@ layout and additional semantics can be applied after `build()`.
 Implemented: Button (all five kinds), IconButton, Switch, Checkbox, RadioGroup,
 Slider (thin and icon bar), Segmented, Progress, Badge, ListRow (arbitrary lead and
 accessory elements), SectionHeader, Tile, Card, Separator, EmptyState,
-CalendarMonth (Gregorian, Monday first), TextFieldFrame (value/placeholder/focus).
+CalendarMonth (Gregorian, Monday first), TextField (native editing, value/placeholder/focus).
 
 Selection and pointer/keyboard activation use runtime checked, disabled, press,
 hover and focus state. Disabled controls ignore input and dim the whole subtree.
@@ -35,7 +35,7 @@ positive finite fractions of the range. Calendar exposes `on_month_change` with
 a (year, month) pair; rebuild from that value. `today(day)` is supplied by the host only for the current month.
 
 Ring uses the public arc primitive. Overlay wrappers are a separate component family.
-TextFieldFrame is intentionally a frame, not an editor.
+TextFieldFrame remains a deprecated compatibility frame.
 
 ## Needed from el
 
@@ -47,8 +47,12 @@ TextFieldFrame is intentionally a frame, not an editor.
   resolves against the headless root width instead of its padded parent. The
   segmented pill uses a zero-height flex rail to avoid this; no el workaround was
   added outside the kit.
-- **Text input:** native editing/IME, selection, caret, value/change semantics and
-  clipboard. Needed to turn TextFieldFrame into TextField.
+- **Text semantics:** public invalid-state and active-descendant setters are missing.
+  Text errors use accessible descriptions; highlighted results use a visual fill.
+- **Focus control and focus motion:** public focus/blur-by-key and focus ring motion
+  and focus-within styling are unavailable. Search Escape delegates blur to the
+  runtime; a visible keyboard focus blurs, but pointer-only focus may remain.
+  The ring uses the theme as el draws it.
 - **Semantic descendants and pointer hits:** non-actionable cell hits currently
   intercept their actionable row. Table announces the combined row values and omits
   separate cell hits until hit testing walks through non-actionable descendants.
@@ -162,8 +166,8 @@ secondary clicks or the Menu key. The model stores `Option<(f32, f32)>`.
 combines a value-bearing ComboBox trigger with a match-width radio menu.
 Opening focuses the checked option, and selection calls `on_change` then closes
 through `on_open(false)`. Enter/Space toggle it; Down opens it (including Alt+Down
-when delivered as Down). el does not expose key modifiers or committed text yet,
-so precise Alt-only handling and character typeahead still need el support.
+when delivered as Down). Character typeahead uses `on_char` (case-insensitive initial-letter cycling),
+ignoring Ctrl/Alt/Meta combinations; it also works while the menu is open.
 An invalid selected index displays an empty value. Supply unique select keys when
 composing multiple selects.
 
@@ -260,3 +264,57 @@ Controls follow each preset's typography, geometry and palette; neutral headless
 surfaces replace native backdrop glass. Rings use token::RING rather than fixed
 stroke weights. Disclosure uses a width spring rather than a rotation, and spinner
 rotation is stepped pending the el capabilities above.
+
+## Text
+
+`TextField::new("Name").key("name").value(model.name.as_str())
+.on_input(|s: &mut Model, value| s.name = value.into()).build()` uses el's editor:
+selection, clipboard, IME, undo, caret and scrolling stay in Runtime.
+Supply distinct stable keys. Labels may be above (default), inside with
+`label_inside(true)`, or omitted with an empty label (the placeholder names the input).
+`placeholder`, `icon`, `accessory`, `clearable`, `helper`, `error`, `invalid`,
+`disabled`, `read_only`, `on_submit` and `select_all_on_focus` compose on the builder.
+Errors use theme destructive ink and an accessible `Invalid: ?` description.
+El does not expose an invalid-state setter yet.
+
+`SecureField::new` starts secure; pass `revealed(model.revealed)` and
+`on_reveal` for the model-owned reveal toggle. El redacts secure editor values.
+`SearchField::new` supplies a search icon, a clear action and select-all on focus.
+Escape clears and delegates blur to el (keyboard-visible focus only at present).
+`TextArea::new` supplies multiline editing; configure `rows(n)`, `max_len(n)`
+and `character_count(true)`. Counts and limits use Unicode scalar values, as el does.
+`TextFieldFrame` remains a deprecated source-compatible legacy frame, used only
+by the original gallery to retain its historical golden baseline.
+
+`Combobox::new(label, options, &model.query, on_change)` takes a `QueryState`:
+query, open, highlighted filtered index, and optional selected source index.
+Typing opens and filters case-insensitively; Up/Down wraps, Enter picks and
+Escape closes. Pointer rows pick too. The combobox exposes the selected label as
+its accessible value. Its nonmodal popover reuses Menu and keeps focus in the
+editor. Active-descendant semantics need an el setter. Use stable keys.
+
+`CommandPalette::new(&model.query, on_change).command(Command::new(key, label,
+action).group(group).icon(icon).shortcut(hint)).build()` returns a dialog overlay.
+Attach it to its opening control. Commands filter by label; consecutive groups
+get headers, with icons and shortcut hints in Menu rows. Keep each group together.
+Arrows highlight, Enter runs and closes, Escape dismisses, and Runtime traps and
+returns focus. Empty results show a message. Shortcut hints are descriptive;
+the host owns global shortcut dispatch. Reset the query on opening if desired.
+
+Field styles and clear-button presence use `MOTION_INTERACTIVE`; Menu and dialog
+surfaces use `MOTION_OPEN`. Runtime owns reduced motion. Focus rings use the theme,
+but their animation and focus-within rings around accessory wells need el support.
+
+`cargo run -p stillkit-kit --example kit_text` writes twelve
+`docs/media/kit/text-<look>-<scheme>.png` sheets: all presets and the One UI +
+Liquid material mix, light and dark. Cells show rest, keyboard focus, filled search,
+error, disabled/read-only, secure/multiline counter, open combobox and open palette.
+The new sheets are visually checked against the native Liquid search field.
+`tests/text.rs` exercises editing, clear/Escape, reveal, error descriptions,
+filter/keyboard/pick, command execution and focus return, typeahead and max count.
+
+Text validation: 45 headless tests pass across the kit, including eleven text tests;
+all-target clippy is clean. The Linux target check passes with the existing core
+a11y dead-code warnings. All twelve text PNGs were opened and inspected, with
+native Liquid's search well as a reference. Commands used `D:\stillkit-targets\N`
+and the LLVM dev override. No files under `crates/stillkit` were edited.

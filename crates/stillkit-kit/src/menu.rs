@@ -14,6 +14,7 @@ pub struct MenuItem<S> {
     hint: Option<Arc<str>>,
     checked: Option<bool>,
     radio: bool,
+    highlighted: bool,
     disabled: bool,
     press: Option<Press<S>>,
 }
@@ -26,6 +27,7 @@ impl<S: 'static> MenuItem<S> {
             hint: None,
             checked: None,
             radio: false,
+            highlighted: false,
             disabled: false,
             press: None,
         }
@@ -51,6 +53,8 @@ impl<S: 'static> MenuItem<S> {
         self.radio = true;
         self
     }
+    /// Visual highlight without moving keyboard focus from a search editor.
+    pub fn highlighted(mut self, value: bool) -> Self { self.highlighted = value; self }
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -94,6 +98,7 @@ impl<S: 'static> MenuItem<S> {
             .opacity(if self.disabled { 0.45 } else { 1. })
             .child(lead)
             .child(text(self.label).font(TextRole::Body).color(INK).grow(1.));
+        if self.highlighted { node = node.fill(el::token::FILL); }
         if let Some(c) = self.checked {
             node = node.checked(c);
         }
