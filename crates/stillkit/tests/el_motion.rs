@@ -279,7 +279,8 @@ fn check_strip(name: &str, click: &str, reduced: bool) {
         .iter()
         .map(|&at| frame_at(&script, at, reduced))
         .collect();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/el-motion-{name}.png"));
+    let directory = if cfg!(target_os = "linux") { "tests/golden/linux" } else { "tests/golden" };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("{directory}/el-motion-{name}.png"));
     stillkit::golden::check(&strip(&frames), &path).unwrap();
 }
 
