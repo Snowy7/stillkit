@@ -1,0 +1,91 @@
+{
+  "settle_seconds": 10,
+  "idle_seconds": 30,
+  "drag_seconds": 10,
+  "start": {
+    "voluntary_all": 9,
+    "involuntary_all": 1,
+    "memory_kib": {
+      "Rss": 8880,
+      "Pss": 6134,
+      "Private_Clean": 128,
+      "Private_Dirty": 5604,
+      "Private": 5732
+    },
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 9,
+    "involuntary": 1,
+    "gpu_memory_kib": {},
+    "libraries": []
+  },
+  "idle_end": {
+    "voluntary_all": 9,
+    "involuntary_all": 1,
+    "memory_kib": {
+      "Rss": 8880,
+      "Pss": 6134,
+      "Private_Clean": 128,
+      "Private_Dirty": 5604,
+      "Private": 5732
+    },
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 9,
+    "involuntary": 1,
+    "gpu_memory_kib": {},
+    "libraries": []
+  },
+  "idle_delta": {
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 0,
+    "involuntary": 0,
+    "voluntary_all": 0,
+    "involuntary_all": 0
+  },
+  "drag_start": {
+    "voluntary_all": 10,
+    "involuntary_all": 2,
+    "memory_kib": {
+      "Rss": 8880,
+      "Pss": 6134,
+      "Private_Clean": 128,
+      "Private_Dirty": 5604,
+      "Private": 5732
+    },
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 10,
+    "involuntary": 2,
+    "gpu_memory_kib": {},
+    "libraries": []
+  },
+  "drag_end": {
+    "voluntary_all": 607,
+    "involuntary_all": 9,
+    "memory_kib": {
+      "Rss": 9236,
+      "Pss": 6426,
+      "Private_Clean": 128,
+      "Private_Dirty": 5832,
+      "Private": 5960
+    },
+    "utime": 17,
+    "stime": 14,
+    "voluntary": 607,
+    "involuntary": 9,
+    "gpu_memory_kib": {},
+    "libraries": []
+  },
+  "drag_delta": {
+    "utime": 17,
+    "stime": 14,
+    "voluntary": 597,
+    "involuntary": 7,
+    "voluntary_all": 597,
+    "involuntary_all": 7
+  },
+  "drag": "drag frames=596 mean_ms=0.440 p95_ms=0.496",
+  "clk_tck": 100
+}

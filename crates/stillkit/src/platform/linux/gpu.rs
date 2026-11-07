@@ -76,6 +76,7 @@ pub struct Canvas {
     size: (u32, u32),
 }
 impl Canvas {
+    /// Allocates a retained bitmap on this thread's lazily shared Vulkan device.
     pub fn new(width: u32, height: u32) -> Result<Self> {
         ensure!(
             width > 0 && height > 0 && width <= u16::MAX as u32 && height <= u16::MAX as u32,
@@ -104,6 +105,7 @@ impl Canvas {
             size: (width, height),
         })
     }
+    /// Rerasterizes only these physical bounds, preserving the rest of the bitmap.
     pub fn draw(&mut self, ui: &mut Ui, list: &DisplayList, area: PixelRect) -> Result<()> {
         ensure!(
             area.x + area.width <= self.size.0 && area.y + area.height <= self.size.1,
@@ -170,6 +172,7 @@ impl Canvas {
         self.gpu.queue.submit([encoder.finish()]);
         Ok(())
     }
+    /// Reads premultiplied BGRA pixels, waiting for the GPU; intended for snapshots.
     pub fn image(&self) -> Result<Image> {
         self.read_texture(&self.pixels)
     }

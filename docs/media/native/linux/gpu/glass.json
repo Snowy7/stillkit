@@ -1,0 +1,131 @@
+{
+  "settle_seconds": 10,
+  "idle_seconds": 30,
+  "drag_seconds": 10,
+  "start": {
+    "voluntary_all": 168,
+    "involuntary_all": 26,
+    "memory_kib": {
+      "Rss": 69872,
+      "Pss": 65266,
+      "Private_Clean": 46468,
+      "Private_Dirty": 18080,
+      "Private": 64548
+    },
+    "utime": 4,
+    "stime": 4,
+    "voluntary": 165,
+    "involuntary": 14,
+    "gpu_memory_kib": {
+      "drm-memory-vram": 199916,
+      "drm-memory-gtt": 76200,
+      "drm-memory-cpu": 0
+    },
+    "libraries": [
+      "/usr/lib/x86_64-linux-gnu/libdrm.so.2.131.0",
+      "/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.131.0",
+      "/usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so"
+    ]
+  },
+  "idle_end": {
+    "voluntary_all": 168,
+    "involuntary_all": 26,
+    "memory_kib": {
+      "Rss": 69872,
+      "Pss": 65266,
+      "Private_Clean": 46468,
+      "Private_Dirty": 18080,
+      "Private": 64548
+    },
+    "utime": 4,
+    "stime": 4,
+    "voluntary": 165,
+    "involuntary": 14,
+    "gpu_memory_kib": {
+      "drm-memory-vram": 199916,
+      "drm-memory-gtt": 76200,
+      "drm-memory-cpu": 0
+    },
+    "libraries": [
+      "/usr/lib/x86_64-linux-gnu/libdrm.so.2.131.0",
+      "/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.131.0",
+      "/usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so"
+    ]
+  },
+  "idle_delta": {
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 0,
+    "involuntary": 0,
+    "voluntary_all": 0,
+    "involuntary_all": 0
+  },
+  "drag_start": {
+    "voluntary_all": 170,
+    "involuntary_all": 26,
+    "memory_kib": {
+      "Rss": 70100,
+      "Pss": 65494,
+      "Private_Clean": 46468,
+      "Private_Dirty": 18308,
+      "Private": 64776
+    },
+    "utime": 5,
+    "stime": 4,
+    "voluntary": 167,
+    "involuntary": 14,
+    "gpu_memory_kib": {
+      "drm-memory-vram": 199916,
+      "drm-memory-gtt": 76200,
+      "drm-memory-cpu": 0
+    },
+    "libraries": [
+      "/usr/lib/x86_64-linux-gnu/libdrm.so.2.131.0",
+      "/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.131.0",
+      "/usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so"
+    ]
+  },
+  "drag_end": {
+    "voluntary_all": 770,
+    "involuntary_all": 32,
+    "memory_kib": {
+      "Rss": 70164,
+      "Pss": 65550,
+      "Private_Clean": 46520,
+      "Private_Dirty": 18308,
+      "Private": 64828
+    },
+    "utime": 40,
+    "stime": 35,
+    "voluntary": 767,
+    "involuntary": 20,
+    "gpu_memory_kib": {
+      "drm-memory-vram": 199916,
+      "drm-memory-gtt": 76616,
+      "drm-memory-cpu": 0
+    },
+    "libraries": [
+      "/usr/lib/x86_64-linux-gnu/libdrm.so.2.131.0",
+      "/usr/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.131.0",
+      "/usr/lib/x86_64-linux-gnu/libvulkan.so.1.4.341",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_lvp.so",
+      "/usr/lib/x86_64-linux-gnu/libvulkan_radeon.so"
+    ]
+  },
+  "drag_delta": {
+    "utime": 35,
+    "stime": 31,
+    "voluntary": 600,
+    "involuntary": 6,
+    "voluntary_all": 600,
+    "involuntary_all": 6
+  },
+  "drag": "drag frames=597 mean_ms=1.071 p95_ms=1.206",
+  "clk_tck": 100
+}

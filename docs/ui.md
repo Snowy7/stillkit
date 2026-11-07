@@ -709,8 +709,9 @@ stillkit::platform::windows::gpu::set_power(gpu::Power::High); // default Low: t
 - **The `gpu` feature.** Without it no GPU code is compiled (no wgpu, no `stillkit-glass`), and
   every mode is `Cpu`. With it, nothing GPU-related loads until the first GPU surface: the
   device is made then, once per thread (`gpu::device`), and a CPU surface never touches it
-  (`tests/gpu_driver.rs`; `tests/no_gpu_driver.rs` still passes). GPU mode is Windows-only; the
-  stub backend has the same calls and draws on the CPU.
+  (`tests/gpu_driver.rs`; `tests/no_gpu_driver.rs` still passes). Linux uses Vello Hybrid (published as `vello_gpu` 0.3) on Vulkan; the
+  stub backend has the same calls and draws on the CPU. Linux initializes its device on the
+  first GPU presentation or headless GPU render; simply constructing a surface is lazy.
 - **Headless renders** (`render::render`, `el`'s `--snap`) follow the thread's mode, so a GPU
   app's snapshots are what its screen shows. `gpu::render` always draws on the GPU.
 
@@ -841,7 +842,7 @@ Unchanged lists do not draw or commit. `next_event()` drains pending input witho
 Use `Surface::popup(parent, name, at)` for parent-relative popups; parentless `Kind::Popup`
 falls back to a toplevel. `set_chrome`, `start_move` and `start_resize` use real input
 serials for client-side chrome. Basic XKB keyboard entry and windowless field rendering
-work; the process creates no graphics device.
+work; CPU surfaces create no graphics device.
 
 On m6u (Ubuntu 26.04 / GNOME 50.1, Ryzen 5 7640HS), the release 400×220 hello window
 used **6,016 KiB private** at steady idle. Over 30 seconds: **0 user/system CPU ticks,
@@ -885,6 +886,90 @@ panel reservations. Bars/background surfaces use layer-shell when advertised and
 an error on GNOME, which has no layer-shell. Layer-shell and parented popup paths compile
 but have not been exercised on another compositor. DirectWrite text-quality controls are
 Windows-only; Linux uses Vello's grayscale outline rasterization for all presets.
+
+### Linux GPU mode
+
+With `gpu`, `Surface::with_render(.., Render::Gpu)` uses **Vello Hybrid**, renamed
+`vello_gpu` in its published 0.3 release (the dependency remains named `vello_hybrid`).
+It shares `vello_common` 0.3, glyph outlines and the single `linux/scene.rs` display-list
+builder with `vello_cpu`; image upload is the only resource-specific callback. Only Vulkan
+is enabled in wgpu. The first GPU draw requests a low-power hardware adapter; software
+Vulkan adapters are rejected with an error. Adapter/swapchain failures are reported, rather
+than silently switching a GPU surface to CPU; device-loss recovery is not implemented. A thread shares one device between its GPU
+surfaces. CPU surfaces never touch it, including with `gpu` compiled in. `Auto` follows
+the same glass-wanted / external-backdrop rule as Windows.
+
+Changed physical bounds are rendered into a damage-sized GPU target and copied into a
+retained texture. The Wayland swapchain receives the retained image (a full texture copy,
+not a full scene rerasterization). No damage means no render, acquire, submit or commit.
+Resize redraws the whole surface. With glass, optics and composition redraw the full
+surface when content or optics change; refractive dependencies extend beyond content's
+damage rectangle. Glass springs use compositor frame callbacks, which stop when the
+scene rests. CPU still uses its original two `wl_shm` buffers. Window opacity is applied
+to premultiplied pixels, and hide/show retains the client frame.
+
+GPU surfaces support `set_glass`, `set_glass_style` and liquid-merging `set_glass_group`.
+Glass is rendered by `stillkit-glass` on the **same Vulkan device**, underneath the Vello
+foreground. A Wayland client cannot read the desktop: the default refractable backdrop
+is an explicit generated checker/gradient test pattern. The Linux extension
+`surface.set_glass_backdrop(image)?` accepts client-owned premultiplied BGRA pixels;
+it repeats/crops that image at physical pixel size. Call it again when the app backdrop
+changes. This is not compositor blur or a desktop wallpaper capture. Tinted appearances
+and continuous corners follow `GlassStyle`; there is no external Linux desktop-glass provider.
+
+Linux-only inspection/event-loop extensions: `Surface::image()` reads the retained client
+frame (including glass, before whole-window opacity); GPU readback blocks and is never
+used by normal presentation. `linux::surface::connection_fd()` lends the Wayland fd for
+poll loops that also watch other descriptors; dispatch with `next_event()` when readable.
+No existing public paths changed. `Render::resolve` now recognizes feature-enabled Linux.
+
+`tests/linux_gpu_render.rs` compares CPU and GPU shapes, text, icons, images and nested
+rounded clips. Tolerance: no channel differs by more than **128**, and at most **0.5%**
+of channels differ by more than **4**; flat blended interiors allow one level of rounding.
+Measured on m6u: maximum **56**, **0.094%** above four. A retained partial update matches
+a complete GPU render byte-for-byte. `linux_no_gpu_driver` checks the CPU boundary both
+with and without the feature; `linux_gpu_driver` checks lazy loading in the opposite
+direction and a return to CPU drawing after Vulkan initialization.
+
+The gallery and Linux mix references were regenerated, and the gallery, motion strips
+and native GPU/glass client captures were opened and inspected. Linux motion tests now
+keep separate font/raster references under `tests/golden/linux`, preserving Windows images.
+
+Release on m6u (amdgpu `1002:15bf`, kernel `7.0.0-31-generic`, GNOME Wayland):
+400×220 physical pixels, **10 s settle, 30 s idle, 10 s scripted slider drag at 60 Hz**.
+CPU is a feature-off executable; the others compile `gpu`. Mixed is one CPU surface
+beside one GPU surface and updates both during drag. Frame times include list construction,
+scene drawing and submission/presentation calls; they are CPU wall time, not GPU timestamps.
+Drag CPU is process CPU time divided by elapsed time (100% = one core).
+
+| Mode | Private MiB: settle → idle end → drag end | GPU allocated MiB: VRAM / GTT | Idle user/system ticks | Idle switches: voluntary/involuntary, all threads | Drag CPU | Frame mean / p95 ms |
+|---|---|---|---|---|---|---|
+| cpu | 5.60 → 5.60 → 5.82 | 0.0 / 0.0 | 0 / 0 | 0 / 0 | 3.1% | 0.440 / 0.496 |
+| gpu | 61.83 → 61.83 → 62.30 | 195.2 / 72.7 | 0 / 0 | 0 / 0 | 5.4% | 0.863 / 0.970 |
+| glass | 63.04 → 63.04 → 63.31 | 195.2 / 74.4 | 0 / 0 | 0 / 0 | 6.6% | 1.071 / 1.206 |
+| mixed | 63.07 → 63.07 → 63.71 | 195.2 / 72.7 | 0 / 0 | 0 / 0 | 7.4% | 1.187 / 1.525 |
+
+Private is `Private_Clean + Private_Dirty` from `smaps_rollup`. GPU allocations come from
+amdgpu fdinfo, deduplicated by DRM client id; VRAM/GTT are driver accounting on this UMA
+machine, not dedicated board residency or additional process-private RAM. Every mode had
+zero idle CPU ticks **and zero context switches across all threads**. Tick accounting is
+100 Hz. The small memory increase after dragging is included above.
+
+CPU mapped **none** of the forbidden libraries. GPU modes mapped `libvulkan.so`,
+`libvulkan_radeon.so`, `libvulkan_lvp.so`, `libdrm.so` and `libdrm_amdgpu.so`; the loader
+probes LVP, while fdinfo confirms the amdgpu hardware device. No `libEGL`, `libGL`,
+`libgbm` or `radeonsi` loaded. These numbers favour keeping small, non-glass surfaces on
+CPU. GNOME's strict new-window focus policy was restored after each run; no activation
+request or synthetic mouse/keyboard input was sent, and every child was terminated.
+`gpu/*.png` are retained client-frame readbacks, not screenshots of the compositor.
+The harness takes an initial readback before settling and another after idle; neither
+readback is inside the idle or drag timing intervals.
+
+
+Validation: workspace golden/serde tests with and without `stillkit/gpu`, all-target
+Clippy with GPU, and Windows MSVC all-target checking pass. Linux emits the eight existing
+accessibility dead-code warnings, with no new warnings. Evidence and the reproduction
+script live in `docs/media/native/linux/gpu/` and `measure_gpu.py`.
 
 ## Looks
 
