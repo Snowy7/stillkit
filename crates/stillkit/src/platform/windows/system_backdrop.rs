@@ -258,7 +258,7 @@ impl SystemBackdrop {
                 other => other,
             }
             .context("compositor factory")?;
-            Ok(factory.ActivateInstance()?.cast().context("Compositor")?)
+            factory.ActivateInstance()?.cast().context("Compositor")
         }
     }
 }
