@@ -1,5 +1,5 @@
 //! Menu content and point-anchored context menus. The model owns opening and dismissal.
-use crate::overlay_surface::{DIM, INK, panel};
+use crate::overlay_surface::{DIM, INK, ShadowLevel, panel};
 use crate::{Icon, Press};
 type Dismiss<S> = Arc<dyn Fn(&mut S)>;
 use std::sync::Arc;
@@ -161,7 +161,7 @@ impl<S: 'static> Menu<S> {
         self
     }
     pub fn build(self) -> El<S> {
-        panel()
+        panel(ShadowLevel::Menu)
             .radius(Len::Theme(|t| t.tokens().radius))
             .min_w(Len::Theme(|t| t.tokens().menu.min_width))
             .pad(Len::Theme(|t| t.tokens().menu.pad))

@@ -1,5 +1,5 @@
 //! Modal confirmation panels. Runtime owns Escape, backdrop dismissal and focus return.
-use crate::overlay_surface::{DIM, INK, panel};
+use crate::overlay_surface::{DIM, INK, ShadowLevel, panel};
 use crate::{Button, ButtonKind};
 use std::sync::Arc;
 use stillkit::el::{self, Justify, Overlay, row, text, token};
@@ -58,7 +58,7 @@ impl<S: 'static> Dialog<S> {
     pub fn build(self) -> Overlay<S> {
         let (cancel, close, dismiss) = (self.dismiss.clone(), self.dismiss.clone(), self.dismiss);
         let accept = self.accept;
-        let content = panel()
+        let content = panel(ShadowLevel::Dialog)
             .key(self.key.clone())
             .w(360.)
             .pad(token::PAD)
