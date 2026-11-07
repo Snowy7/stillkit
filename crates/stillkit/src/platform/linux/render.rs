@@ -3,11 +3,13 @@ use super::Text;
 pub use crate::bitmap::{Image, TextMode, TextQuality};
 use crate::{DisplayList, Op, PixelRect, Rect, Rgba};
 use anyhow::{Result, ensure};
+use skrifa::MetadataProvider;
 use std::{cell::RefCell, sync::Arc};
 use vello_cpu::{
     Pixmap, RenderContext, Resources,
     kurbo::{self, Affine, BezPath, Cap, Join, Shape, Stroke},
 };
+/// Per-thread text and image services, usable without a Wayland connection.
 pub struct Ui {
     pub text: Text,
 }
@@ -47,6 +49,7 @@ impl Image {
         ui.decode_image(&std::fs::read(path)?, (32768, 32768))
     }
 }
+/// Rasterizes a display list headlessly to premultiplied BGRA pixels.
 pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
     let canvas = Canvas::new(ui, width, height)?;
     canvas.draw(&mut ui.text, list, PixelRect::full(width, height))?;
@@ -56,6 +59,7 @@ struct State {
     resources: Resources,
     pixels: Image,
 }
+/// A retained premultiplied bitmap; draw and read only damaged bounds.
 pub struct Canvas {
     state: RefCell<State>,
 }
@@ -285,6 +289,25 @@ fn draw_ops(
                 color,
                 ..
             } => {
+                if label.chars().count() == 1
+                    && let Some(icon) = label
+                        .chars()
+                        .next()
+                        .and_then(crate::icons::from_system_glyph)
+                {
+                    draw_ops(
+                        ctx,
+                        res,
+                        text,
+                        &[Op::Icon {
+                            rect: Rect::new(r.left, r.top, style.size, style.size),
+                            icon,
+                            weight: (style.size / 12.).max(1.),
+                            color: *color,
+                        }],
+                    )?;
+                    continue;
+                }
                 let italic = matches!(op, Op::Emphasis { italic: true, .. });
                 let glyphs: Vec<_> = text
                     .shape_emphasis(label, style, italic)
@@ -294,8 +317,15 @@ fn draw_ops(
                 paint(ctx, *color);
                 for (g, y) in glyphs {
                     if let Some(font) = text.fonts.get_font(g.font_id, g.font_weight) {
-                        ctx.glyph_run(res, &font.as_peniko())
+                        let face = font.as_peniko();
+                        let location = skrifa::FontRef::from_index(font.data(), face.index)?
+                            .axes()
+                            .location([("wght", g.font_weight.0 as f32)]);
+                        let coords: Vec<_> =
+                            location.coords().iter().map(|c| c.to_bits()).collect();
+                        ctx.glyph_run(res, &face)
                             .font_size(g.font_size)
+                            .normalized_coords(&coords)
                             .atlas_cache(false)
                             .fill_glyphs(
                                 [vello_cpu::Glyph {
@@ -665,4 +695,39 @@ mod image_tests {
             "the crop's left side is blue too"
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn variable_font_semibold_is_between_regular_and_bold() {
+    let mut ui = Ui::new().unwrap();
+    let ink: Vec<u64> = [400, 600, 700]
+        .into_iter()
+        .map(|weight| {
+            let list = DisplayList {
+                ops: vec![Op::Text {
+                    rect: Rect::new(0., 0., 250., 40.),
+                    text: "Semibold specimen".into(),
+                    style: crate::TextStyle {
+                        weight,
+                        ..crate::TextStyle::new("Inter", 24.)
+                    },
+                    color: Rgba::new(1., 1., 1., 1.),
+                }],
+                ..Default::default()
+            };
+            render(&mut ui, &list, 280, 40)
+                .unwrap()
+                .pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| p[3] as u64)
+                .sum()
+        })
+        .collect();
+    assert!(
+        ink[0] < ink[1] && ink[1] < ink[2],
+        "400/600/700 ink coverage: {ink:?}"
+    );
 }

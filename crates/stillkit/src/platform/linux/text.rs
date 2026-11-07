@@ -3,10 +3,12 @@ pub use crate::text_style::{TextStyle, VARIABLE};
 use cosmic_text::{Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Weight};
 use std::{collections::HashMap, sync::Arc};
 type Key = (String, String, [u32; 4], u16);
+/// Per-thread font discovery and bounded shaped-layout cache.
 pub struct Text {
     pub(crate) fonts: FontSystem,
     cache: HashMap<Key, Buffer>,
     capacity: usize,
+    italic_loaded: bool,
 }
 impl Text {
     pub fn new() -> anyhow::Result<Self> {
@@ -20,13 +22,16 @@ impl Text {
                 let _ = db.load_font_file(file);
             }
         }
-        db.load_font_data(include_bytes!("../../../assets/Inter.ttf").to_vec());
-        db.load_font_data(include_bytes!("../../../assets/Inter-Italic.ttf").to_vec());
+        db.load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(
+            include_bytes!("../../../assets/Inter.ttf").as_slice(),
+        )));
+
         db.set_sans_serif_family("Inter");
         Ok(Self {
             fonts: FontSystem::new_with_locale_and_db("en-US".into(), db),
             cache: HashMap::new(),
             capacity: 512,
+            italic_loaded: false,
         })
     }
     pub(crate) fn shape(&mut self, text: &str, style: &TextStyle) -> &Buffer {
@@ -38,6 +43,14 @@ impl Text {
         style: &TextStyle,
         italic: bool,
     ) -> &Buffer {
+        if italic && !self.italic_loaded {
+            self.fonts
+                .db_mut()
+                .load_font_source(cosmic_text::fontdb::Source::Binary(Arc::new(
+                    include_bytes!("../../../assets/Inter-Italic.ttf").as_slice(),
+                )));
+            self.italic_loaded = true;
+        }
         let key = (
             text.into(),
             style.family.to_string(),
@@ -82,6 +95,15 @@ impl Text {
         &self.cache[&key]
     }
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32) {
+        if text.chars().count() == 1
+            && text
+                .chars()
+                .next()
+                .and_then(crate::icons::from_system_glyph)
+                .is_some()
+        {
+            return (style.size, style.size);
+        }
         let b = self.shape(text, style);
         b.layout_runs().fold((0f32, 0f32), |(w, h), r| {
             (w.max(r.line_w), h.max(r.line_top + r.line_height))

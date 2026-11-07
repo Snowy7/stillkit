@@ -86,6 +86,7 @@ use wayland_client::{
         wl_seat, wl_shm, wl_shm_pool, wl_surface,
     },
 };
+pub use wayland_protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
 use wayland_protocols::xdg::shell::client::{
     xdg_popup, xdg_positioner, xdg_surface, xdg_toplevel, xdg_wm_base,
 };
@@ -236,6 +237,7 @@ pub fn queue_event(id: usize, event: Event) {
         Ok(())
     });
 }
+/// A Wayland surface with retained display list and CPU damage bitmap.
 pub struct Surface {
     id: SurfaceId,
     alpha: u8,
@@ -522,10 +524,39 @@ impl Surface {
     }
     pub fn set_glass(&self, _: Option<crate::Glass>) {}
     pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {}
-    pub fn show(&self) {}
+    /// Remaps a hidden surface with its retained CPU bitmap.
+    pub fn show(&self) {
+        let result = runtime(|r| {
+            if r.state.windows.get(&self.id).is_some_and(|n| !n.configured) {
+                r.state.windows[&self.id].surface.commit();
+                r.conn.flush()?;
+                while !r.state.windows[&self.id].configured {
+                    r.queue.blocking_dispatch(&mut r.state)?;
+                }
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        });
+        match result {
+            Ok(true) => {
+                if let Some(c) = &self.canvas {
+                    let image = c.image();
+                    if let Err(e) =
+                        self.send(&image, crate::PixelRect::full(image.width, image.height))
+                    {
+                        log::error!("Wayland show: {e}");
+                    }
+                }
+            }
+            Err(e) => log::error!("Wayland show: {e}"),
+            _ => {}
+        }
+    }
     pub fn hide(&self) {
         let _ = runtime(|r| {
-            if let Some(n) = r.state.windows.get(&self.id) {
+            if let Some(n) = r.state.windows.get_mut(&self.id) {
+                n.configured = false;
                 n.surface.attach(None, 0, 0);
                 n.surface.commit();
             }

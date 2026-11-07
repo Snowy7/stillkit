@@ -76,3 +76,4 @@ memmap2 = "0.9"
 libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 xkbcommon-dl = "0.4"
+skrifa = "0.44"

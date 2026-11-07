@@ -77,6 +77,22 @@ fn main() -> anyhow::Result<()> {
                     );
                     scale = next;
                 }
+                Event::Press(p, stillkit::Button::Left)
+                    if p.at.x > size.0 as f32 - 8. * scale
+                        || p.at.y > size.1 as f32 - 8. * scale =>
+                {
+                    use stillkit::platform::linux::surface::ResizeEdge;
+                    let edge = if p.at.x > size.0 as f32 - 8. * scale
+                        && p.at.y > size.1 as f32 - 8. * scale
+                    {
+                        ResizeEdge::BottomRight
+                    } else if p.at.x > size.0 as f32 - 8. * scale {
+                        ResizeEdge::Right
+                    } else {
+                        ResizeEdge::Bottom
+                    };
+                    window.start_resize(edge)?;
+                }
                 Event::Press(p, stillkit::Button::Left) if p.at.y < 28. * scale => {
                     window.start_move()?
                 }
