@@ -3,8 +3,9 @@
 //! theme and the scale when it lays the tree out.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use accesskit::Role;
+use accesskit::{HasPopup, Role};
 
 use crate::icons::Icon;
 use crate::{Frame, HitId, Image, Rect, Rgba, Spring, TextRole, Theme};
@@ -271,6 +272,10 @@ pub(crate) type Drag<S> = Box<dyn Fn(&mut S, f32, f32)>;
 pub(crate) type OnKey<S> = Box<dyn Fn(&mut S, KeyCode, &mut Tx) -> Handled>;
 /// A range's step handler ([`El::on_step`]): the change in value.
 pub(crate) type OnStep<S> = Box<dyn Fn(&mut S, f64)>;
+/// A context-menu handler ([`El::on_context_menu`]): where, in design px.
+pub(crate) type OnContext<S> = Box<dyn Fn(&mut S, f32, f32)>;
+/// A timeout handler ([`El::on_timeout`]).
+pub(crate) type OnTimeout<S> = (Duration, Box<dyn Fn(&mut S)>);
 
 /// A range's values ([`El::range`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -383,6 +388,15 @@ pub struct El<S> {
     pub(crate) group: Option<Group>,
     /// A scroll view along this axis ([`El::scroll`]); boxes only.
     pub(crate) scroll: Option<Axis>,
+    pub(crate) on_context: Option<OnContext<S>>,
+    pub(crate) on_timeout: Option<OnTimeout<S>>,
+    /// Overlays declared here ([`El::overlay`]); the runtime lifts them above the content
+    /// after each view run.
+    pub(crate) overlays: Vec<super::Overlay<S>>,
+    /// What it opens, for assistive technology, even while closed.
+    pub(crate) popup: Option<HasPopup>,
+    /// Its tooltip's text ([`El::tooltip`]).
+    pub(crate) tip: Option<Arc<str>>,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -406,6 +420,11 @@ fn new<S>(what: What) -> El<S> {
         on_step: None,
         group: None,
         scroll: None,
+        on_context: None,
+        on_timeout: None,
+        overlays: Vec::new(),
+        popup: None,
+        tip: None,
         children: Vec::new(),
     }
 }
@@ -862,6 +881,49 @@ impl<S> El<S> {
         self
     }
 
+    /// Runs on `&mut S` when the secondary button is released over the element (the innermost
+    /// one with a handler), or the Menu key goes down while focus is in it, with where a menu
+    /// should open (the pointer, or the focused element's centre), design px in the window:
+    /// `on_context_menu(|s, x, y| s.menu = Some((x, y)))` with
+    /// `.overlay(s.menu.map(|(x, y)| menu(items).at(x, y)))`. It makes nothing pressable.
+    pub fn on_context_menu(mut self, handler: impl Fn(&mut S, f32, f32) + 'static) -> Self {
+        self.on_context = Some(Box::new(handler));
+        self
+    }
+
+    /// Runs on `&mut S` once, `after` the element first appears (again only if it leaves and
+    /// comes back): a toast timing out. The host wakes for it and nothing else; once the
+    /// element goes, nothing stays armed.
+    pub fn on_timeout(mut self, after: Duration, handler: impl Fn(&mut S) + 'static) -> Self {
+        self.on_timeout = Some((after, Box::new(handler)));
+        self
+    }
+
+    // ---- Overlays -------------------------------------------------------------------------
+
+    /// Declares an overlay ([`super::popover`], [`super::menu`], [`super::dialog`],
+    /// [`super::toasts`]) with this element as its trigger: it is placed against the element
+    /// unless it names another anchor, and drawn above the window's content while it is
+    /// [`open`](super::Overlay::open) (and `Some`). The element tells assistive technology
+    /// what it opens, whether that is open, and which panel it controls. Call it again for
+    /// more overlays.
+    pub fn overlay(mut self, overlay: impl Into<Option<super::Overlay<S>>>) -> Self {
+        if let Some(overlay) = overlay.into() {
+            self.popup = self.popup.or(overlay.kind.popup());
+            self.overlays.push(overlay);
+        }
+        self
+    }
+
+    /// A tooltip: `text` opens above the element once the pointer rests on it (or keyboard
+    /// focus arrives) for [`super::TOOLTIP_DELAY`], and closes when it leaves, on a press or on
+    /// Escape. It takes neither focus nor the pointer, and opening it doesn't run the view.
+    /// Assistive technology reads it as the element's description (unless it has one).
+    pub fn tooltip(mut self, text: impl Into<Arc<str>>) -> Self {
+        self.tip = Some(text.into());
+        self
+    }
+
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
         self.on_press.is_some()
@@ -878,7 +940,7 @@ impl<S> El<S> {
 
     /// Whether it gets a hit item at all: interactive, or carrying semantics of its own.
     pub(crate) fn hit(&self) -> bool {
-        self.interactive() || self.sem.role.is_some() || self.sem.label.is_some()
+        self.interactive() || self.sem.role.is_some() || self.sem.label.is_some() || self.tip.is_some()
     }
 
     /// The first text in it, for a default label.

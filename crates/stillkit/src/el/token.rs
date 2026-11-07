@@ -61,3 +61,6 @@ pub const MOTION_LAYOUT: Motion = Motion::Theme(|t| t.motion.layout);
 pub const MOTION_INTERACTIVE: Motion = Motion::Theme(|t| t.motion.interactive);
 /// Opening, closing, entering and exiting.
 pub const MOTION_OPEN: Motion = Motion::Theme(|t| t.motion.open);
+
+/// The dim behind a modal dialog ([`super::dialog`]): black, heavier on a dark scheme.
+pub const SCRIM: Paint = Paint::Theme(|t| crate::Rgba::new(0.0, 0.0, 0.0, if t.dark() { 0.5 } else { 0.3 }));

@@ -38,6 +38,7 @@ mod element;
 mod host;
 mod json;
 mod layout;
+mod overlay;
 mod png;
 mod runtime;
 mod scroll;
@@ -49,4 +50,5 @@ pub use element::{
 };
 pub use crate::platform::current::host::reduced_motion;
 pub use host::{App, Input, Script, run};
-pub use runtime::{Change, Runtime, Shown, Snapshot};
+pub use overlay::{Overlay, Side, TOOLTIP_DELAY, dialog, menu, popover, toasts};
+pub use runtime::{Change, Popup, Runtime, Shown, Snapshot};

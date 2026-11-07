@@ -39,6 +39,12 @@ pub struct Detail {
     pub selected: Option<bool>,
     /// Open (a disclosure, a menu button).
     pub expanded: Option<bool>,
+    /// What it opens (a menu button, a dialog's trigger), open or not.
+    pub popup: Option<accesskit::HasPopup>,
+    /// The hit item it opened and controls (the menu or popover panel), while open.
+    pub controls: Option<HitId>,
+    /// A modal dialog: everything outside it is inert.
+    pub modal: bool,
 }
 
 /// Rich actions remain owned data until the surface's UI thread consumes them.
@@ -121,6 +127,10 @@ impl Snapshot {
             if let Some(on) = hit.checked {
                 node.set_toggled(if on { Toggled::True } else { Toggled::False });
             }
+            // A status item (a toast) is announced when it appears.
+            if hit.role == Role::Status {
+                node.set_live(accesskit::Live::Polite);
+            }
             for (_, semantic) in self.semantics.iter().filter(|(id, _)| *id == hit.id) {
                 match semantic {
                     Semantics::Range {
@@ -173,6 +183,16 @@ impl Snapshot {
                         }
                         if let Some(expanded) = detail.expanded {
                             node.set_expanded(expanded);
+                        }
+                        if let Some(popup) = detail.popup {
+                            node.set_has_popup(popup);
+                        }
+                        // A relation to an item outside this surface's tree is left out.
+                        if let Some(controls) = detail.controls.filter(|c| seen.contains(c)) {
+                            node.push_controlled(node_id(controls));
+                        }
+                        if detail.modal {
+                            node.set_modal();
                         }
                     }
                     _ => {}

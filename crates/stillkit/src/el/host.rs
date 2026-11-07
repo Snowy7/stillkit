@@ -13,9 +13,10 @@
 //!
 //! Scripts and dumps use design pixels. A script is a JSON array of steps, each with an `at`
 //! time in seconds and one input: `{"at": 0.2, "move": [x, y]}`, `"down"`, `"up"`,
-//! `{"click": "key"}` (the centre of a keyed element), `{"key": "Tab"}` (also `Shift+Tab`,
+//! `{"right": [x, y]}` (the secondary button, for context menus), `{"click": "key"}` (the
+//! centre of a keyed element), `{"key": "Tab"}` (also `Shift+Tab`,
 //! `Enter`, `Space`, `Escape`, arrows `Left` `Right` `Up` `Down`, `PageUp`, `PageDown`, `Home`,
-//! `End`, or a virtual-key number), `{"wheel": [x, y, delta]}` (120 a notch, positive up).
+//! `End`, `Menu`, or a virtual-key number), `{"wheel": [x, y, delta]}` (120 a notch, positive up).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -51,6 +52,8 @@ pub enum Input {
     Key { vk: u16, shift: bool },
     /// The wheel at a point: 120 a notch, positive up.
     Wheel(f32, f32, i16),
+    /// The secondary button pressed and released at a point (a context menu).
+    Right(f32, f32),
 }
 
 /// Timed input in design pixels, replayed on a runtime's virtual clock ([`Runtime::play`]).
@@ -73,6 +76,8 @@ impl Script {
                 Input::Down(x, y)
             } else if let Some((x, y)) = point("up") {
                 Input::Up(x, y)
+            } else if let Some((x, y)) = point("right") {
+                Input::Right(x, y)
             } else if let Some(key) = step.get("click").and_then(Json::str) {
                 Input::Click(key.to_owned())
             } else if let Some(Json::Arr(w)) = step.get("wheel")
@@ -83,7 +88,7 @@ impl Script {
             } else if let Some(key) = step.get("key") {
                 key_of(key).with_context(|| format!("step {i}: unknown key {key:?}"))?
             } else {
-                bail!("step {i}: no input (move, down, up, click, key or wheel)");
+                bail!("step {i}: no input (move, down, up, right, click, key or wheel)");
             };
             out.push((Duration::from_secs_f64(at.max(0.0)), input));
         }
@@ -116,6 +121,7 @@ fn key_of(key: &Json) -> Option<Input> {
         "Up" => 0x26,
         "Right" => 0x27,
         "Down" => 0x28,
+        "Menu" => 0x5D,
         _ => return None,
     };
     Some(Input::Key { vk, shift })
@@ -145,6 +151,7 @@ impl<S> Runtime<S> {
                 Input::Key { vk: 0x09, shift } => self.tab(*shift),
                 Input::Key { vk, .. } => self.key(*vk),
                 Input::Wheel(x, y, delta) => self.wheel_at(x * s, y * s, *delta),
+                Input::Right(x, y) => self.right_click(x * s, y * s),
             }
             self.frame(Duration::ZERO);
         }
