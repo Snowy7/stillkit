@@ -35,6 +35,9 @@
 //! - [`El::overlay`] with [`popover`], [`menu`], [`dialog`] or [`toasts`], and
 //!   [`El::tooltip`], put anchored content above the window's (in a popup surface when it
 //!   doesn't fit).
+//! - [`text_input`] and [`text_area`] are text fields: the view owns the string
+//!   ([`El::value`], [`El::on_input`]); caret moves, selection and the caret's blink never run
+//!   the view. On Windows the focused one types through RichEdit (the system IME).
 
 mod animate;
 mod clipboard;

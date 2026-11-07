@@ -17,6 +17,9 @@
 //!   in a scroll view is reached and scrolled into view.
 //! - **Size, scale and theme** re-lay out the retained tree without running the view (size
 //!   and scale land at once; a theme's colours animate where elements have motion).
+//! - **Text fields** ([`text`]) take keys and characters before their ancestors, keep their
+//!   caret, selection, undo and scroll here, and hand edits to `on_input`; on Windows the
+//!   focused one types through RichEdit (`native`).
 //! - **Overlays** ([`layer`]) are lifted out of the tree after each view run and appended to
 //!   the root, placed against their anchors, and take Escape, outside presses and focus first.
 //!   Tooltips and timers run on the clock without running the view.

@@ -1375,6 +1375,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         // An `el` field takes the keys `el`'s policy gives it (crate::el::edit::command); the
         // rest go to the app as keys, untouched by RichEdit.
         let mut refused = false;
+        // An `el` field attached while the window was inactive takes the focus with it.
+        if field.is_el() && msg == WM_SETFOCUS {
+            field.focus();
+            return LRESULT(0);
+        }
         if field.is_el() && focused {
             use crate::el::edit::{Cmd, command, types};
             use windows::Win32::UI::WindowsAndMessaging::WM_SYSKEYDOWN;

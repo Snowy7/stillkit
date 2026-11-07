@@ -185,7 +185,8 @@ impl<S> Runtime<S> {
     }
 
     /// The `--tree` dump: every element as shown now, in design pixels, with what assistive
-    /// technology reads (`range` is `[min, max, value]`; `scroll` a scroll view's offset).
+    /// technology reads (`range` is `[min, max, value]`; `scroll` a scroll view's offset;
+    /// `selection` a text field's anchor and caret, bytes into its `text`).
     pub fn tree_json(&self) -> String {
         let s = self.scale();
         let (w, h) = self.size();
@@ -197,7 +198,7 @@ impl<S> Runtime<S> {
             .map(|n| {
                 let r = n.rect;
                 format!(
-                    "{{\"key\":{},\"path\":{},\"role\":{},\"label\":{},\"rect\":[{},{},{},{}],\"fill\":{},\"text\":{},\"checked\":{},\"state\":\"{:?}\",\"focused\":{},\"range\":{},\"value\":{},\"description\":{},\"selected\":{},\"expanded\":{},\"scroll\":{}}}",
+                    "{{\"key\":{},\"path\":{},\"role\":{},\"label\":{},\"rect\":[{},{},{},{}],\"fill\":{},\"text\":{},\"checked\":{},\"state\":\"{:?}\",\"focused\":{},\"range\":{},\"value\":{},\"description\":{},\"selected\":{},\"expanded\":{},\"scroll\":{},\"selection\":{}}}",
                     opt(n.key.map(|k| quote(&k))),
                     quote(if n.path.is_empty() { "/" } else { &n.path }),
                     opt(n.role.map(|r| quote(&format!("{r:?}")))),
@@ -217,6 +218,7 @@ impl<S> Runtime<S> {
                     opt(n.selected.map(|v| v.to_string())),
                     opt(n.expanded.map(|v| v.to_string())),
                     opt(n.scroll.map(|v| (v / s).to_string())),
+                    opt(n.selection.map(|(a, c)| format!("[{a},{c}]"))),
                 )
             })
             .collect();
@@ -411,6 +413,8 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
             #[cfg(windows)]
             popups.sync(&mut rt, client)?;
         }
+        // ...and after it, so a value the view refused or changed reaches RichEdit at once.
+        rt.sync_text_input(&surface);
         if !rt.animating() {
             frames = None;
         } else if frames.as_ref().is_none_or(|(_, since)| since.elapsed() >= FRAMES) {

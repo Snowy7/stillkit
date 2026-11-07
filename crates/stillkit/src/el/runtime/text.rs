@@ -95,6 +95,10 @@ impl<S> Runtime<S> {
     /// Focus moved onto or off a field: the caret's blink restarts, `select_all_on_focus`
     /// selects, a field left behind drops its composition.
     pub(super) fn sync_focus(&mut self) {
+        // A view without fields pays nothing per frame.
+        if self.fields.is_empty() && self.typing.is_none() {
+            return;
+        }
         let now = self.focused_field().map(|(_, id, spec)| (id, spec.select_all));
         if now.map(|n| n.0) == self.typing {
             return;

@@ -26,8 +26,10 @@ el::run(App { title: "Hello", size: (320.0, 180.0), kind: Kind::App { min: (200,
 Examples: `examples/el_hello.rs` (elements only), `examples/el_sound.rs` (the plan's Sound
 panel, its slider and switch drawn by today's kit through `paint`) and `examples/el_motion.rs`
 (rows entering and leaving, a card changing size, a theme switch), `examples/el_scroll.rs`
-(a long list scrolling under a header that stays put) and `examples/el_overlays.rs` (a
-popover, a context menu, a tooltip, a dialog, a select-style menu and a toast stack).
+(a long list scrolling under a header that stays put), `examples/el_overlays.rs` (a
+popover, a context menu, a tooltip, a dialog, a select-style menu and a toast stack) and
+`examples/el_text.rs` (a form: a name, a password, a search field with a clear button and a
+notes area).
 
 ## Elements
 
@@ -39,6 +41,7 @@ popover, a context menu, a tooltip, a dialog, a select-style menu and a toast st
 | `image(Arc<Image>)` | a bitmap at its own size unless sized; rounded with `.radius` |
 | `arc(fraction)` | a ring or meter: a circle fitting its box, `fraction` of its span filled in `color` (`token::ACCENT`) over a track (`.track(paint)`, `token::FILL`; `.no_track()`), stroked `token::RING` wide (`.stroke(len)`) with round caps; `.arc_start(ArcStart::Top \| Right \| Bottom \| Left)` and `.arc_span(0..=1)` (`Left` with `0.5` is a semicircle meter); with motion the fraction springs |
 | `paint(\|f, rect, id\| ..)` | draws with the kit (`Frame`) into its laid-out rect; `id` is the element's hit id, so a kit control drawn here hovers, presses and focuses like any element |
+| `text_input(key)`, `text_area(key)` | a text field: one line, or wrapped lines that scroll; see [Text fields](#text-fields) |
 
 - **Layout:** `w`, `h`, `size`, `w_full`, `h_full`, `grow`, `min_*`, `max_*`, `gap`, `pad`,
   `pad_x`, `pad_y`, `align` (cross axis), `justify` (main axis), `absolute(x, y)`.
@@ -60,6 +63,8 @@ popover, a context menu, a tooltip, a dialog, a select-style menu and a toast st
   `on_drag(|s, x, y| ..)` (the pointer's place across the box, `0..=1`, while pressed; its
   changes land at once), `on_key(|s, key: KeyCode, tx| -> Handled)` and
   `on_step(|s, delta: f64| ..)` (a `range` stepped by keys or assistive technology),
+  `on_char(|s, c: char, tx| -> Handled)` (a typed character, after a focused field),
+  `on_input(|s, text: &str| ..)` and `on_submit(|s, text: &str| ..)` (text fields),
   `on_context_menu(|s, x, y| ..)` (secondary click or the Menu key, design px in the window)
   and `on_timeout(after, |s| ..)` (once, `after` the element appears).
   `tx.scroll_into_view(key)` shows an element once the view has run.
@@ -127,10 +132,81 @@ view never runs for animation, and `Runtime::animating()` says whether anything 
 click at 0.1 s), made through the same path as
 `el_motion --script s.json --at 0.3 --snap out.png`.
 
+## Text fields
+
+```rust
+text_input("name").placeholder("Your name").max_len(32)
+    .value(s.name.as_str()).on_input(|s, t| s.name = t.into()).on_submit(|s, t| s.go(t))
+text_input("password").secure().value(s.password.as_str()).on_input(|s, t| s.password = t.into())
+text_area("notes").rows(5).value(s.notes.as_str()).on_input(|s, t| s.notes = t.into())
+```
+
+- **The view owns the string.** `.value(..)` is what the field shows; each edit (typing,
+  deleting, a paste, undo, an IME commit, assistive technology's Set Value) goes to
+  `on_input` with the new text, the view runs, and whatever `.value` it gives back is what the
+  field shows. Give the old text back to refuse an edit (the caret and undo history go back
+  too), or another to transform it. Without `.value` the field keeps its own text.
+- **Builders:** `placeholder`, `secure` (bullets; no copy or cut; no text for assistive
+  technology, in `--tree` or in the list), `max_len(chars)`, `read_only` (focus, select and
+  copy only), `select_all_on_focus`, `rows(n)` (a text area's height when unsized, 3),
+  `font(TextRole)`, `color`. Padding, fill and radius are the element's own. Caret and
+  selection come from `token::CARET` and `token::SELECTION` (the theme's accent), the
+  placeholder from `token::TERTIARY`. A field shows its focus ring whenever it has focus.
+- **Editing:** a click places the caret, a drag selects, a double click selects a word and a
+  triple click the line (dragging after them extends by words or lines). Arrows, Ctrl+arrows
+  by word (Windows' stops: the start of the next word), Home and End (Ctrl: the whole
+  text), Up and Down and Page Up and Down in a text area (keeping their column), Shift to
+  extend, Backspace and Delete (Ctrl: by word), Ctrl+A, Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z, Ctrl+C,
+  Ctrl+X and Ctrl+V (and Ctrl+Insert, Shift+Delete, Shift+Insert). Typing undoes a word at a
+  time. Moves are by grapheme. Enter submits a `text_input` (Ctrl+Enter a `text_area`, where
+  Enter is a new line); without `on_submit` it goes on to the ancestors.
+- **Layout:** a field is one line of its role tall (a text area `rows` lines) plus its
+  padding, and only as wide as it is given. A long line scrolls sideways to keep the caret in
+  sight; a text area wraps at word boundaries and scrolls in its own scroll view (the wheel,
+  the overlay scrollbar, the caret kept in sight), which never runs the view either.
+- **What runs:** caret moves, selection, scrolling and the blink only repaint. The caret
+  blinks (530 ms on, 530 off) on the runtime clock while its window has the keyboard, and
+  holds still, shown, after 5 s without input, as Windows' caret does; `wake_at` holds the
+  next blink, and nothing once it holds still or no field has focus.
+- **Clipboard:** `Runtime::set_clipboard(impl Clipboard)`. Headless runtimes and tests keep
+  a `MemoryClipboard` (a script never touches the user's clipboard); `el::run` gives Linux
+  runtimes the seat's selection. On Windows the focused field's RichEdit uses the system
+  clipboard itself.
+- **IME:** `Runtime::preedit(text, cursor)` draws a composition inline, underlined, at the
+  caret, and `type_text` commits; `caret_rect()` is where candidate windows go.
+- **Per platform** (`Runtime::sync_text_input`, called by `el::run` before each frame):
+  - *Windows:* while a field has focus in a window, the existing windowless RichEdit
+    (`TextField`) types into it: the system IME (TSF, its composition inline, candidates at
+    the caret), caret placement, mouse selection, undo and the system clipboard. The runtime
+    keeps focus, drawing order (`Op::TextField`, with the caret drawn from
+    `TextField::caret`) and the key policy: the surface asks `el::edit::command` which keys
+    the field takes; the rest reach the app as `Event::Key` (Tab and Escape always). One
+    RichEdit exists at a time, made on focus, dropped on blur; unfocused fields draw through
+    the runtime's editor. Apps' own `TextField`s behave as before.
+  - *Linux (Wayland):* the runtime's editor, drawn by stillkit. Characters come from
+    xkbcommon with the locale's compose table (dead keys, Compose sequences) as `Event::Char`
+    after their key; the clipboard is `wl_data_device` (text/plain;charset=utf-8,
+    UTF8_STRING, text/plain); the IME is text-input-v3 (enabled with the caret's rectangle
+    while a field has focus, its preedit drawn inline). **Compile-checked only so far:**
+    see [Not yet](#not-yet).
+- **Accessibility:** a field is a text input (multi-line, or a password input), named by its
+  `label` or placeholder. Its text is its value (Set Value types it), and
+  `Semantics::Field` gives one AccessKit text run per visual line, with each character's
+  place and width, word starts, and the caret and selection. A secure field gives neither.
+- **Headless:** `type_text(s)`, `key_with(vk, Modifiers::CTRL)`, `preedit`, and the
+  script's `{"type": "text"}` and `{"key": "Ctrl+Shift+Left"}`. `Shown` (and `--tree`)
+  carry a field's text and `selection` (anchor, caret). `tests/el_text.rs` checks typing,
+  word moves, undo, paste, multi-click, a refused value, Enter and Tab, a secure field, the
+  runs, and the blink; the RichEdit path has its own test (a hidden window, never focused).
+
 ## Keys and focus
 
 A key goes to the focused element, then up through its ancestors (the root when nothing has
-focus). Each element in turn gets its `on_key`; a key it uses (`Handled::Yes`) re-runs the
+focus). A focused text field gets it first: it takes what it edits with (and every key that
+types a character, which arrives apart as `type_text`), and refuses the rest, which go on
+as below; Escape and Tab always go on. Characters go to the focused field, else to the
+focused element's and its ancestors' `on_char`. Handlers read the modifiers held through
+`tx.modifiers()`; the host sends every key with them (`Runtime::key_with`). Each element in turn gets its `on_key`; a key it uses (`Handled::Yes`) re-runs the
 view and goes no further. Unused, the element's built-in keys come next:
 
 - **A range** (`range` + `on_step`, while it has focus): Right and Up add a step, Left and
@@ -271,8 +347,10 @@ input; then 0 ms CPU over 5 s. Idle private memory is unchanged against the base
 `MsgWaitForMultipleObjectsEx` until a message arrives. While `Runtime::animating()`, it holds
 `Surface::animation_frames` (a display-rate timer thread posting frames); once everything
 settles it drops them, and no timer or ticker remains. A pending runtime timer
-(`Runtime::wake_at`) gets one wake: a sleeping thread posts one message to the window at its
-deadline, unless a newer deadline replaced it (elsewhere, frames stand in while it waits). A frame that
+(`Runtime::wake_at`: a tooltip's delay, a toast, the caret's blink) gets one wake through the
+platform host, `host::wake_at(deadline)`: on Windows the message wait's own timeout
+(`MsgWaitForMultipleObjectsEx`, no thread or timer object), on Linux a timerfd polled beside
+the display fd and disarmed when nothing waits. With no deadline the wait is infinite. A frame that
 changes nothing paints nothing; a repainted but identical list costs the surface one
 comparison. `el_hello` (release) measured after start-up settled, over 30 s: 0 context
 switches on the UI thread, 0 ms CPU, 5.0 MB private; no GPU driver loaded (only the system
@@ -304,8 +382,10 @@ Scripts and dumps use design pixels. A script is a JSON array of timed steps:
  {"at": 0.5, "click": "switch"}, {"at": 0.6, "key": "Tab"}, {"at": 0.7, "key": "Enter"}]
 ```
 
-Keys: `Tab`, `Shift+Tab`, `Enter`, `Space`, `Escape`, `Left`, `Right`, `Up`, `Down`,
-`PageUp`, `PageDown`, `Home`, `End`, `Menu`, or a virtual-key number; `{"wheel": [x, y, delta]}` turns
+Keys: `Tab`, `Enter`, `Space`, `Escape`, `Left`, `Right`, `Up`, `Down`, `PageUp`,
+`PageDown`, `Home`, `End`, `Menu`, `Backspace`, `Delete`, `Insert`, a letter or digit, or a
+virtual-key number, each with any of `Ctrl+`, `Alt+` and `Shift+` (`Ctrl+Shift+Z`);
+`{"type": "text"}` types into the focused field; `{"wheel": [x, y, delta]}` turns
 the wheel (120 a notch, positive up); `{"right": [x, y]}` clicks the secondary button. Tests
 use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x, y)`,
 `click(key)`, `key(vk)`, `tab(back)`, `wheel_at(x, y, delta)`, `find(key)`, `presented(key)`,
@@ -316,9 +396,22 @@ use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x,
 
 - Components (phase 5): today's kit controls come in through `paint`.
 - The app window's modal resize loop: content catches up when the drag ends.
-- Text fields and per-element cursors. `on_key` sees virtual keys without modifiers (Tab's
-  Shift comes from the host); text input will need characters, IME and modifiers, and a
-  focused field taking keys before its ancestors' `on_key`.
+- Per-element cursors (an I-beam over fields comes from RichEdit while one has focus on
+  Windows, nowhere else).
+- Text fields, what is left:
+  - **Linux is compile-checked only.** Untested on a compositor: characters and compose,
+    modifiers, the `wl_data_device` clipboard (copy, and paste from another client or our
+    own selection), text-input-v3 (enable, cursor rectangle, preedit, commit), the timerfd
+    wake, and the stillkit-drawn caret, selection and preedit underline there. Linux has no
+    key repeat yet (wl_keyboard's repeat_info is ignored), so holding Backspace deletes one.
+  - **Windows:** RichEdit draws the selection in the system's highlight colour, not
+    `token::SELECTION`, and masks a password with `*`. A text area's scroll while focused is
+    RichEdit's own (no overlay scrollbar until it loses focus, and the offsets don't carry
+    over). Undo history lives in the RichEdit, so it ends when the field loses focus.
+  - Caret placement is by characters on one shaped line: mixed-direction (bidi) text gets
+    visual caret stops but logical selection rects in the runtime's editor (RichEdit, on
+    Windows, handles bidi itself). No drag and drop of text, no context menu (cut, copy,
+    paste) and no spell checking. Shift+click doesn't extend yet.
 - Overlays, what is left:
   - **Assistive technology can't open or close a trigger yet.** A trigger that reports
     `expanded` is an ExpandCollapse control in UI Automation, which hides Invoke, and
@@ -327,10 +420,7 @@ use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x,
   - **Popups:** drawn at the window's scale (a monitor with another DPI gets the window's
     pixels), against the work area of the window's monitor only, and their accessibility
     tree is separate from the window's (their hits and names, without the window's
-    semantics). The one-shot wake lives in `el/host.rs` (a thread posting `WM_NULL`); it
-    belongs in the platform host as `wake_at(deadline)`, next to `wait()`, with a Linux
-    version (Linux holds frames while a timer waits). A root that scrolls keeps its
-    overlays in the window.
+    semantics). A root that scrolls keeps its overlays in the window.
   - Tooltips are text; rich hover cards are popovers the app opens. No hover grace period
     beyond moving straight across, and toasts don't pause under the pointer.
   - No cascading submenus: an overlay declared inside a menu opens above it (`side(Right)`),

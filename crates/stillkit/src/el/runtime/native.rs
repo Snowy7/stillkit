@@ -69,11 +69,12 @@ impl<S> Runtime<S> {
                 field.set_style(&look.style, look.ink);
                 let _ = field.set_text(&f.ed.text);
                 field.select_range(utf16(&f.ed.text, f.ed.selection()));
-                let _ = field.prepare();
-                // Only a window that has the keyboard hands it on; otherwise the first click in
-                // the field focuses it (the surface does that).
+                // Only a window that has the keyboard hands it on; otherwise the field takes it
+                // when the window does (the surface forwards WM_SETFOCUS as a focus).
                 if foreground(surface) {
                     field.focus();
+                } else {
+                    let _ = field.prepare();
                 }
                 surface.set_text_field(Some(field.clone()));
                 f.native = Some(field.clone());
