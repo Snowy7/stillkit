@@ -102,10 +102,14 @@ pub fn select(s: &State) -> El<State> {
     .build()
 }
 pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
+    sheet_at_scale(theme, 1)
+}
+/// Render at an integer device scale for the visual audit.
+pub fn sheet_at_scale(theme: Theme, scale: u32) -> anyhow::Result<Image> {
     let mut sheet = Image {
-        width: 1600,
-        height: 760,
-        pixels: vec![0; 1600 * 760 * 4],
+        width: 1600 * scale,
+        height: 760 * scale,
+        pixels: vec![0; (1600 * 760 * scale * scale * 4) as usize],
     };
     for i in 0..8 {
         let state = State {
@@ -166,8 +170,8 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
                 })
             },
             theme.clone(),
-            (400, 380),
-            1.,
+            (400 * scale, 380 * scale),
+            scale as f32,
         )?;
         rt.set_background(Some(theme.color.surface.with_alpha(1.)));
         if i == 1 {
@@ -176,10 +180,13 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
         rt.frame(Duration::from_secs(1));
         rt.frame(Duration::from_secs(2));
         let image = rt.snap()?;
-        for y in 0..380 {
-            let to = (((i as u32 / 4 * 380 + y) * 1600 + i as u32 % 4 * 400) * 4) as usize;
-            let from = (y * 400 * 4) as usize;
-            sheet.pixels[to..to + 1600].copy_from_slice(&image.pixels[from..from + 1600]);
+        for y in 0..image.height {
+            let to = (((i as u32 / 4 * image.height + y) * sheet.width
+                + i as u32 % 4 * image.width)
+                * 4) as usize;
+            let from = (y * image.width * 4) as usize;
+            let bytes = (image.width * 4) as usize;
+            sheet.pixels[to..to + bytes].copy_from_slice(&image.pixels[from..from + bytes]);
         }
     }
     Ok(sheet)

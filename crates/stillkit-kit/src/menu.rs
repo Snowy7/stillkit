@@ -54,7 +54,10 @@ impl<S: 'static> MenuItem<S> {
         self
     }
     /// Visual highlight without moving keyboard focus from a search editor.
-    pub fn highlighted(mut self, value: bool) -> Self { self.highlighted = value; self }
+    pub fn highlighted(mut self, value: bool) -> Self {
+        self.highlighted = value;
+        self
+    }
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -75,12 +78,14 @@ impl<S: 'static> MenuItem<S> {
             lead = lead.child(if self.radio {
                 el::el().size(6.).radius(3.).fill(INK)
             } else {
-                icon(Icon::Check).size(12.).color(INK)
+                icon(Icon::Check)
+                    .size(Len::Theme(|t| t.tokens().menu.glyph))
+                    .color(INK)
             });
         } else if self.checked.is_none()
             && let Some(g) = self.glyph
         {
-            lead = lead.child(icon(g).size(16.).color(INK));
+            lead = lead.child(icon(g).size(el::token::ICON).color(INK));
         }
         let mut node = row()
             .h(Len::Theme(|t| t.tokens().menu.row))
@@ -98,14 +103,19 @@ impl<S: 'static> MenuItem<S> {
             .opacity(if self.disabled { 0.45 } else { 1. })
             .child(lead)
             .child(text(self.label).font(TextRole::Body).color(INK).grow(1.));
-        if self.highlighted { node = node.fill(el::token::FILL); }
+        if self.highlighted {
+            node = node.fill(el::token::FILL);
+        }
         if let Some(c) = self.checked {
             node = node.checked(c);
         }
         if let Some(h) = self.hint {
-            node = node
-                .description(h.clone())
-                .child(text(h).font(TextRole::Footnote).color(DIM).pad_x(12.));
+            node = node.description(h.clone()).child(
+                text(h)
+                    .font(TextRole::Footnote)
+                    .color(DIM)
+                    .pad_x(Len::Theme(|t| t.tokens().menu.gap / 2.)),
+            );
         }
         if let Some(k) = self.key {
             node = node.key(k);

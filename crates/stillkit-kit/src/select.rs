@@ -78,7 +78,7 @@ impl<S: 'static> Select<S> {
             .h(token::CONTROL)
             .min_w(180.)
             .pad_x(12.)
-            .gap(12.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .radius(token::RADIUS_CONTROL)
             .fill(token::FILL)
@@ -97,10 +97,18 @@ impl<S: 'static> Select<S> {
             })
             .on_char(move |s, c, tx| {
                 let mods = tx.modifiers();
-                if disabled || mods.ctrl || mods.alt || mods.meta || c.is_control() { return Handled::No; }
+                if disabled || mods.ctrl || mods.alt || mods.meta || c.is_control() {
+                    return Handled::No;
+                }
                 for offset in 1..=options.len() {
                     let i = (selected.wrapping_add(offset)) % options.len();
-                    if options[i].to_lowercase().starts_with(&c.to_lowercase().to_string()) { change(s, i); return Handled::Yes; }
+                    if options[i]
+                        .to_lowercase()
+                        .starts_with(&c.to_lowercase().to_string())
+                    {
+                        change(s, i);
+                        return Handled::Yes;
+                    }
                 }
                 Handled::No
             })

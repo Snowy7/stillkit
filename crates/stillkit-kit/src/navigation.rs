@@ -135,7 +135,8 @@ impl<S: 'static> Disclosure<S> {
             .child(trigger.key("trigger"));
         if self.open {
             n = n.child(
-                row().key("content")
+                row()
+                    .key("content")
                     .transition(Transition::fade())
                     .pad_x(inset)
                     .child(el().w(Len::Theme(|t| t.metrics.icon + t.metrics.item)))
@@ -207,8 +208,8 @@ impl<S: 'static> Toolbar<S> {
     pub fn new(label: impl Into<Arc<str>>) -> Self {
         Self {
             root: row()
-                .gap(4.)
-                .pad(4.)
+                .gap(token::ITEM)
+                .pad(token::ITEM)
                 .align(Align::Center)
                 .fill(token::CARD)
                 .radius(token::RADIUS_CONTROL)

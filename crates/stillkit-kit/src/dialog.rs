@@ -74,7 +74,7 @@ impl<S: 'static> Dialog<S> {
             .child(text(self.body).wrap(6).color(DIM))
             .child(
                 row()
-                    .gap(8.)
+                    .gap(token::ITEM)
                     .justify(Justify::End)
                     .child(
                         Button::new(self.cancel)

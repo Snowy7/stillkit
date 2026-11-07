@@ -63,9 +63,17 @@ impl<S: 'static> Stepper<S> {
         for (delta, label) in [(-self.step, "Decrease"), (self.step, "Increase")] {
             if delta > 0. {
                 n = n.child(
-                    row().min_w(token::CONTROL).grow(1.)
-                        .justify(Justify::Center).align(Align::Center)
-                        .child(text(self.value.to_string()).font(TextRole::Body).color(LABEL)),
+                    row()
+                        .min_w(token::CONTROL)
+                        .grow(1.)
+                        .justify(Justify::Center)
+                        .align(Align::Center)
+                        .child(
+                            text(self.value.to_string())
+                                .font(TextRole::Body)
+                                .color(LABEL)
+                                .opacity(if self.disabled { 0.45 } else { 1. }),
+                        ),
                 );
             }
             let next = (self.value + delta).clamp(self.min, self.max);
@@ -73,7 +81,7 @@ impl<S: 'static> Stepper<S> {
                 if delta < 0. { Icon::Remove } else { Icon::Add },
                 format!("{label} {}", self.label),
             )
-                .disabled(self.disabled || next == self.value);
+            .disabled(self.disabled || next == self.value);
             if let Some(f) = self.change.clone() {
                 b = b.on_press(move |s| f(s, next));
             }

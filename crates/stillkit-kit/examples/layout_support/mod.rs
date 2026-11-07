@@ -245,6 +245,10 @@ pub fn view(s: &State) -> El<State> {
         .child(row().gap(14.).child(first).child(middle).child(last))
 }
 pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
+    sheet_at_scale(theme, 1)
+}
+/// Render at an integer device scale for the visual audit.
+pub fn sheet_at_scale(theme: Theme, scale: u32) -> anyhow::Result<Image> {
     let mut r = Runtime::new(
         State {
             value: 0.57,
@@ -253,8 +257,8 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
         },
         view,
         theme.clone(),
-        (1054, 1120),
-        1.,
+        (1054 * scale, 1120 * scale),
+        scale as f32,
     )?;
     r.set_background(Some(theme.color.surface.with_alpha(1.)));
     r.frame(Duration::ZERO);
