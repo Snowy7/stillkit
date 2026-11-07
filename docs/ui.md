@@ -679,6 +679,105 @@ resources. Golden PNG comparison/IO already uses portable `Image` data; its rast
 is supplied by the selected renderer. Spring/tween math stays core, while the waitable
 frame timer and DWM refresh query live in the Windows backend.
 
+## Render modes
+
+A surface draws in one of two ways. **CPU** (the default) is everything above: software
+Direct2D on a WIC bitmap in a per-pixel-alpha layered window, no GPU device in the process, and
+glass (if any) from an external [`Backdrop`](#glass-under-a-surface-n3). **GPU** draws the same
+display list with the same code on a hardware device, and draws Liquid Glass in-process. Both
+kinds mix freely on one UI thread.
+
+```rust,ignore
+use stillkit::platform::{Render, set_render};
+set_render(Render::Auto);                    // this thread's default, before making surfaces
+let bar = Surface::new(Kind::Bar, "bar", Role::Toolbar)?;              // the default
+let panel = Surface::with_render(kind, "panel", Role::Dialog, Render::Gpu)?; // its own choice
+assert_eq!(panel.render(), Render::Gpu);    // Cpu or Gpu, Auto already resolved
+panel.set_glass(Some(glass));                // in-process glass under the panel's content
+panel.set_glass_group(&[a, b], 48.0);        // one liquid container: within 48 px they fuse
+stillkit::platform::windows::gpu::set_power(gpu::Power::High); // default Low: the iGPU
+```
+
+- **Where the choice lives.** A thread default (`set_render`, else `STILLKIT_RENDER=cpu|gpu|auto`,
+  else `Cpu`) plus a per-surface override (`Surface::with_render`). Thread-level, like the glass
+  backdrop, because `Surface::new` takes no `Ui` and `el::run` makes its surface from an `App`
+  with no render field: an app picks GPU with one call before `run`, and mypaper's ~1,000 call
+  sites stay as they are. Per surface, so CPU bars and widgets can sit beside one GPU panel.
+- **`Auto`** resolves when the surface is made: `Cpu` unless glass is wanted
+  (`glass::set_style(Some(..))`, see `glass::wanted`) and no external backdrop is installed;
+  then `Gpu`. The measured numbers below are why it isn't simply "GPU when glass".
+- **The `gpu` feature.** Without it no GPU code is compiled (no wgpu, no `stillkit-glass`), and
+  every mode is `Cpu`. With it, nothing GPU-related loads until the first GPU surface: the
+  device is made then, once per thread (`gpu::device`), and a CPU surface never touches it
+  (`tests/gpu_driver.rs`; `tests/no_gpu_driver.rs` still passes). GPU mode is Windows-only; the
+  stub backend has the same calls and draws on the CPU.
+- **Headless renders** (`render::render`, `el`'s `--snap`) follow the thread's mode, so a GPU
+  app's snapshots are what its screen shows. `gpu::render` always draws on the GPU.
+
+### How a GPU surface draws
+
+```text
+Surface::present(ui, origin, size, list)       (GPU surface)
+  1. damage = the same regions as the CPU path                    (none: no draw, no commit)
+  2. per region: IDCompositionSurface::BeginDraw(region) → the D2D 1.1 device context targets
+     that piece of the atlas, translated to its offset → Painter::region (clip, clear, ops)
+  3. a move or resize: SetWindowPos (the glass is in the window, so it moves with it)
+  4. one IDCompositionDevice::Commit, only if something changed
+```
+
+- One drawing code: `render::Painter` holds the Direct2D target, brush and geometry caches that
+  `Canvas` used to; the software canvas and the GPU layer each own one. The device is hardware
+  Direct3D 11 (BGRA) on the adapter `gpu::Power` prefers (`EnumAdapterByGpuPreference`), with a
+  Direct2D 1.1 device and a DirectComposition device on it.
+- Windows: the same kinds (popups, the bar, desktop-band windows, app windows), made with
+  `WS_EX_NOREDIRECTIONBITMAP` instead of `WS_EX_LAYERED`: per-pixel alpha comes from the
+  premultiplied composition surface. `set_alpha` is the root visual's opacity.
+- **Hit-testing differs.** Without a layered bitmap Windows can't hit-test by alpha, so
+  `WM_NCHITTEST` answers from the last frame's top-level op bounds: a rounded corner's outside
+  hits as its bounding box, and a miss passes to windows **of this thread** only
+  (`HTTRANSPARENT`), not to other apps. Views already fill their body with at least `Rgba::HIT`,
+  so clicks on the body behave as on the CPU.
+- Not ported: `layered_app` (the alpha canvas for app windows) stays CPU-only.
+
+**Tolerance.** GPU pictures match the CPU ones except for antialiasing on edges: on the kit
+gallery pages (`STILLKIT_RENDER=gpu cargo run --release -p stillkit --features gpu --example
+gallery -- <dir>`, then `glass_compare`) at most **0.22 %** of channels differ by more than 4
+levels (**1.4 %** on the icon sheet, which is all edges); single edge pixels (an arc's square end,
+round stroke caps) differ by up to 191; flat areas and text are exact (`kit-text.png` is
+byte-identical). `tests/gpu_render.rs` holds a mixed page to ≤ 0.5 % of channels over 4 levels,
+each within 128, interiors exact. CPU mode is byte-identical to `docs/media/native/kit-*.png`
+with and without the feature.
+
+### Glass in GPU mode
+
+`platform::windows::gpu_glass` draws `stillkit-glass` (liquid-rust) on a wgpu DX12 device on the
+same adapter, into a premultiplied composition swapchain on a visual **under** the surface's
+content visual: the panel's labels draw over its glass. The two devices share nothing; they are
+two visuals of one tree. It draws when the glass changes and while its springs move (a
+`glass-motion` thread posts frames until they rest), never when idle.
+
+| Surface kind | What its glass refracts |
+| --- | --- |
+| Desktop-band window | The wallpaper under it: what is really there. |
+| Bar, popup | The wallpaper under it: a stand-in for the windows that may be behind. |
+| App window | The wallpaper too, for now (see below). |
+
+The wallpaper is decoded once per thread (WIC, scaled to cover the primary screen like "Fill")
+into a GPU texture; each glass copies its window's piece of it, again on a move. Later work:
+other apps' windows through Windows Graphics Capture; and the app's own content beneath an
+in-window panel, by drawing the ops before the panel's `HIT` fill into a D3D11 texture shared with
+D3D12 (an NT handle and a fence) as the glass's backdrop, with the panel's own ops above it.
+
+`set_glass_group(&[Glass], spacing)` puts every body in one liquid container: shapes within
+`spacing` fuse through a smooth union, and a body given a new frame springs to it, merging and
+splitting on the way (`examples/glass_merge.rs`). The material maps to liquid-rust's regular glass:
+`refraction`, `blur` as frost (px to points), `highlight` as the specular rim, `tint` as the stain,
+`1 - clarity` as the transparency slider; dark glass unless a light tint says otherwise.
+`GlassStyle`'s brightness, saturation, smoothing, depth and inner shadow carry over.
+
+### Measured
+
+<!-- render-modes-measured -->
 
 ## Linux backend
 
