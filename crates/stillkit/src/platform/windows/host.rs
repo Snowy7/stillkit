@@ -22,9 +22,18 @@ pub fn shift_down() -> bool {
 
 /// Sleeps until a window message arrives, then dispatches every message waiting.
 pub fn wait() {
+    pump(INFINITE);
+}
+
+/// [`wait`], but for at most `timeout`.
+pub fn wait_for(timeout: std::time::Duration) {
+    pump(timeout.as_millis().min(u128::from(INFINITE - 1)) as u32);
+}
+
+fn pump(millis: u32) {
     // SAFETY: a standard message pump on this thread, with no handles to outlive.
     unsafe {
-        MsgWaitForMultipleObjectsEx(None, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        MsgWaitForMultipleObjectsEx(None, millis, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         let mut msg = MSG::default();
         while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
             let _ = TranslateMessage(&msg);

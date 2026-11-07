@@ -286,7 +286,7 @@ fn sparse_meter_updates_match_a_complete_render() {
         before = after;
     }
     assert!(
-        canvas.arcs.borrow().len() <= 64,
+        canvas.paint.arcs.borrow().len() <= 64,
         "meter geometry stays bounded"
     );
 }
@@ -388,6 +388,12 @@ impl Ui {
             })
         }
     }
+    /// The text rendering parameters canvases are made with (GPU surfaces use them too).
+    #[cfg(feature = "gpu")]
+    pub(crate) fn params(&self) -> &IDWriteRenderingParams {
+        &self.params
+    }
+
     /// Makes the factories. Initializes COM on this thread (apartment-threaded) if nothing has.
     pub fn new() -> Result<Self> {
         Self::with_text_factory(false)
@@ -467,14 +473,21 @@ impl Image {
 
 }
 
-/// Draws `list` into a new `width`×`height` image exactly as a surface shows it.
+/// Draws `list` into a new `width`×`height` image exactly as a surface shows it: on the GPU
+/// when this thread's render mode is `Gpu` (`gpu` feature), else on the CPU.
 pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
+    #[cfg(feature = "gpu")]
+    if crate::platform::render() == crate::platform::Render::Gpu
+        && let Some(image) = super::gpu::render(ui, list, width, height)?
+    {
+        return Ok(image);
+    }
     let canvas = <Canvas as crate::platform::Renderer>::new(ui, width, height)?;
     let full = PixelRect::full(width, height);
     crate::platform::Renderer::draw(&canvas, &mut ui.text, list, full)?;
     // EndDraw committed the picture to WIC. Release source copies before allocating
     // the returned pixels; a one-shot raster never draws those bitmaps again.
-    canvas.images.borrow_mut().clear();
+    canvas.paint.release_images();
     let mut pixels = vec![0u8; (width * height * 4) as usize];
     crate::platform::Renderer::read(&canvas, full, |row, bytes| {
         let at = row as usize * width as usize * 4;
@@ -490,7 +503,14 @@ pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Resul
 /// A WIC bitmap and the software Direct2D target drawing into it.
 pub struct Canvas {
     bitmap: IWICBitmap,
-    target: ID2D1RenderTarget,
+    paint: Painter,
+}
+
+/// What draws a display list on one Direct2D target, with its caches: the software target of a
+/// [`Canvas`], or the hardware device context of a GPU surface (`gpu`). One drawing code for
+/// both, so the two modes draw the same picture.
+pub(crate) struct Painter {
+    pub(crate) target: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
     images: RefCell<HashMap<usize, (Arc<Image>, ID2D1Bitmap)>>,
     arcs: RefCell<HashMap<[u32; 4], ID2D1PathGeometry>>,
@@ -499,6 +519,80 @@ pub struct Canvas {
     icons: RefCell<HashMap<crate::icons::Icon, Option<ID2D1PathGeometry>>>,
     /// Round caps and joins, for icons.
     round: ID2D1StrokeStyle,
+    /// The target's translation while drawing (a GPU update rect's offset in its atlas);
+    /// icons set their own transform on top of it. Always zero on a software canvas.
+    #[cfg(feature = "gpu")]
+    pub(crate) base: std::cell::Cell<(f32, f32)>,
+}
+
+impl Painter {
+    /// Caches for drawing on `target`: grayscale text with `params`, round icon strokes.
+    pub(crate) fn new(
+        target: ID2D1RenderTarget,
+        factory: &ID2D1Factory,
+        params: &IDWriteRenderingParams,
+    ) -> Result<Self> {
+        // SAFETY: documented calls on live objects owned by the caller and by the painter.
+        unsafe {
+            target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+            target.SetTextRenderingParams(params);
+            let brush = target.CreateSolidColorBrush(&color(Rgba::TRANSPARENT), None)?;
+            use windows::Win32::Graphics::Direct2D::{
+                D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND, D2D1_STROKE_STYLE_PROPERTIES,
+            };
+            let round = factory.CreateStrokeStyle(
+                &D2D1_STROKE_STYLE_PROPERTIES {
+                    startCap: D2D1_CAP_STYLE_ROUND,
+                    endCap: D2D1_CAP_STYLE_ROUND,
+                    dashCap: D2D1_CAP_STYLE_ROUND,
+                    lineJoin: D2D1_LINE_JOIN_ROUND,
+                    miterLimit: 10.0,
+                    ..Default::default()
+                },
+                None,
+            )?;
+            Ok(Self {
+                target,
+                brush,
+                images: RefCell::new(HashMap::new()),
+                arcs: RefCell::new(HashMap::new()),
+                continuous: RefCell::new(HashMap::new()),
+                icons: RefCell::new(HashMap::new()),
+                round,
+                #[cfg(feature = "gpu")]
+                base: std::cell::Cell::new((0.0, 0.0)),
+            })
+        }
+    }
+
+    /// A canvas must not keep page artwork alive after its display list stops using it.
+    pub(crate) fn retain(&self, list: &DisplayList) {
+        fn used_images(ops: &[Op], live: &mut std::collections::HashSet<usize>) {
+            for op in ops {
+                match op {
+                    Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
+                    Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
+                    _ => {}
+                }
+            }
+        }
+        let mut live = std::collections::HashSet::new();
+        used_images(&list.ops, &mut live);
+        self.images.borrow_mut().retain(|key, _| live.contains(key));
+    }
+
+    /// Drops every cached bitmap (a one-shot raster never draws them again).
+    pub(crate) fn release_images(&self) {
+        self.images.borrow_mut().clear();
+    }
+
+    /// The translation icons draw on top of.
+    fn base(&self) -> (f32, f32) {
+        #[cfg(feature = "gpu")]
+        return self.base.get();
+        #[cfg(not(feature = "gpu"))]
+        (0.0, 0.0)
+    }
 }
 
 impl Canvas {
@@ -529,33 +623,8 @@ impl Canvas {
                 .d2d
                 .CreateWicBitmapRenderTarget(&bitmap, &properties)
                 .context("software Direct2D target")?;
-            target.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
-            target.SetTextRenderingParams(&ui.params);
-            let brush = target.CreateSolidColorBrush(&color(Rgba::TRANSPARENT), None)?;
-            use windows::Win32::Graphics::Direct2D::{
-                D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND, D2D1_STROKE_STYLE_PROPERTIES,
-            };
-            let round = ui.d2d.CreateStrokeStyle(
-                &D2D1_STROKE_STYLE_PROPERTIES {
-                    startCap: D2D1_CAP_STYLE_ROUND,
-                    endCap: D2D1_CAP_STYLE_ROUND,
-                    dashCap: D2D1_CAP_STYLE_ROUND,
-                    lineJoin: D2D1_LINE_JOIN_ROUND,
-                    miterLimit: 10.0,
-                    ..Default::default()
-                },
-                None,
-            )?;
-            Ok(Self {
-                bitmap,
-                target,
-                brush,
-                images: RefCell::new(HashMap::new()),
-                arcs: RefCell::new(HashMap::new()),
-                continuous: RefCell::new(HashMap::new()),
-                icons: RefCell::new(HashMap::new()),
-                round,
-            })
+            let paint = Painter::new(target, &ui.d2d, &ui.params)?;
+            Ok(Self { bitmap, paint })
         }
     }
 
@@ -571,30 +640,14 @@ impl Canvas {
         list: &DisplayList,
         areas: &[PixelRect],
     ) -> Result<()> {
-        // A canvas must not keep page artwork alive after its display list stops using it.
-        fn used_images(ops: &[Op], live: &mut std::collections::HashSet<usize>) {
-            for op in ops {
-                match op {
-                    Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
-                    Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
-                    _ => {}
-                }
-            }
-        }
-        let mut live = std::collections::HashSet::new();
-        used_images(&list.ops, &mut live);
-        self.images.borrow_mut().retain(|key, _| live.contains(key));
-        let t = &self.target;
+        self.paint.retain(list);
+        let t = &self.paint.target;
         // SAFETY: drawing calls between BeginDraw and EndDraw on this thread's target; every
         // object passed in is alive for the call.
         unsafe {
             t.BeginDraw();
             for area in areas {
-                let clip = area.to_rect();
-                t.PushAxisAlignedClip(&d2d(clip), D2D1_ANTIALIAS_MODE_ALIASED);
-                t.Clear(Some(&color(Rgba::TRANSPARENT)));
-                self.ops(text, &list.ops, clip);
-                t.PopAxisAlignedClip();
+                self.paint.region(text, list, *area);
             }
             t.EndDraw(None, None).context("drawing")?;
         }
@@ -686,6 +739,24 @@ impl Canvas {
             }
         }
         Ok(())
+    }
+}
+
+impl Painter {
+    /// Clears `area` and draws the operations of `list` that touch it, clipped to it.
+    ///
+    /// # Safety
+    /// Runs between the target's BeginDraw and EndDraw.
+    pub(crate) unsafe fn region(&self, text: &mut Text, list: &DisplayList, area: PixelRect) {
+        let t = &self.target;
+        let clip = area.to_rect();
+        // SAFETY: per this function's contract; the clip is popped before returning.
+        unsafe {
+            t.PushAxisAlignedClip(&d2d(clip), D2D1_ANTIALIAS_MODE_ALIASED);
+            t.Clear(Some(&color(Rgba::TRANSPARENT)));
+            self.ops(text, &list.ops, clip);
+            t.PopAxisAlignedClip();
+        }
     }
 
     /// # Safety
@@ -1181,19 +1252,20 @@ impl Canvas {
         // SAFETY: per this function's contract.
         unsafe {
             self.brush.SetColor(&color(c));
+            let (bx, by) = self.base();
             t.SetTransform(&windows_numerics::Matrix3x2 {
                 M11: scale,
                 M12: 0.0,
                 M21: 0.0,
                 M22: scale,
-                M31: rect.left,
-                M32: rect.top,
+                M31: rect.left + bx,
+                M32: rect.top + by,
             });
             if icon.filled() {
                 t.FillGeometry(&*geometry, &self.brush, None);
             }
             t.DrawGeometry(&*geometry, &self.brush, weight / scale, &self.round);
-            t.SetTransform(&windows_numerics::Matrix3x2::identity());
+            t.SetTransform(&windows_numerics::Matrix3x2::translation(bx, by));
         }
     }
 

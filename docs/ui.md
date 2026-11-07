@@ -679,6 +679,150 @@ resources. Golden PNG comparison/IO already uses portable `Image` data; its rast
 is supplied by the selected renderer. Spring/tween math stays core, while the waitable
 frame timer and DWM refresh query live in the Windows backend.
 
+## Render modes
+
+A surface draws in one of two ways. **CPU** (the default) is everything above: software
+Direct2D on a WIC bitmap in a per-pixel-alpha layered window, no GPU device in the process, and
+glass (if any) from an external [`Backdrop`](#glass-under-a-surface-n3). **GPU** draws the same
+display list with the same code on a hardware device, and draws Liquid Glass in-process. Both
+kinds mix freely on one UI thread.
+
+```rust,ignore
+use stillkit::platform::{Render, set_render};
+set_render(Render::Auto);                    // this thread's default, before making surfaces
+let bar = Surface::new(Kind::Bar, "bar", Role::Toolbar)?;              // the default
+let panel = Surface::with_render(kind, "panel", Role::Dialog, Render::Gpu)?; // its own choice
+assert_eq!(panel.render(), Render::Gpu);    // Cpu or Gpu, Auto already resolved
+panel.set_glass(Some(glass));                // in-process glass under the panel's content
+panel.set_glass_group(&[a, b], 48.0);        // one liquid container: within 48 px they fuse
+stillkit::platform::windows::gpu::set_power(gpu::Power::High); // default Low: the iGPU
+```
+
+- **Where the choice lives.** A thread default (`set_render`, else `STILLKIT_RENDER=cpu|gpu|auto`,
+  else `Cpu`) plus a per-surface override (`Surface::with_render`). Thread-level, like the glass
+  backdrop, because `Surface::new` takes no `Ui` and `el::run` makes its surface from an `App`
+  with no render field: an app picks GPU with one call before `run`, and mypaper's ~1,000 call
+  sites stay as they are. Per surface, so CPU bars and widgets can sit beside one GPU panel.
+- **`Auto`** resolves when the surface is made: `Cpu` unless glass is wanted
+  (`glass::set_style(Some(..))`, see `glass::wanted`) and no external backdrop is installed;
+  then `Gpu`. The measured numbers below are why it isn't simply "GPU when glass".
+- **The `gpu` feature.** Without it no GPU code is compiled (no wgpu, no `stillkit-glass`), and
+  every mode is `Cpu`. With it, nothing GPU-related loads until the first GPU surface: the
+  device is made then, once per thread (`gpu::device`), and a CPU surface never touches it
+  (`tests/gpu_driver.rs`; `tests/no_gpu_driver.rs` still passes). GPU mode is Windows-only; the
+  stub backend has the same calls and draws on the CPU.
+- **Headless renders** (`render::render`, `el`'s `--snap`) follow the thread's mode, so a GPU
+  app's snapshots are what its screen shows. `gpu::render` always draws on the GPU.
+
+### How a GPU surface draws
+
+```text
+Surface::present(ui, origin, size, list)       (GPU surface)
+  1. damage = the same regions as the CPU path                    (none: no draw, no commit)
+  2. per region: IDCompositionSurface::BeginDraw(region) → the D2D 1.1 device context targets
+     that piece of the atlas, translated to its offset → Painter::region (clip, clear, ops)
+  3. a move or resize: SetWindowPos (the glass is in the window, so it moves with it)
+  4. one IDCompositionDevice::Commit, only if something changed
+```
+
+- One drawing code: `render::Painter` holds the Direct2D target, brush and geometry caches that
+  `Canvas` used to; the software canvas and the GPU layer each own one. The device is hardware
+  Direct3D 11 (BGRA) on the adapter `gpu::Power` prefers (`EnumAdapterByGpuPreference`), with a
+  Direct2D 1.1 device and a DirectComposition device on it.
+- Windows: the same kinds (popups, the bar, desktop-band windows, app windows), made with
+  `WS_EX_NOREDIRECTIONBITMAP` instead of `WS_EX_LAYERED`: per-pixel alpha comes from the
+  premultiplied composition surface. `set_alpha` is the root visual's opacity.
+- **Hit-testing differs.** Without a layered bitmap Windows can't hit-test by alpha, so
+  `WM_NCHITTEST` answers from the last frame's top-level op bounds: a rounded corner's outside
+  hits as its bounding box, and a miss passes to windows **of this thread** only
+  (`HTTRANSPARENT`), not to other apps. Views already fill their body with at least `Rgba::HIT`,
+  so clicks on the body behave as on the CPU.
+- Not ported: `layered_app` (the alpha canvas for app windows) stays CPU-only.
+
+**Tolerance.** GPU pictures match the CPU ones except for antialiasing on edges: on the kit
+gallery pages (`STILLKIT_RENDER=gpu cargo run --release -p stillkit --features gpu --example
+gallery -- <dir>`, then `glass_compare`) at most **0.22 %** of channels differ by more than 4
+levels (**1.4 %** on the icon sheet, which is all edges); single edge pixels (an arc's square end,
+round stroke caps) differ by up to 191; flat areas and text are exact (`kit-text.png` is
+byte-identical). `tests/gpu_render.rs` holds a mixed page to ≤ 0.5 % of channels over 4 levels,
+each within 128, interiors exact. CPU mode is byte-identical to `docs/media/native/kit-*.png`
+with and without the feature.
+
+### Glass in GPU mode
+
+`platform::windows::gpu_glass` draws `stillkit-glass` (liquid-rust) on a wgpu DX12 device on the
+same adapter, into a premultiplied composition swapchain on a visual **under** the surface's
+content visual: the panel's labels draw over its glass. The two devices share nothing; they are
+two visuals of one tree. It draws when the glass changes and while its springs move (a
+`glass-motion` thread posts frames until they rest), never when idle.
+
+| Surface kind | What its glass refracts |
+| --- | --- |
+| Desktop-band window | The wallpaper under it: what is really there. |
+| Bar, popup | The wallpaper under it: a stand-in for the windows that may be behind. |
+| App window | The wallpaper too, for now (see below). |
+
+The wallpaper is decoded once per thread (WIC, scaled to cover the primary screen like "Fill")
+into a GPU texture; each glass copies its window's piece of it, again on a move. Later work:
+other apps' windows through Windows Graphics Capture; and the app's own content beneath an
+in-window panel, by drawing the ops before the panel's `HIT` fill into a D3D11 texture shared with
+D3D12 (an NT handle and a fence) as the glass's backdrop, with the panel's own ops above it.
+
+`set_glass_group(&[Glass], spacing)` puts every body in one liquid container: shapes within
+`spacing` fuse through a smooth union, and a body given a new frame springs to it, merging and
+splitting on the way (`examples/glass_merge.rs`). The material maps to liquid-rust's regular glass:
+`refraction`, `blur` as frost (px to points), `highlight` as the specular rim, `tint` as the stain,
+`1 - clarity` as the transparency slider; dark glass unless a light tint says otherwise.
+`GlassStyle`'s brightness, saturation, smoothing, depth and inner shadow carry over.
+
+### Measured
+
+`examples/glass_measure.rs`, 2026-11-07, this PC (Ryzen 7 7800X3D with its Radeon iGPU, RTX 4070
+SUPER, 2560×1440 at 100 %), release builds. One 360×220 popup panel (a title, a slider; glass under
+a 328×188 body), 10 s settle, 30 s idle, then 10 s of the app moving its own slider every display
+frame. Sampled from outside: private bytes, CPU time, every thread's context switches (drivers'
+included), and the `GPU Process Memory` counters. "Glass process" is a second process with its own
+window under the panel, a wgpu device and the same glass code; its numbers are added in.
+
+| Configuration | Adapter | Private MB (app + host) | GPU dedicated / shared MB | Wakes / 30 s idle | Idle CPU | Drag CPU | Drag frame median / p95 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| CPU only (fill) | none (WARP) | **6.4** | 0 / 0 | **22** | 0.000 % | 4.5 % | 0.282 / 0.662 |
+| CPU + glass process | Radeon iGPU | **228.4** (6.5 + 221.9) | 97.6 / 20.7 | **2034** (4 + 2030) | 0.052 % | 7.2 % | 0.222 / 0.301 |
+| CPU + glass process | RTX 4070 SUPER | **168.5** (6.4 + 162.1) | 74.6 / 35.9 | **2848** (11 + 2837) | 0.104 % | 5.3 % | 0.252 / 0.661 |
+| GPU, no glass | Radeon iGPU | **29.8** | 8.8 / 3.2 | **61** | 0.000 % | 5.2 % | 0.248 / 0.351 |
+| GPU, no glass | RTX 4070 SUPER | **58.1** | 13.9 / 1.7 | **2424** | 0.104 % | 7.8 % | 0.201 / 0.359 |
+| GPU + in-process glass | Radeon iGPU | **251.8** | 106.4 / 26.0 | **2050** | 0.000 % | 5.3 % | 0.237 / 0.318 |
+| GPU + in-process glass | RTX 4070 SUPER | **178.3** | 88.5 / 35.0 | **5621** | 0.312 % | 6.7 % | 0.162 / 0.214 |
+
+- **Glass costs the same in or out of process.** The wgpu DX12 device is the cost: about
+  160–220 MB private, 75–106 MB dedicated GPU memory, and 70–190 driver wakes a second while idle,
+  wherever it lives. In-process GPU + glass is within 10 % of CPU + a glass process (iGPU 252 vs
+  228 MB; NVIDIA 178 vs 169 MB). By the rule "if a separate glass process costs about as much as
+  going GPU, go GPU", an app that must bring its own glass goes GPU.
+- **GPU without glass never pays.** Hardware Direct2D costs 30 MB (iGPU) to 58 MB (NVIDIA, with
+  ~80 driver wakes a second) against 6.4 MB on the CPU, for the same drag CPU and frame time.
+- **The iGPU is the better default** for wakes and CPU (61 vs 2424 idle wakes without glass); the
+  discrete GPU's D3D12 stack is smaller in private memory (178 vs 252 MB with glass).
+- Drag CPU and frame time are this process's own (the draw and the present call); the GPU's and
+  DWM's work is not in them. CPU times are at the 15.6 ms granularity of process times.
+
+**A CPU surface beside a GPU device** (`glass_measure mixed`: a 200×40 widget, 300 redraws, in a
+process that already holds the GPU panel and its glass): the first CPU surface adds 1.8–2.5 MB
+(WARP and the software target), later ones 0.1 MB; a GPU surface adds 0.15–0.22 MB. Redraw median
+0.124–0.129 ms on the CPU against 0.139–0.160 ms on the GPU, the same CPU time. So small surfaces
+stay on the CPU even in a GPU process: about free, a little faster, and their redraws never wait on
+the GPU (one NVIDIA run had GPU p95 spikes of 12.7 ms; the CPU's stayed under 0.3 ms).
+
+**The CPU path is unchanged** (`stillkit-bar-spike --seconds 60`, `main` against this branch
+without the `gpu` feature, alternating runs on a busy PC): whole-bar redraw median 0.28–0.37 ms
+both, clock-only 0.14–0.19 ms both, 1 idle wakeup in 60 s both, private after redraws a median of
+8.5 MB before and 8.6 MB after (each run within 7.97–8.96 MB), first paint 6.6–6.9 MB both, no GPU
+driver. The gallery is byte-identical with and without the feature.
+
+**`Auto`, from these numbers:** CPU when no glass is wanted; when glass is wanted, the external
+backdrop if one is installed (mypaper's engine: its device is already paid for, and one serves
+every app); otherwise GPU, with small glass-less surfaces made `Render::Cpu` beside it. A glass
+process would win only if it could exit while no glass shows, or serve several apps.
 
 ## Linux backend
 

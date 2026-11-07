@@ -169,6 +169,21 @@ pub(crate) struct Shared {
     origin: Cell<(i32, i32)>,
     a11y: RefCell<Option<A11y>>,
     semantics: RefCell<Vec<(HitId, crate::Semantics)>>,
+    /// A GPU surface's drawn bounds (surface px), for `WM_NCHITTEST`: without a layered bitmap
+    /// Windows can't hit-test by alpha. `None` on CPU surfaces.
+    #[cfg(feature = "gpu")]
+    solid: RefCell<Option<Vec<crate::geom::Rect>>>,
+}
+
+/// A GPU surface's composition and its in-process glass (`gpu`, `gpu_glass`).
+#[cfg(feature = "gpu")]
+struct Gpu {
+    /// Made on the first present (it needs the `Ui`'s text parameters).
+    layer: Option<super::gpu::Layer>,
+    glass: Option<super::gpu_glass::Shared>,
+    /// The glass wanted, and the distance within which it fuses (px).
+    glasses: Vec<crate::glass::Glass>,
+    spacing: f32,
 }
 
 /// The bitmap `UpdateLayeredWindowIndirect` reads: a DIB section selected into a memory DC.
@@ -247,6 +262,9 @@ pub struct Surface {
     glass: Cell<Option<crate::glass::Glass>>,
     glass_open: Cell<bool>,
     glass_style: Cell<crate::glass::GlassStyle>,
+    /// `Some` for a GPU surface.
+    #[cfg(feature = "gpu")]
+    gpu: Option<RefCell<Gpu>>,
 }
 
 impl Surface {
@@ -291,27 +309,50 @@ impl Surface {
             });
         AnimationFrames(active)
     }
-    /// A hidden, empty window. `name` and `role` describe it to assistive technology.
+    /// A hidden, empty window. `name` and `role` describe it to assistive technology. It draws
+    /// in this thread's default mode ([`crate::platform::set_render`], `Cpu` unless set).
     pub fn new(kind: Kind, name: &str, role: Role) -> Result<Self> {
-        Self::create(kind, name, role, false)
+        Self::create(kind, name, role, false, default_render())
+    }
+
+    /// [`Surface::new`] with its own render mode, whatever the thread's default.
+    pub fn with_render(kind: Kind, name: &str, role: Role, render: crate::platform::Render) -> Result<Self> {
+        Self::create(kind, name, role, false, render)
     }
 
     /// A startup surface whose UI Automation adapter is created on its first WM_GETOBJECT.
     /// Its latest hit snapshot is retained from the first present, including before activation.
     pub fn new_deferred_accessibility(kind: Kind, name: &str, role: Role) -> Result<Self> {
-        Self::create(kind, name, role, true)
+        Self::create(kind, name, role, true, default_render())
     }
 
-    fn create(kind: Kind, name: &str, role: Role, deferred: bool) -> Result<Self> {
+    #[cfg_attr(not(feature = "gpu"), allow(unused_variables))]
+    fn create(kind: Kind, name: &str, role: Role, deferred: bool, render: crate::platform::Render) -> Result<Self> {
+        // GPU mode needs a hardware device, made (once per thread) by the first GPU surface; a
+        // CPU surface never touches it. Without one the surface draws on the CPU.
+        #[cfg(feature = "gpu")]
+        let gpu = render
+            .resolve(crate::glass::wanted(), crate::glass::backdrop().is_some())
+            == crate::platform::Render::Gpu
+            && super::gpu::device().is_some();
+        #[cfg(not(feature = "gpu"))]
+        let gpu = false;
+        // A GPU window shows DirectComposition content only: no redirection bitmap, no layering.
+        let layered = if gpu {
+            windows::Win32::UI::WindowsAndMessaging::WS_EX_NOREDIRECTIONBITMAP
+        } else {
+            WS_EX_LAYERED
+        };
         if let Kind::App { min } = kind {
-            let hwnd = crate::app_window::create(name, Some(wndproc))?;
+            let ex = if gpu { layered } else { WINDOW_EX_STYLE::default() };
+            let hwnd = crate::app_window::create(name, Some(wndproc), ex)?;
             let app = crate::app_window::AppShared::new(min);
-            return Ok(Self::adopt(hwnd, kind, name, role, deferred, Some(app)));
+            return Ok(Self::adopt(hwnd, kind, name, role, deferred, Some(app), gpu));
         }
         register_class()?;
         let (style, ex, parent) = match kind {
             Kind::Popup { activate } => {
-                let ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
+                let ex = layered | WS_EX_TOPMOST | WS_EX_TOOLWINDOW;
                 (
                     WS_POPUP,
                     if activate { ex } else { ex | WS_EX_NOACTIVATE },
@@ -321,14 +362,14 @@ impl Surface {
             // No WS_EX_NOACTIVATE: `WM_MOUSEACTIVATE` decides per click (`set_click_activates`).
             Kind::Bar => (
                 WS_POPUP,
-                WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+                layered | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
                 None,
             ),
             Kind::DesktopChild { .. } => (
                 WS_POPUP,
                 // Receive normal click activation for keyboard editing. WM_WINDOWPOSCHANGING
                 // below prevents activation from raising the surface out of its desktop band.
-                WS_EX_LAYERED | WS_EX_TOOLWINDOW,
+                layered | WS_EX_TOOLWINDOW,
                 None,
             ),
             Kind::App { .. } => unreachable!("created above"),
@@ -351,10 +392,11 @@ impl Surface {
             )
         }
         .context("creating a surface window")?;
-        Ok(Self::adopt(hwnd, kind, name, role, deferred, None))
+        Ok(Self::adopt(hwnd, kind, name, role, deferred, None, gpu))
     }
 
     /// Ties a new window to its shared state (the window procedure's view of the surface).
+    #[cfg_attr(not(feature = "gpu"), allow(unused_variables))]
     fn adopt(
         hwnd: HWND,
         kind: Kind,
@@ -362,6 +404,7 @@ impl Surface {
         role: Role,
         deferred: bool,
         app: Option<crate::app_window::AppShared>,
+        gpu: bool,
     ) -> Self {
         let activate = match kind {
             Kind::Popup { activate } => activate,
@@ -390,6 +433,8 @@ impl Surface {
             } else {
                 A11y::new(hwnd, role, name.into())
             })),
+            #[cfg(feature = "gpu")]
+            solid: RefCell::new((gpu && !is_app).then(Vec::new)),
         });
         // The window holds a strong reference, released in WM_NCDESTROY.
         let raw = Rc::into_raw(shared.clone());
@@ -418,7 +463,35 @@ impl Surface {
             glass: Cell::new(None),
             glass_open: Cell::new(false),
             glass_style: Cell::new(crate::glass::GlassStyle::default()),
+            #[cfg(feature = "gpu")]
+            gpu: gpu.then(|| {
+                RefCell::new(Gpu {
+                    layer: None,
+                    glass: None,
+                    glasses: Vec::new(),
+                    spacing: 0.0,
+                })
+            }),
         }
+    }
+
+    /// How this surface draws: `Cpu` or `Gpu` (`Auto` resolved when it was made).
+    pub fn render(&self) -> crate::platform::Render {
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            return crate::platform::Render::Gpu;
+        }
+        crate::platform::Render::Cpu
+    }
+
+    /// Whether glass can show under this surface now: in-process glass on a GPU surface, else
+    /// the thread's external backdrop ([`crate::glass::available`]).
+    pub fn glass_available(&self) -> bool {
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            return super::gpu_glass::device().is_some();
+        }
+        crate::glass::available()
     }
 
     pub fn id(&self) -> SurfaceId {
@@ -440,7 +513,17 @@ impl Surface {
     /// Puts engine glass under `glass.body` (or takes it away, `None`). While the window shows,
     /// the glass follows it: opened on [`show`](Self::show), placed before every move, reshaped
     /// here, closed on [`hide`](Self::hide) and drop (crate::glass).
+    ///
+    /// On a GPU surface the glass is drawn in this process, under the surface's content, and
+    /// follows the window by itself.
     pub fn set_glass(&self, glass: Option<crate::glass::Glass>) {
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = &self.gpu {
+            self.glass.set(glass);
+            gpu.borrow_mut().glasses = glass.into_iter().collect();
+            self.sync_glass();
+            return;
+        }
         let old = self.glass.replace(glass);
         if !self.glass_open.get() {
             if glass.is_some() && self.is_visible() {
@@ -462,6 +545,13 @@ impl Surface {
 
     /// Sets cached optics before showing a surface; changing them updates an open backdrop.
     pub fn set_glass_style(&self, style: crate::glass::GlassStyle) {
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            if self.glass_style.replace(style) != style {
+                self.sync_glass();
+            }
+            return;
+        }
         if self.glass_style.replace(style) != style
             && self.glass_open.get()
             && let Some(backdrop) = crate::glass::backdrop()
@@ -475,7 +565,83 @@ impl Surface {
         self.glass_open.get()
     }
 
+    /// Several glass bodies under a GPU surface (surface px), in one liquid container: shapes
+    /// within `spacing` px of each other fuse, and a body that moves morphs (springs) to its new
+    /// frame, merging and splitting on the way. A CPU surface shows the first one, through its
+    /// backdrop, as [`set_glass`](Self::set_glass) does.
+    pub fn set_glass_group(&self, glasses: &[crate::glass::Glass], spacing: f32) {
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = &self.gpu {
+            self.glass.set(glasses.first().copied());
+            let mut gpu = gpu.borrow_mut();
+            gpu.glasses.clear();
+            gpu.glasses.extend_from_slice(glasses);
+            gpu.spacing = spacing;
+            drop(gpu);
+            self.sync_glass();
+            return;
+        }
+        let _ = spacing;
+        self.set_glass(glasses.first().copied());
+    }
+
+    /// Makes a GPU surface's in-process glass match what is wanted: shown while the window is
+    /// visible and has glass, gone otherwise. Draws a frame when anything changed.
+    #[cfg(feature = "gpu")]
+    fn sync_glass(&self) {
+        let Some(gpu) = &self.gpu else { return };
+        let mut gpu = gpu.borrow_mut();
+        let Gpu { layer, glass, glasses, spacing } = &mut *gpu;
+        let wanted = !glasses.is_empty() && self.is_visible();
+        match (wanted, layer.as_mut(), glass.as_ref()) {
+            (true, Some(layer), None) => {
+                let Some(device) = super::gpu_glass::device() else { return };
+                let scale = scale_of(self.hwnd);
+                // Under the content visual: the panel's labels draw over its glass.
+                // SAFETY: a new visual of this thread's composition device, in our own tree.
+                let visual = unsafe {
+                    layer.device.dcomp.CreateVisual().and_then(|v| layer.root.AddVisual(&v, false, &layer.content).map(|()| v))
+                };
+                match visual.map_err(anyhow::Error::from).and_then(|v| super::gpu_glass::GlassLayer::new(device, v, self.size, scale)) {
+                    Ok(mut new) => {
+                        new.place(self.origin);
+                        new.set(glasses, &self.glass_style.get(), *spacing);
+                        let shared = Rc::new(RefCell::new(new));
+                        super::gpu_glass::register(self.hwnd, &shared);
+                        layer.touch();
+                        if let Err(e) = layer.commit() {
+                            log::error!("glass: {e:#}");
+                        }
+                        super::gpu_glass::draw(self.hwnd, &shared);
+                        *glass = Some(shared);
+                    }
+                    Err(e) => log::error!("in-process glass: {e:#}"),
+                }
+            }
+            (true, Some(_), Some(shared)) => {
+                if let Ok(mut g) = shared.try_borrow_mut() {
+                    g.set(glasses, &self.glass_style.get(), *spacing);
+                }
+                super::gpu_glass::draw(self.hwnd, shared);
+            }
+            (false, layer, Some(_)) => {
+                super::gpu_glass::unregister(self.hwnd);
+                *glass = None;
+                if let Some(layer) = layer {
+                    layer.touch();
+                    let _ = layer.commit();
+                }
+            }
+            _ => {}
+        }
+        self.glass_open.set(glass.is_some());
+    }
+
     fn open_glass(&self) {
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            return self.sync_glass();
+        }
         if let (Some(glass), Some(backdrop)) = (self.glass.get(), crate::glass::backdrop()) {
             let shape = glass.shape(self.origin);
             let opened = backdrop.open_styled(
@@ -490,6 +656,10 @@ impl Surface {
     }
 
     fn close_glass(&self) {
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            return self.sync_glass();
+        }
         if self.glass_open.replace(false)
             && let Some(backdrop) = crate::glass::backdrop()
         {
@@ -542,6 +712,10 @@ impl Surface {
         list.focus = list
             .focus
             .filter(|id| list.hits.iter().any(|hit| hit.id == *id));
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            return self.present_gpu(ui, origin, size, list, sparse);
+        }
         if self.shared.app.is_some() {
             return self.present_app(ui, size, list);
         }
@@ -570,16 +744,122 @@ impl Surface {
         Ok(dirty.is_some())
     }
 
+    /// `present` for a GPU surface: draw the damage into the composition surface (one
+    /// `BeginDraw` per region), move or resize the window, commit once. An unchanged frame at
+    /// the same place draws and commits nothing.
+    #[cfg(feature = "gpu")]
+    fn present_gpu(
+        &mut self,
+        ui: &mut Ui,
+        origin: (i32, i32),
+        size: (u32, u32),
+        list: DisplayList,
+        sparse: bool,
+    ) -> Result<bool> {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+        };
+        let is_app = self.shared.app.is_some();
+        let gpu = self.gpu.as_ref().expect("a GPU surface");
+        let mut state = gpu.borrow_mut();
+        if state.layer.is_none() {
+            let device = super::gpu::device().context("GPU device")?;
+            state.layer = Some(super::gpu::Layer::new(self.hwnd, device, ui.params())?);
+        }
+        let Gpu { layer, glass, .. } = &mut *state;
+        let layer = layer.as_mut().expect("made above");
+        let resized = size != self.size || !layer.has_content();
+        if resized {
+            layer.resize(size)?;
+            if let Some(app) = &self.shared.app {
+                app.size.set(size);
+            }
+        }
+        let regions = crate::damage::regions(&list, &self.shown, size, resized, sparse);
+        layer.draw(&mut ui.text, &list, &regions)?;
+        let moved = !is_app && origin != self.origin;
+        if !is_app && (moved || resized) {
+            let flags = SWP_NOZORDER | SWP_NOACTIVATE | if resized { Default::default() } else { SWP_NOSIZE };
+            // SAFETY: our own window.
+            unsafe { SetWindowPos(self.hwnd, None, origin.0, origin.1, size.0 as i32, size.1 as i32, flags)? };
+            self.origin = origin;
+            self.shared.origin.set(origin);
+        }
+        self.size = size;
+        if let Some(glass) = glass
+            && (moved || resized)
+        {
+            if let Ok(mut g) = glass.try_borrow_mut() {
+                g.resize(size);
+                g.place(origin);
+            }
+            super::gpu_glass::draw(self.hwnd, glass);
+        }
+        layer.commit()?;
+        drop(state);
+        if let Some(solid) = self.shared.solid.borrow_mut().as_mut() {
+            solid.clear();
+            solid.extend(list.ops.iter().filter(|op| !matches!(op, crate::Op::Clip { .. } | crate::Op::Unclip)).map(crate::Op::bounds));
+        }
+        // The first present of a surface already shown with glass wanted.
+        if !self.glass_open.get() && self.glass.get().is_some() {
+            self.sync_glass();
+        }
+        self.set_hits(&list);
+        self.shown = list;
+        Ok(!regions.is_empty())
+    }
+
     /// Moves the window without redrawing (slides).
     pub fn move_to(&mut self, origin: (i32, i32)) -> Result<()> {
+        #[cfg(feature = "gpu")]
+        if self.gpu.is_some() {
+            if origin != self.origin {
+                self.move_gpu(origin, self.size)?;
+            }
+            return Ok(());
+        }
         if origin != self.origin {
             self.update(origin, None)?;
         }
         Ok(())
     }
 
+    /// A GPU surface's move: the window (its glass moves with it), and the glass's backdrop.
+    #[cfg(feature = "gpu")]
+    fn move_gpu(&mut self, origin: (i32, i32), size: (u32, u32)) -> Result<()> {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+        };
+        // SAFETY: our own window.
+        unsafe {
+            SetWindowPos(self.hwnd, None, origin.0, origin.1, size.0 as i32, size.1 as i32, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE)?
+        };
+        self.origin = origin;
+        self.shared.origin.set(origin);
+        let glass = self.gpu.as_ref().and_then(|g| g.borrow().glass.clone());
+        if let Some(glass) = glass {
+            if let Ok(mut g) = glass.try_borrow_mut() {
+                g.place(origin);
+            }
+            super::gpu_glass::draw(self.hwnd, &glass);
+        }
+        Ok(())
+    }
+
     /// Fades the whole window without redrawing.
     pub fn set_alpha(&mut self, alpha: u8) -> Result<()> {
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = &self.gpu {
+            if alpha != self.alpha {
+                self.alpha = alpha;
+                if let Some(layer) = gpu.borrow_mut().layer.as_mut() {
+                    layer.set_opacity(f32::from(alpha) / 255.0)?;
+                    layer.commit()?;
+                }
+            }
+            return Ok(());
+        }
         if alpha != self.alpha {
             self.alpha = alpha;
             self.update(self.origin, None)?;
@@ -750,6 +1030,15 @@ impl Surface {
     pub fn release(&mut self) {
         if let Some(app) = &self.shared.app {
             app.release_canvas();
+        }
+        // The composition and its glass go with the pixels; the next present makes them again.
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = &self.gpu {
+            super::gpu_glass::unregister(self.hwnd);
+            let mut gpu = gpu.borrow_mut();
+            gpu.glass = None;
+            gpu.layer = None;
+            self.glass_open.set(false);
         }
         self.pixels = None;
         self.shown = DisplayList::default();
@@ -938,11 +1227,26 @@ impl Surface {
 
 impl Drop for Surface {
     fn drop(&mut self) {
+        #[cfg(feature = "gpu")]
+        if let Some(gpu) = &self.gpu {
+            super::gpu_glass::unregister(self.hwnd);
+            let mut gpu = gpu.borrow_mut();
+            gpu.glass = None;
+            gpu.layer = None;
+        }
         self.close_glass();
         self.discard_events();
         // SAFETY: our own window, destroyed on its creating thread.
         let _ = unsafe { DestroyWindow(self.hwnd) };
     }
+}
+
+/// Device pixels per design pixel of `hwnd` (its DPI / 96).
+#[cfg(feature = "gpu")]
+fn scale_of(hwnd: HWND) -> f32 {
+    // SAFETY: a query on our own window.
+    let dpi = unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) };
+    if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
 }
 
 fn desktop_member(window: HWND) -> bool {
@@ -1117,6 +1421,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
     }
     let button = |button| (pointer(shared, lparam), button);
+    #[cfg(feature = "gpu")]
+    match msg {
+        // A GPU window has no layered bitmap to hit-test by alpha: what its last frame drew is
+        // ours, the rest lets clicks through to the windows of this thread below.
+        windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST => {
+            if let Some(solid) = shared.solid.borrow().as_ref() {
+                let (ox, oy) = shared.origin.get();
+                let at = Point::new(
+                    (i32::from(lparam.0 as i16) - ox) as f32,
+                    (i32::from((lparam.0 >> 16) as i16) - oy) as f32,
+                );
+                const HTTRANSPARENT: isize = -1;
+                const HTCLIENT: isize = 1;
+                return LRESULT(if solid.iter().any(|r| r.contains(at)) { HTCLIENT } else { HTTRANSPARENT });
+            }
+        }
+        super::gpu_glass::WM_GLASS_FRAME => {
+            super::gpu_glass::tick(hwnd);
+            return LRESULT(0);
+        }
+        _ => {}
+    }
     match msg {
         WM_FRAME => push(id, Event::Frame),
         WM_MOUSEACTIVATE if shared.no_activate.get() => return LRESULT(MA_NOACTIVATE as isize),
@@ -1252,4 +1578,12 @@ impl crate::platform::Window for Surface {
         self.update(origin, bitmap.map(|(dc, dirty, resized)| (*dc, dirty, resized)))
     }
     fn next_event() -> Option<(SurfaceId, Event)> { next_event() }
+}
+
+/// The thread's default render mode; always `Cpu` without the `gpu` feature (nothing is read).
+fn default_render() -> crate::platform::Render {
+    #[cfg(feature = "gpu")]
+    return crate::platform::render();
+    #[cfg(not(feature = "gpu"))]
+    crate::platform::Render::Cpu
 }
