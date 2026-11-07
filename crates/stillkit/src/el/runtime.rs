@@ -17,6 +17,9 @@
 //!   in a scroll view is reached and scrolled into view.
 //! - **Size, scale and theme** re-lay out the retained tree without running the view (size
 //!   and scale land at once; a theme's colours animate where elements have motion).
+//! - **Overlays** ([`layer`]) are lifted out of the tree after each view run and appended to
+//!   the root, placed against their anchors, and take Escape, outside presses and focus first.
+//!   Tooltips and timers run on the clock without running the view.
 //!
 //! The headless methods (`pointer_down`, `click`, `find`, `presented`, `tree`, `snap`) drive
 //! the same runtime the window host does, on a virtual clock.

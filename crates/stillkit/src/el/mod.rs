@@ -32,6 +32,9 @@
 //!   state changes re-run the view (hover, press and focus repaint the retained tree).
 //! - [`run`] hosts a runtime in a window, and doubles as the agent tooling (`--snap`,
 //!   `--tree`, `--script`).
+//! - [`El::overlay`] with [`popover`], [`menu`], [`dialog`] or [`toasts`], and
+//!   [`El::tooltip`], put anchored content above the window's (in a popup surface when it
+//!   doesn't fit).
 
 mod animate;
 mod element;
