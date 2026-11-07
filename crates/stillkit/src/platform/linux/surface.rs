@@ -380,7 +380,7 @@ impl Surface {
                     } else {
                         layer_shell::Layer::Background
                     },
-                    "stillkit".into(),
+                    crate::identity::current().prefix.into(),
                     &q,
                     id,
                 );
@@ -416,7 +416,7 @@ impl Surface {
                 } else {
                     let t = s.get_toplevel(&q, id);
                     t.set_title(name.into());
-                    t.set_app_id("org.stillkit.app".into());
+                    t.set_app_id(crate::identity::current().prefix.into());
                     if let Kind::App { min } = kind {
                         t.set_min_size(min.0 as i32, min.1 as i32);
                     }

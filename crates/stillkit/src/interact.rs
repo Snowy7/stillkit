@@ -11,8 +11,8 @@
 //! - **focus rings** show only after the keyboard moved focus (`focus_visible`), never on a
 //!   click.
 
-#[path = "interaction_motion.rs"]
-pub mod motion;
+/// Compatibility path for interaction timing; prefer `crate::interaction_motion`.
+pub use crate::interaction_motion as motion;
 
 use crate::focus;
 use crate::geom::{Point, Rgba};

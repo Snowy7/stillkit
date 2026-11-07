@@ -6,7 +6,6 @@ fn view(s: &State) -> El<State> {
     col().pad(24.).child(text("One view, native hosts"))
 }
 fn main() -> anyhow::Result<()> {
-    #[cfg(windows)]
     stillkit::set_identity(stillkit::Identity {
         prefix: "example.guide",
         desktop_classes: &[],

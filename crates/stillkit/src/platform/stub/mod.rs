@@ -25,11 +25,9 @@ pub mod app_window {
 pub mod layered_app {}
 pub mod compose {}
 pub mod modules {}
+/// Portable process identity.
 pub mod identity {
-    pub struct Identity;
-    pub fn set_identity(_: Identity) {
-        unimplemented!("application identity")
-    }
+    pub use crate::identity::{Identity, set_identity};
 }
 pub mod watch {
     pub struct FileWatch;

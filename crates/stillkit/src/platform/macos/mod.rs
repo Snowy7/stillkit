@@ -32,10 +32,9 @@ pub mod timing;
 mod view;
 pub mod layered_app {}
 pub mod compose {}
+/// Portable process identity.
 pub mod identity {
-    pub struct Identity;
-    /// The app's name and icon come from its bundle (Info.plist) on macOS.
-    pub fn set_identity(_: Identity) {}
+    pub use crate::identity::{Identity, set_identity};
 }
 pub mod watch {
     pub struct FileWatch;

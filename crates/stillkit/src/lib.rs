@@ -11,7 +11,7 @@
 
 mod a11y;
 pub mod platform;
-use platform::current::identity;
+mod identity;
 pub use identity::{Identity, set_identity};
 pub use a11y::{AccessibilityAction, Detail, FieldText, Semantics, TextLine};
 pub use platform::current::app_window;
@@ -30,8 +30,6 @@ pub mod golden;
 mod icon_paths;
 pub mod icons;
 pub mod interact;
-// Preserve the two existing public module/type identities.
-#[allow(clippy::duplicate_mod)]
 pub mod interaction_motion;
 pub mod kit;
 pub use platform::current::layered_app;
