@@ -1875,7 +1875,7 @@ Inventory: 2051 explicit public declarations/re-exports across all backend alter
 
 ```rust
 6: pub trait Backdrop {
-38: pub fn install(backdrop: Rc<dyn Backdrop>) {
+42: pub fn install(backdrop: Rc<dyn Backdrop>) {
 ```
 
 

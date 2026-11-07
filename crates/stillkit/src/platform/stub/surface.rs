@@ -5,17 +5,17 @@ use anyhow::{Result, bail};
 pub enum Kind {
     /// A topmost popup: menus, flyouts. With `activate` it takes the keyboard focus when
     /// asked ([`Surface::take_focus`]); without, clicking it never activates it (submenus).
-    Popup { activate: bool },
+    Popup { #[doc = "Whether activation is requested."] activate: bool },
     /// A floating bar: topmost and never activated. Its app-bar reservation
     /// (`SHAppBarMessage`) belongs to the bar (N2).
     Bar,
     /// Desktop-layer surface. The name is retained for callers, but this is a top-level
     /// layered tool window anchored immediately above `parent` (Progman), never a WS_CHILD.
     /// Raised desktops do not display ULW children, and WGC cannot exclude child windows.
-    DesktopChild { parent: usize },
+    DesktopChild { #[doc = "Native desktop parent handle."] parent: usize },
     /// A normal app window (Studio): resizable, activated, in the taskbar, drawn opaque.
     /// `min` is its smallest client size in design pixels. See [`crate::app_window`].
-    App { min: (u32, u32) },
+    App { #[doc = "Minimum client size in design pixels."] min: (u32, u32) },
 }
 
 /// Identifies a surface in [`Event`]s.
