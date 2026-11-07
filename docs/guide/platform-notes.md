@@ -4,6 +4,8 @@ Windows has the full backend: CPU/GPU surfaces, native editing and UI Automation
 
 Linux supports Wayland CPU and GPU; no X11 or AT-SPI yet. Normal windows use xdg-shell. Bars need wlr-layer-shell (KDE/wlroots). GNOME has no layer-shell: a real bar there requires a Shell extension. Headless CPU tests need fonts/fontconfig, not a compositor. Clipboard and IME are implemented but need broader live compositor testing.
 
+Identity/set_identity are Windows-specific in shape: Linux currently exposes a unit Identity and returns (), so guard Windows class-name configuration with cfg(windows), as below.
+
 macOS backend is in progress and untested. Cross-compilation checks types, not native behavior.
 
 ```rust
@@ -15,6 +17,7 @@ fn view(s: &State) -> El<State> {
     col().pad(24.).child(text("One view, native hosts"))
 }
 fn main() -> anyhow::Result<()> {
+    #[cfg(windows)]
     stillkit::set_identity(stillkit::Identity {
         prefix: "example.guide",
         desktop_classes: &[],

@@ -25,6 +25,8 @@ actionlint .github/workflows/ci.yml
   passed
 ```
 
-All eleven guide examples and showcase compiled. Nine windowed guide examples also produced headless PNG/tree output; the theme example loaded its TOML with serde and returned no check() diagnostics, and the tooling example replayed a click and asserted updated state. README's hello matches guide_getting_started.
+All eleven guide examples and showcase compiled on Windows and cross-checked for Linux, including GPU-enabled examples (`cargo check -p stillkit -p stillkit-kit --examples --target x86_64-unknown-linux-gnu --features stillkit/golden,stillkit/serde,stillkit/gpu`). Nine windowed guide examples also produced headless PNG/tree output; the theme example loaded its TOML with serde and returned no check() diagnostics, and the tooling example replayed a click and asserted updated state. README's hello matches guide_getting_started.
 
 Showcase PNGs were visually inspected in Solid and One UI + Liquid material, each light and dark. Additional script captures exercised devices, dialog, toast, select, editing and live theme changes; tree assertions checked their results. Local artifacts are under D:\stillkit-targets\O (showcase-review.png is the contact sheet). These are CPU captures of themed materials; actual glass lenses require Surface hooks, which el::run does not attach automatically. Linux/macOS native execution was not tested on this Windows machine.
+
+The guide cross-check exposed a platform API mismatch: Windows Identity has prefix/desktop_classes and set_identity returns Result, while Linux/stub Identity is a unit type and set_identity returns (). The platform example uses cfg(windows) for class names; library source was left unchanged.
