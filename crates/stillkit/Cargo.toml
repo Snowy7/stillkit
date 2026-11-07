@@ -6,6 +6,16 @@ repository.workspace = true
 edition.workspace = true
 license.workspace = true
 
+keywords = ["gui", "native", "wayland", "windows", "declarative"]
+categories = ["gui", "rendering"]
+readme = "../../README.md"
+rust-version = "1.101"
+
+[package.metadata.stillkit]
+# Cargo requires a numeric rust-version, not a nightly date.
+toolchain = "nightly"
+verified-rustc-commit-date = "2026-11-02"
+
 [dependencies]
 accesskit.workspace = true
 anyhow.workspace = true

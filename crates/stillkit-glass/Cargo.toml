@@ -10,6 +10,16 @@ license = "MIT OR Apache-2.0"
 repository.workspace = true
 publish = false
 
+keywords = ["gui", "wgpu", "glass", "rendering", "graphics"]
+categories = ["gui", "rendering"]
+readme = "CREDITS.md"
+rust-version = "1.101"
+
+[package.metadata.stillkit]
+# Cargo requires a numeric rust-version, not a nightly date.
+toolchain = "nightly"
+verified-rustc-commit-date = "2026-11-02"
+
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.34", features = ["bytemuck"] }
