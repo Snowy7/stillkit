@@ -1,6 +1,6 @@
 # Public API review for 0.1
 
-Reviewed against the mypaper shell, Studio and Files source in its original checkout (read-only), all stillkit crates, examples and guides. The inventory below records every explicit public declaration and re-export in core sources, including platform alternatives and doc-hidden compatibility APIs. `pub(crate)` and `pub(super)` are excluded. Declarations in private implementation modules are included when their types are re-exported, so source paths are not necessarily import paths. Enum variants and trait members inherit their enclosing item's visibility; their documented definitions accompany the listed types/traits in source.
+Reviewed against the mypaper shell, Studio and Files source in its original checkout (read-only), all stillkit crates, examples and guides. The inventory below records every explicit public declaration and re-export in core sources, including platform alternatives and doc-hidden compatibility APIs. `pub(crate)` and `pub(super)` are excluded. Declarations in private implementation modules are included when their types are re-exported, so source paths are not necessarily import paths. Enum variants, named variant fields and trait members inherit visibility and are listed beside their enclosing public types, with their source lines.
 
 ## Decisions
 
@@ -54,6 +54,36 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 125: pub hits: Vec<Hit>,
 126: pub focus: Option<HitId>,
 127: pub semantics: Vec<(HitId, Semantics)>,
+18: // Semantics::Range (inherited visibility)
+Range {
+20: // Semantics::value (inherited visibility)
+value: f64,
+22: // Semantics::min (inherited visibility)
+min: f64,
+24: // Semantics::max (inherited visibility)
+max: f64,
+26: // Semantics::step (inherited visibility)
+step: f64,
+29: // Semantics::Text (inherited visibility)
+Text(Arc<str>),
+31: // Semantics::Reorder (inherited visibility)
+Reorder,
+33: // Semantics::Status (inherited visibility)
+Status(Arc<str>),
+36: // Semantics::Detail (inherited visibility)
+Detail(Detail),
+39: // Semantics::Field (inherited visibility)
+Field(Arc<FieldText>),
+87: // AccessibilityAction::SetNumber (inherited visibility)
+SetNumber(f64),
+89: // AccessibilityAction::SetText (inherited visibility)
+SetText(String),
+91: // AccessibilityAction::Increment (inherited visibility)
+Increment,
+93: // AccessibilityAction::Decrement (inherited visibility)
+Decrement,
+95: // AccessibilityAction::Custom (inherited visibility)
+Custom(i32),
 ```
 
 
@@ -71,6 +101,12 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 49: pub height: u32,
 51: pub pixels: Vec<u8>,
 56: pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+22: // TextMode::NaturalSymmetric (inherited visibility)
+NaturalSymmetric,
+24: // TextMode::Natural (inherited visibility)
+Natural,
+26: // TextMode::GdiClassic (inherited visibility)
+GdiClassic,
 ```
 
 
@@ -134,6 +170,10 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 52: pub fn rgb(self) -> [u8; 3] {
 69: pub fn at(self, part: Part, rect: Rect, point: Point) -> Self {
 101: pub fn draw<A: Clone>(
+23: // Part::SaturationValue (inherited visibility)
+SaturationValue,
+25: // Part::Hue (inherited visibility)
+Hue,
 ```
 
 
@@ -293,6 +333,68 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 1797: pub fn card(&mut self, rect: Rect, radius: f32) {
 1807: pub fn scroll(
 1876: pub fn intersect(a: Rect, b: Rect) -> Option<Rect> {
+253: // Font::Display (inherited visibility)
+Display,
+255: // Font::Title1 (inherited visibility)
+Title1,
+257: // Font::Title2 (inherited visibility)
+Title2,
+259: // Font::Heading (inherited visibility)
+Heading,
+261: // Font::Body (inherited visibility)
+Body,
+263: // Font::Strong (inherited visibility)
+Strong,
+265: // Font::Caption (inherited visibility)
+Caption,
+267: // Font::Micro (inherited visibility)
+Micro,
+269: // Font::Mono (inherited visibility)
+Mono,
+349: // Glyph::Icon (inherited visibility)
+Icon(Icon),
+351: // Glyph::Font (inherited visibility)
+Font(char),
+385: // Behavior::Click (inherited visibility)
+Click,
+387: // Behavior::Toggle (inherited visibility)
+Toggle,
+389: // Behavior::Slider (inherited visibility)
+Slider {
+391: // Behavior::track (inherited visibility)
+track: Rect,
+393: // Behavior::min (inherited visibility)
+min: f64,
+395: // Behavior::max (inherited visibility)
+max: f64,
+397: // Behavior::step (inherited visibility)
+step: f64,
+399: // Behavior::value (inherited visibility)
+value: f64,
+402: // Behavior::Field (inherited visibility)
+Field,
+404: // Behavior::Drag (inherited visibility)
+Drag,
+406: // Behavior::Thumb (inherited visibility)
+Thumb {
+408: // Behavior::view (inherited visibility)
+view: Key,
+410: // Behavior::track (inherited visibility)
+track: Rect,
+412: // Behavior::content (inherited visibility)
+content: f32,
+451: // ButtonKind::Primary (inherited visibility)
+Primary,
+453: // ButtonKind::Secondary (inherited visibility)
+Secondary,
+455: // ButtonKind::Ghost (inherited visibility)
+Ghost,
+462: // Align::Start (inherited visibility)
+Start,
+464: // Align::Center (inherited visibility)
+Center,
+466: // Align::End (inherited visibility)
+End,
 ```
 
 
@@ -347,6 +449,10 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 ```rust
 7: pub trait Clipboard {
 16: pub struct Memory(pub Option<String>);
+9: // Clipboard::get (inherited visibility)
+fn get(&mut self) -> Option<String>;
+11: // Clipboard::set (inherited visibility)
+fn set(&mut self, text: &str);
 ```
 
 
@@ -562,6 +668,50 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 1158: pub fn on_timeout(mut self, after: Duration, handler: impl Fn(&mut S) + 'static) -> Self {
 1171: pub fn overlay(mut self, overlay: impl Into<Option<super::Overlay<S>>>) -> Self {
 1183: pub fn tooltip(mut self, text: impl Into<Arc<str>>) -> Self {
+21: // Len::Px (inherited visibility)
+Px(f32),
+23: // Len::Theme (inherited visibility)
+Theme(fn(&Theme) -> f32),
+46: // Paint::Rgba (inherited visibility)
+Rgba(Rgba),
+48: // Paint::Theme (inherited visibility)
+Theme(fn(&Theme) -> Rgba),
+72: // Motion::Spring (inherited visibility)
+Spring(Spring),
+74: // Motion::Theme (inherited visibility)
+Theme(fn(&Theme) -> Spring),
+253: // Handled::Yes (inherited visibility)
+Yes,
+255: // Handled::No (inherited visibility)
+No,
+268: // Axis::Horizontal (inherited visibility)
+Horizontal,
+270: // Axis::Vertical (inherited visibility)
+Vertical,
+281: // ArcStart::Top (inherited visibility)
+Top,
+283: // ArcStart::Right (inherited visibility)
+Right,
+285: // ArcStart::Bottom (inherited visibility)
+Bottom,
+287: // ArcStart::Left (inherited visibility)
+Left,
+306: // Align::Start (inherited visibility)
+Start,
+308: // Align::Center (inherited visibility)
+Center,
+310: // Align::End (inherited visibility)
+End,
+312: // Align::Stretch (inherited visibility)
+Stretch,
+319: // Justify::Start (inherited visibility)
+Start,
+321: // Justify::Center (inherited visibility)
+Center,
+323: // Justify::End (inherited visibility)
+End,
+325: // Justify::Between (inherited visibility)
+Between,
 ```
 
 
@@ -624,6 +774,24 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 164: pub fn play(&mut self, script: &Script, until: Option<Duration>) {
 198: pub fn tree_json(&self) -> String {
 292: pub fn run<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>) -> Result<()> {
+55: // Input::Move (inherited visibility)
+Move(f32, f32),
+57: // Input::Down (inherited visibility)
+Down(f32, f32),
+59: // Input::Up (inherited visibility)
+Up(f32, f32),
+61: // Input::Click (inherited visibility)
+Click(String),
+63: // Input::Key (inherited visibility)
+Key { vk: u16, shift: bool },
+65: // Input::Wheel (inherited visibility)
+Wheel(f32, f32, i16),
+67: // Input::Right (inherited visibility)
+Right(f32, f32),
+69: // Input::KeyWith (inherited visibility)
+KeyWith(u16, Modifiers),
+71: // Input::Type (inherited visibility)
+Type(String),
 ```
 
 
@@ -694,6 +862,14 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 303: pub side: Option<Side>,
 304: pub align: Align,
 305: pub gap: f32,
+34: // Side::Top (inherited visibility)
+Top,
+36: // Side::Bottom (inherited visibility)
+Bottom,
+38: // Side::Left (inherited visibility)
+Left,
+40: // Side::Right (inherited visibility)
+Right,
 ```
 
 
@@ -1001,6 +1177,250 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 343: pub const fn font_glyph(self) -> Option<char> {
 427: pub fn glyph_in(self, family: &str) -> char {
 442: pub const fn filled(self) -> bool {
+33: // IconSet::Vector (inherited visibility)
+Vector,
+35: // IconSet::Font (inherited visibility)
+Font(Arc<str>),
+84: // Icon::Play (inherited visibility)
+Play,
+86: // Icon::Pause (inherited visibility)
+Pause,
+88: // Icon::Previous (inherited visibility)
+Previous,
+90: // Icon::Next (inherited visibility)
+Next,
+92: // Icon::Music (inherited visibility)
+Music,
+94: // Icon::Shuffle (inherited visibility)
+Shuffle,
+96: // Icon::Repeat (inherited visibility)
+Repeat,
+99: // Icon::ChevronLeft (inherited visibility)
+ChevronLeft,
+101: // Icon::ChevronRight (inherited visibility)
+ChevronRight,
+103: // Icon::ChevronUp (inherited visibility)
+ChevronUp,
+105: // Icon::ChevronDown (inherited visibility)
+ChevronDown,
+107: // Icon::Add (inherited visibility)
+Add,
+109: // Icon::Remove (inherited visibility)
+Remove,
+111: // Icon::Close (inherited visibility)
+Close,
+113: // Icon::Check (inherited visibility)
+Check,
+115: // Icon::More (inherited visibility)
+More,
+117: // Icon::Settings (inherited visibility)
+Settings,
+119: // Icon::Search (inherited visibility)
+Search,
+121: // Icon::Edit (inherited visibility)
+Edit,
+123: // Icon::Delete (inherited visibility)
+Delete,
+125: // Icon::Copy (inherited visibility)
+Copy,
+127: // Icon::Refresh (inherited visibility)
+Refresh,
+129: // Icon::Pin (inherited visibility)
+Pin,
+131: // Icon::Resize (inherited visibility)
+Resize,
+133: // Icon::Grip (inherited visibility)
+Grip,
+135: // Icon::ArrowUp (inherited visibility)
+ArrowUp,
+137: // Icon::ArrowDown (inherited visibility)
+ArrowDown,
+139: // Icon::External (inherited visibility)
+External,
+141: // Icon::Download (inherited visibility)
+Download,
+143: // Icon::Upload (inherited visibility)
+Upload,
+146: // Icon::Apps (inherited visibility)
+Apps,
+148: // Icon::Window (inherited visibility)
+Window,
+150: // Icon::Power (inherited visibility)
+Power,
+152: // Icon::Restart (inherited visibility)
+Restart,
+154: // Icon::SignOut (inherited visibility)
+SignOut,
+156: // Icon::Lock (inherited visibility)
+Lock,
+158: // Icon::Bell (inherited visibility)
+Bell,
+160: // Icon::BellOff (inherited visibility)
+BellOff,
+162: // Icon::Calendar (inherited visibility)
+Calendar,
+164: // Icon::Clock (inherited visibility)
+Clock,
+166: // Icon::Timer (inherited visibility)
+Timer,
+168: // Icon::Globe (inherited visibility)
+Globe,
+170: // Icon::Keyboard (inherited visibility)
+Keyboard,
+172: // Icon::Desktop (inherited visibility)
+Desktop,
+174: // Icon::Home (inherited visibility)
+Home,
+176: // Icon::User (inherited visibility)
+User,
+178: // Icon::Folder (inherited visibility)
+Folder,
+180: // Icon::File (inherited visibility)
+File,
+182: // Icon::Clipboard (inherited visibility)
+Clipboard,
+184: // Icon::Terminal (inherited visibility)
+Terminal,
+186: // Icon::Message (inherited visibility)
+Message,
+188: // Icon::Controls (inherited visibility)
+Controls,
+190: // Icon::Layers (inherited visibility)
+Layers,
+193: // Icon::Volume (inherited visibility)
+Volume(u8),
+195: // Icon::Mute (inherited visibility)
+Mute,
+197: // Icon::Speaker (inherited visibility)
+Speaker,
+199: // Icon::Headphones (inherited visibility)
+Headphones,
+201: // Icon::Mic (inherited visibility)
+Mic,
+203: // Icon::Wifi (inherited visibility)
+Wifi(u8),
+205: // Icon::Ethernet (inherited visibility)
+Ethernet,
+207: // Icon::Offline (inherited visibility)
+Offline,
+209: // Icon::Hotspot (inherited visibility)
+Hotspot,
+211: // Icon::Cast (inherited visibility)
+Cast,
+213: // Icon::Airplane (inherited visibility)
+Airplane,
+215: // Icon::Location (inherited visibility)
+Location,
+217: // Icon::Bluetooth (inherited visibility)
+Bluetooth,
+219: // Icon::Brightness (inherited visibility)
+Brightness,
+221: // Icon::Moon (inherited visibility)
+Moon,
+223: // Icon::NightLight (inherited visibility)
+NightLight,
+225: // Icon::Focus (inherited visibility)
+Focus,
+227: // Icon::Saver (inherited visibility)
+Saver,
+229: // Icon::Gauge (inherited visibility)
+Gauge,
+231: // Icon::Thermometer (inherited visibility)
+Thermometer,
+233: // Icon::Cpu (inherited visibility)
+Cpu,
+235: // Icon::Battery (inherited visibility)
+Battery(u8),
+237: // Icon::Charging (inherited visibility)
+Charging,
+239: // Icon::BatteryWarning (inherited visibility)
+BatteryWarning,
+241: // Icon::Plug (inherited visibility)
+Plug,
+243: // Icon::Accessibility (inherited visibility)
+Accessibility,
+245: // Icon::Eye (inherited visibility)
+Eye,
+247: // Icon::Camera (inherited visibility)
+Camera,
+249: // Icon::Info (inherited visibility)
+Info,
+251: // Icon::Warning (inherited visibility)
+Warning,
+253: // Icon::Star (inherited visibility)
+Star,
+255: // Icon::Heart (inherited visibility)
+Heart,
+257: // Icon::Notes (inherited visibility)
+Notes,
+259: // Icon::Tasks (inherited visibility)
+Tasks,
+261: // Icon::Photo (inherited visibility)
+Photo,
+263: // Icon::Feed (inherited visibility)
+Feed,
+266: // Icon::Sun (inherited visibility)
+Sun,
+268: // Icon::Cloud (inherited visibility)
+Cloud,
+270: // Icon::CloudSun (inherited visibility)
+CloudSun,
+272: // Icon::CloudMoon (inherited visibility)
+CloudMoon,
+274: // Icon::Rain (inherited visibility)
+Rain,
+276: // Icon::Drizzle (inherited visibility)
+Drizzle,
+278: // Icon::Snow (inherited visibility)
+Snow,
+280: // Icon::Snowflake (inherited visibility)
+Snowflake,
+282: // Icon::Thunder (inherited visibility)
+Thunder,
+284: // Icon::Fog (inherited visibility)
+Fog,
+286: // Icon::Wind (inherited visibility)
+Wind,
+288: // Icon::Droplet (inherited visibility)
+Droplet,
+290: // Icon::Umbrella (inherited visibility)
+Umbrella,
+292: // Icon::Sunrise (inherited visibility)
+Sunrise,
+294: // Icon::Sunset (inherited visibility)
+Sunset,
+297: // Icon::Palette (inherited visibility)
+Palette,
+299: // Icon::Undo (inherited visibility)
+Undo,
+301: // Icon::Redo (inherited visibility)
+Redo,
+303: // Icon::Pointer (inherited visibility)
+Pointer,
+305: // Icon::Move (inherited visibility)
+Move,
+307: // Icon::Wrench (inherited visibility)
+Wrench,
+309: // Icon::Video (inherited visibility)
+Video,
+311: // Icon::Sparkles (inherited visibility)
+Sparkles,
+313: // Icon::Package (inherited visibility)
+Package,
+315: // Icon::Images (inherited visibility)
+Images,
+317: // Icon::Activity (inherited visibility)
+Activity,
+319: // Icon::Rocket (inherited visibility)
+Rocket,
+321: // Icon::Quote (inherited visibility)
+Quote,
+323: // Icon::Grid (inherited visibility)
+Grid,
+325: // Icon::Toggle (inherited visibility)
+Toggle,
+327: // Icon::PanelTop (inherited visibility)
+PanelTop,
 ```
 
 
@@ -1032,6 +1452,20 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 96: pub fn reset(&mut self) -> Response {
 107: pub fn handle(&mut self, list: &DisplayList, event: &Event) -> Response {
 164: pub fn step(&mut self, list: &DisplayList, delta: i32) {
+26: // State::Rest (inherited visibility)
+Rest,
+28: // State::Hover (inherited visibility)
+Hover,
+30: // State::Pressed (inherited visibility)
+Pressed,
+32: // State::Disabled (inherited visibility)
+Disabled,
+56: // Response::Unchanged (inherited visibility)
+Unchanged,
+58: // Response::Redraw (inherited visibility)
+Redraw,
+60: // Response::Activate (inherited visibility)
+Activate(HitId),
 ```
 
 
@@ -1119,6 +1553,38 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 1014: pub fn field_frame(
 1062: pub fn empty(&mut self, rect: Rect, icon: Option<Icon>, title: &str, detail: Option<&str>) -> f32 {
 1106: pub fn scroll(
+50: // ButtonKind::Filled (inherited visibility)
+Filled,
+52: // ButtonKind::Tinted (inherited visibility)
+Tinted,
+54: // ButtonKind::Gray (inherited visibility)
+Gray,
+56: // ButtonKind::Plain (inherited visibility)
+Plain,
+58: // ButtonKind::Destructive (inherited visibility)
+Destructive,
+65: // Lead::None (inherited visibility)
+None,
+67: // Lead::Icon (inherited visibility)
+Icon(Icon),
+69: // Lead::Badge (inherited visibility)
+Badge(Icon, bool),
+71: // Lead::Image (inherited visibility)
+Image(Arc<crate::Image>),
+73: // Lead::Monogram (inherited visibility)
+Monogram(char),
+80: // Accessory::None (inherited visibility)
+None,
+82: // Accessory::Chevron (inherited visibility)
+Chevron,
+84: // Accessory::Check (inherited visibility)
+Check,
+86: // Accessory::Text (inherited visibility)
+Text(&'a str),
+88: // Accessory::Switch (inherited visibility)
+Switch(bool),
+90: // Accessory::Button (inherited visibility)
+Button(HitId, Icon, &'a str),
 ```
 
 
@@ -1151,6 +1617,26 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 202: pub fn grid(rect: Rect, columns: usize, gap: f32, height: f32, index: usize) -> Rect {
 216: pub enum SizeClass {
 227: pub fn of(width: f32, height: f32) -> Self {
+56: // Align::Start (inherited visibility)
+Start,
+58: // Align::Center (inherited visibility)
+Center,
+60: // Align::End (inherited visibility)
+End,
+78: // Axis::Row (inherited visibility)
+Row,
+80: // Axis::Column (inherited visibility)
+Column,
+160: // Length::Fixed (inherited visibility)
+Fixed(f32),
+162: // Length::Fill (inherited visibility)
+Fill(f32),
+218: // SizeClass::Compact (inherited visibility)
+Compact,
+220: // SizeClass::Regular (inherited visibility)
+Regular,
+222: // SizeClass::Large (inherited visibility)
+Large,
 ```
 
 
@@ -1261,6 +1747,38 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 689: pub fn contains(&self, x: i32, y: i32) -> bool {
 694: pub fn owns(&self, id: SurfaceId) -> bool {
 699: pub fn handle(&mut self, ui: &mut Ui, id: SurfaceId, event: &Event) -> Option<Outcome<C>> {
+59: // Entry::Separator (inherited visibility)
+Separator,
+61: // Entry::Action (inherited visibility)
+Action {
+63: // Entry::label (inherited visibility)
+label: String,
+65: // Entry::command (inherited visibility)
+command: C,
+67: // Entry::checked (inherited visibility)
+checked: Option<bool>,
+69: // Entry::enabled (inherited visibility)
+enabled: bool,
+72: // Entry::Submenu (inherited visibility)
+Submenu {
+74: // Entry::label (inherited visibility)
+label: String,
+76: // Entry::items (inherited visibility)
+items: Vec<Entry<C>>,
+81: // Entry::Iconic (inherited visibility)
+Iconic {
+83: // Entry::icon (inherited visibility)
+icon: MenuIcon,
+85: // Entry::item (inherited visibility)
+item: Box<Entry<C>>,
+93: // MenuIcon::Glyph (inherited visibility)
+Glyph(char),
+95: // MenuIcon::Image (inherited visibility)
+Image(Arc<crate::Image>),
+518: // Outcome::Chosen (inherited visibility)
+Chosen(C),
+520: // Outcome::Closed (inherited visibility)
+Closed,
 ```
 
 
@@ -1300,6 +1818,26 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 4: pub enum Chrome {
 16: pub enum Cursor {
 32: pub fn set_modal_hook(_: Option<Box<dyn FnMut()>>) {}
+6: // Chrome::Caption (inherited visibility)
+Caption,
+8: // Chrome::Minimize (inherited visibility)
+Minimize,
+10: // Chrome::Maximize (inherited visibility)
+Maximize,
+12: // Chrome::Close (inherited visibility)
+Close,
+19: // Cursor::Arrow (inherited visibility)
+Arrow,
+21: // Cursor::Text (inherited visibility)
+Text,
+23: // Cursor::Hand (inherited visibility)
+Hand,
+25: // Cursor::Move (inherited visibility)
+Move,
+27: // Cursor::Resize (inherited visibility)
+Resize,
+29: // Cursor::ResizeHorizontal (inherited visibility)
+ResizeHorizontal,
 ```
 
 
@@ -1316,6 +1854,20 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 ```rust
 6: pub trait Backdrop {
 42: pub fn install(backdrop: Rc<dyn Backdrop>) {
+8: // Backdrop::available (inherited visibility)
+fn available(&self) -> bool;
+10: // Backdrop::open (inherited visibility)
+fn open(&self, client: WindowId, shape: Shape, radius: f32, material: &GlassMaterial) -> bool;
+12: // Backdrop::open_styled (inherited visibility)
+fn open_styled(
+27: // Backdrop::style (inherited visibility)
+fn style(&self, _client: WindowId, _style: &GlassStyle) {}
+29: // Backdrop::place (inherited visibility)
+fn place(&self, client: WindowId, shape: Shape, radius: f32);
+31: // Backdrop::material (inherited visibility)
+fn material(&self, client: WindowId, material: &GlassMaterial);
+33: // Backdrop::close (inherited visibility)
+fn close(&self, client: WindowId);
 ```
 
 
@@ -1397,6 +1949,10 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 100: pub fn typed(&mut self, key: u32) -> Typed {
 123: pub fn text(&self, key: u32) -> String {
 139: pub fn symbol(&self, key: u32) -> u32 {
+20: // Typed::Text (inherited visibility)
+Text(String),
+22: // Typed::Composing (inherited visibility)
+Composing,
 ```
 
 
@@ -1523,6 +2079,66 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 985: pub fn toggle_maximize(&self) -> Result<()> {
 1004: pub fn start_move(&self) -> Result<()> {
 1016: pub fn start_resize(&self, edge: xdg_toplevel::ResizeEdge) -> Result<()> {
+8: // Kind::Popup (inherited visibility)
+Popup { activate: bool },
+10: // Kind::Bar (inherited visibility)
+Bar,
+12: // Kind::DesktopChild (inherited visibility)
+DesktopChild { parent: usize },
+14: // Kind::App (inherited visibility)
+App { min: (u32, u32) },
+25: // Button::Left (inherited visibility)
+Left,
+27: // Button::Right (inherited visibility)
+Right,
+29: // Button::Middle (inherited visibility)
+Middle,
+45: // Event::Frame (inherited visibility)
+Frame,
+47: // Event::Move (inherited visibility)
+Move(Pointer),
+49: // Event::Leave (inherited visibility)
+Leave,
+51: // Event::Wheel (inherited visibility)
+Wheel(Pointer, i16),
+53: // Event::CaptureLost (inherited visibility)
+CaptureLost,
+55: // Event::Press (inherited visibility)
+Press(Pointer, Button),
+57: // Event::Release (inherited visibility)
+Release(Pointer, Button),
+59: // Event::DoubleClick (inherited visibility)
+DoubleClick(Pointer, Button),
+61: // Event::Key (inherited visibility)
+Key(u16),
+63: // Event::Activated (inherited visibility)
+Activated,
+65: // Event::Deactivated (inherited visibility)
+Deactivated,
+67: // Event::Invoke (inherited visibility)
+Invoke(HitId),
+69: // Event::Focus (inherited visibility)
+Focus(HitId),
+71: // Event::DpiChanged (inherited visibility)
+DpiChanged(u32),
+73: // Event::VisibilityChanged (inherited visibility)
+VisibilityChanged,
+75: // Event::Cancelled (inherited visibility)
+Cancelled,
+77: // Event::TextChanged (inherited visibility)
+TextChanged,
+79: // Event::TextSubmit (inherited visibility)
+TextSubmit,
+81: // Event::Resized (inherited visibility)
+Resized(u32, u32),
+83: // Event::Close (inherited visibility)
+Close,
+85: // Event::SettingChanged (inherited visibility)
+SettingChanged,
+88: // Event::Char (inherited visibility)
+Char(char),
+90: // Event::Preedit (inherited visibility)
+Preedit,
 ```
 
 
@@ -1576,6 +2192,26 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 13: pub enum Chrome {
 26: pub enum Cursor {
 48: pub fn set_modal_hook(hook: Option<Box<dyn FnMut()>>) {
+15: // Chrome::Caption (inherited visibility)
+Caption,
+17: // Chrome::Minimize (inherited visibility)
+Minimize,
+19: // Chrome::Maximize (inherited visibility)
+Maximize,
+21: // Chrome::Close (inherited visibility)
+Close,
+29: // Cursor::Arrow (inherited visibility)
+Arrow,
+31: // Cursor::Text (inherited visibility)
+Text,
+33: // Cursor::Hand (inherited visibility)
+Hand,
+35: // Cursor::Move (inherited visibility)
+Move,
+37: // Cursor::Resize (inherited visibility)
+Resize,
+39: // Cursor::ResizeHorizontal (inherited visibility)
+ResizeHorizontal,
 ```
 
 
@@ -1593,6 +2229,20 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 49: pub fn install(backdrop: Rc<dyn Backdrop>) {
 54: pub fn install_system() {
 77: pub struct SystemBackdrop {
+22: // Backdrop::available (inherited visibility)
+fn available(&self) -> bool;
+24: // Backdrop::open (inherited visibility)
+fn open(&self, client: WindowId, shape: Shape, radius: f32, material: &GlassMaterial) -> bool;
+26: // Backdrop::open_styled (inherited visibility)
+fn open_styled(&self, client: WindowId, shape: Shape, radius: f32, material: &GlassMaterial, style: &GlassStyle) -> bool {
+34: // Backdrop::style (inherited visibility)
+fn style(&self, _client: WindowId, _style: &GlassStyle) {}
+36: // Backdrop::place (inherited visibility)
+fn place(&self, client: WindowId, shape: Shape, radius: f32);
+38: // Backdrop::material (inherited visibility)
+fn material(&self, client: WindowId, material: &GlassMaterial);
+40: // Backdrop::close (inherited visibility)
+fn close(&self, client: WindowId);
 ```
 
 
@@ -1779,6 +2429,66 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 715: pub fn set_chrome(&self, parts: &[(crate::Rect, Chrome)]) {
 723: pub fn set_background(&self, color: crate::Rgba) {
 732: pub fn set_cursor(&self, cursor: Cursor) {
+42: // Kind::Popup (inherited visibility)
+Popup { activate: bool },
+44: // Kind::Bar (inherited visibility)
+Bar,
+46: // Kind::DesktopChild (inherited visibility)
+DesktopChild { parent: usize },
+48: // Kind::App (inherited visibility)
+App { min: (u32, u32) },
+66: // Button::Left (inherited visibility)
+Left,
+68: // Button::Right (inherited visibility)
+Right,
+70: // Button::Middle (inherited visibility)
+Middle,
+86: // Event::Frame (inherited visibility)
+Frame,
+88: // Event::Move (inherited visibility)
+Move(Pointer),
+90: // Event::Leave (inherited visibility)
+Leave,
+92: // Event::Wheel (inherited visibility)
+Wheel(Pointer, i16),
+94: // Event::CaptureLost (inherited visibility)
+CaptureLost,
+96: // Event::Press (inherited visibility)
+Press(Pointer, Button),
+98: // Event::Release (inherited visibility)
+Release(Pointer, Button),
+100: // Event::DoubleClick (inherited visibility)
+DoubleClick(Pointer, Button),
+102: // Event::Key (inherited visibility)
+Key(u16),
+104: // Event::Activated (inherited visibility)
+Activated,
+106: // Event::Deactivated (inherited visibility)
+Deactivated,
+108: // Event::Invoke (inherited visibility)
+Invoke(HitId),
+110: // Event::Focus (inherited visibility)
+Focus(HitId),
+112: // Event::DpiChanged (inherited visibility)
+DpiChanged(u32),
+114: // Event::VisibilityChanged (inherited visibility)
+VisibilityChanged,
+116: // Event::Cancelled (inherited visibility)
+Cancelled,
+118: // Event::TextChanged (inherited visibility)
+TextChanged,
+120: // Event::TextSubmit (inherited visibility)
+TextSubmit,
+122: // Event::Resized (inherited visibility)
+Resized(u32, u32),
+124: // Event::Close (inherited visibility)
+Close,
+126: // Event::SettingChanged (inherited visibility)
+SettingChanged,
+129: // Event::Char (inherited visibility)
+Char(char),
+131: // Event::Preedit (inherited visibility)
+Preedit,
 ```
 
 
@@ -1868,6 +2578,58 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 148: pub const RIGHT: u16 = 0x27;
 149: pub const ESCAPE: u16 = 0x1b;
 150: pub const RETURN: u16 = 0x0d;
+23: // Renderer::Context (inherited visibility)
+type Context;
+25: // Renderer::new (inherited visibility)
+fn new(context: &Self::Context, width: u32, height: u32) -> Result<Self>;
+27: // Renderer::draw (inherited visibility)
+fn draw(&self, text: &mut current::Text, list: &DisplayList, damage: PixelRect) -> Result<()>;
+29: // Renderer::read (inherited visibility)
+fn read(&self, damage: PixelRect, sink: impl FnMut(u32, &[u8])) -> Result<()>;
+34: // TextSystem::Format (inherited visibility)
+type Format;
+36: // TextSystem::Layout (inherited visibility)
+type Layout;
+38: // TextSystem::format (inherited visibility)
+fn format(&mut self, style: &TextStyle) -> Option<Self::Format>;
+40: // TextSystem::layout (inherited visibility)
+fn layout(&mut self, text: &str, style: &TextStyle) -> Option<&Self::Layout>;
+42: // TextSystem::measure (inherited visibility)
+fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32);
+44: // TextSystem::clear_cache (inherited visibility)
+fn clear_cache(&mut self);
+49: // Window::Bitmap (inherited visibility)
+type Bitmap;
+51: // Window::new (inherited visibility)
+fn new(kind: current::Kind, name: &str, role: accesskit::Role) -> Result<Self>;
+53: // Window::present_bitmap (inherited visibility)
+fn present_bitmap(
+59: // Window::next_event (inherited visibility)
+fn next_event() -> Option<(current::SurfaceId, current::Event)>;
+64: // TextInput::text (inherited visibility)
+fn text(&self) -> Result<String>;
+66: // TextInput::set_text (inherited visibility)
+fn set_text(&self, text: &str) -> Result<()>;
+68: // TextInput::focus (inherited visibility)
+fn focus(&self);
+70: // TextInput::blur (inherited visibility)
+fn blur(&self);
+72: // TextInput::caret (inherited visibility)
+fn caret(&self) -> Option<crate::Rect>;
+84: // Render::Cpu (inherited visibility)
+Cpu,
+88: // Render::Gpu (inherited visibility)
+Gpu,
+93: // Render::Auto (inherited visibility)
+Auto,
+134: // Backend::Renderer (inherited visibility)
+type Renderer: Renderer;
+136: // Backend::Text (inherited visibility)
+type Text: TextSystem;
+138: // Backend::Window (inherited visibility)
+type Window: Window;
+140: // Backend::TextInput (inherited visibility)
+type TextInput: TextInput;
 ```
 
 
@@ -1876,6 +2638,20 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 ```rust
 6: pub trait Backdrop {
 42: pub fn install(backdrop: Rc<dyn Backdrop>) {
+8: // Backdrop::available (inherited visibility)
+fn available(&self) -> bool;
+10: // Backdrop::open (inherited visibility)
+fn open(&self, client: HWND, shape: Shape, radius: f32, material: &GlassMaterial) -> bool;
+12: // Backdrop::open_styled (inherited visibility)
+fn open_styled(
+27: // Backdrop::style (inherited visibility)
+fn style(&self, _client: HWND, _style: &GlassStyle) {}
+29: // Backdrop::place (inherited visibility)
+fn place(&self, client: HWND, shape: Shape, radius: f32);
+31: // Backdrop::material (inherited visibility)
+fn material(&self, client: HWND, material: &GlassMaterial);
+33: // Backdrop::close (inherited visibility)
+fn close(&self, client: HWND);
 ```
 
 
@@ -1929,6 +2705,14 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 61: pub mod icons;
 62: pub use render::Canvas as Renderer;
 64: pub struct Backend;
+26: // Chrome::Caption (inherited visibility)
+Caption,
+28: // Chrome::Minimize (inherited visibility)
+Minimize,
+30: // Chrome::Maximize (inherited visibility)
+Maximize,
+32: // Chrome::Close (inherited visibility)
+Close,
 ```
 
 
@@ -2000,6 +2784,62 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 215: pub fn show_active(&self, _: bool) {
 219: pub fn set_chrome(&self, _: &[(crate::Rect, super::app_window::Chrome)]) {
 223: pub fn set_background(&self, _: crate::Rgba) {
+8: // Kind::Popup (inherited visibility)
+Popup { activate: bool },
+11: // Kind::Bar (inherited visibility)
+Bar,
+15: // Kind::DesktopChild (inherited visibility)
+DesktopChild { parent: usize },
+18: // Kind::App (inherited visibility)
+App { min: (u32, u32) },
+29: // Button::Left (inherited visibility)
+Left,
+31: // Button::Right (inherited visibility)
+Right,
+33: // Button::Middle (inherited visibility)
+Middle,
+49: // Event::Frame (inherited visibility)
+Frame,
+51: // Event::Move (inherited visibility)
+Move(Pointer),
+53: // Event::Leave (inherited visibility)
+Leave,
+55: // Event::Wheel (inherited visibility)
+Wheel(Pointer, i16),
+57: // Event::CaptureLost (inherited visibility)
+CaptureLost,
+59: // Event::Press (inherited visibility)
+Press(Pointer, Button),
+61: // Event::Release (inherited visibility)
+Release(Pointer, Button),
+63: // Event::DoubleClick (inherited visibility)
+DoubleClick(Pointer, Button),
+65: // Event::Key (inherited visibility)
+Key(u16),
+67: // Event::Activated (inherited visibility)
+Activated,
+69: // Event::Deactivated (inherited visibility)
+Deactivated,
+71: // Event::Invoke (inherited visibility)
+Invoke(HitId),
+73: // Event::Focus (inherited visibility)
+Focus(HitId),
+75: // Event::DpiChanged (inherited visibility)
+DpiChanged(u32),
+77: // Event::VisibilityChanged (inherited visibility)
+VisibilityChanged,
+79: // Event::Cancelled (inherited visibility)
+Cancelled,
+81: // Event::TextChanged (inherited visibility)
+TextChanged,
+83: // Event::TextSubmit (inherited visibility)
+TextSubmit,
+85: // Event::Resized (inherited visibility)
+Resized(u32, u32),
+87: // Event::Close (inherited visibility)
+Close,
+89: // Event::SettingChanged (inherited visibility)
+SettingChanged,
 ```
 
 
@@ -2055,6 +2895,26 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 679: pub fn set_cursor(&self, cursor: Cursor) {
 684: pub fn set_frame(&self, dark: bool, border: Rgba) {
 706: pub fn set_icon_png(&self, png: &[u8]) {
+61: // Chrome::Caption (inherited visibility)
+Caption,
+63: // Chrome::Minimize (inherited visibility)
+Minimize,
+65: // Chrome::Maximize (inherited visibility)
+Maximize,
+67: // Chrome::Close (inherited visibility)
+Close,
+75: // Cursor::Arrow (inherited visibility)
+Arrow,
+77: // Cursor::Text (inherited visibility)
+Text,
+79: // Cursor::Hand (inherited visibility)
+Hand,
+81: // Cursor::Move (inherited visibility)
+Move,
+83: // Cursor::Resize (inherited visibility)
+Resize,
+85: // Cursor::ResizeHorizontal (inherited visibility)
+ResizeHorizontal,
 ```
 
 
@@ -2075,6 +2935,20 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 6: pub trait Backdrop {
 43: pub fn install(backdrop: Rc<dyn Backdrop>) {
 59: pub fn system() -> Rc<super::system_backdrop::SystemBackdrop> {
+8: // Backdrop::available (inherited visibility)
+fn available(&self) -> bool;
+10: // Backdrop::open (inherited visibility)
+fn open(&self, client: HWND, shape: Shape, radius: f32, material: &GlassMaterial) -> bool;
+12: // Backdrop::open_styled (inherited visibility)
+fn open_styled(
+27: // Backdrop::style (inherited visibility)
+fn style(&self, _client: HWND, _style: &GlassStyle) {}
+29: // Backdrop::place (inherited visibility)
+fn place(&self, client: HWND, shape: Shape, radius: f32);
+31: // Backdrop::material (inherited visibility)
+fn material(&self, client: HWND, material: &GlassMaterial);
+33: // Backdrop::close (inherited visibility)
+fn close(&self, client: HWND);
 ```
 
 
@@ -2093,6 +2967,10 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 125: pub adapter: Adapter,
 138: pub fn device() -> Option<Rc<Device>> {
 355: pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Option<Image>> {
+58: // Power::Low (inherited visibility)
+Low,
+60: // Power::High (inherited visibility)
+High,
 ```
 
 
@@ -2264,6 +3142,62 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 1117: pub fn take_focus(&self) -> &'static str {
 1246: pub fn set_accessibility_semantics(&self, semantics: Vec<(HitId, crate::Semantics)>) {
 1251: pub fn take_accessibility_action(&self, hit: HitId) -> Option<crate::AccessibilityAction> {
+55: // Kind::Popup (inherited visibility)
+Popup { activate: bool },
+58: // Kind::Bar (inherited visibility)
+Bar,
+62: // Kind::DesktopChild (inherited visibility)
+DesktopChild { parent: HWND },
+65: // Kind::App (inherited visibility)
+App { min: (u32, u32) },
+76: // Button::Left (inherited visibility)
+Left,
+78: // Button::Right (inherited visibility)
+Right,
+80: // Button::Middle (inherited visibility)
+Middle,
+96: // Event::Frame (inherited visibility)
+Frame,
+98: // Event::Move (inherited visibility)
+Move(Pointer),
+100: // Event::Leave (inherited visibility)
+Leave,
+102: // Event::Wheel (inherited visibility)
+Wheel(Pointer, i16),
+104: // Event::CaptureLost (inherited visibility)
+CaptureLost,
+106: // Event::Press (inherited visibility)
+Press(Pointer, Button),
+108: // Event::Release (inherited visibility)
+Release(Pointer, Button),
+110: // Event::DoubleClick (inherited visibility)
+DoubleClick(Pointer, Button),
+112: // Event::Key (inherited visibility)
+Key(u16),
+114: // Event::Activated (inherited visibility)
+Activated,
+116: // Event::Deactivated (inherited visibility)
+Deactivated,
+118: // Event::Invoke (inherited visibility)
+Invoke(HitId),
+120: // Event::Focus (inherited visibility)
+Focus(HitId),
+122: // Event::DpiChanged (inherited visibility)
+DpiChanged(u32),
+124: // Event::VisibilityChanged (inherited visibility)
+VisibilityChanged,
+126: // Event::Cancelled (inherited visibility)
+Cancelled,
+128: // Event::TextChanged (inherited visibility)
+TextChanged,
+130: // Event::TextSubmit (inherited visibility)
+TextSubmit,
+132: // Event::Resized (inherited visibility)
+Resized(u32, u32),
+134: // Event::Close (inherited visibility)
+Close,
+136: // Event::SettingChanged (inherited visibility)
+SettingChanged,
 ```
 
 
@@ -2349,6 +3283,18 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 97: pub original: DisplayList,
 104: pub fn new(ui: &mut Ui, list: DisplayList, size: (u32, u32)) -> anyhow::Result<Self> {
 114: pub fn frame(&self, full: Rect, body: Rect) -> DisplayList {
+43: // Reveal::Slide (inherited visibility)
+Slide,
+45: // Reveal::Fade (inherited visibility)
+Fade,
+47: // Reveal::Pop (inherited visibility)
+Pop,
+49: // Reveal::Scale (inherited visibility)
+Scale,
+51: // Reveal::Morph (inherited visibility)
+Morph,
+53: // Reveal::None (inherited visibility)
+None,
 ```
 
 
@@ -2375,6 +3321,156 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 358: pub fn hit_at(&self, p: Point) -> Option<&Hit> {
 364: pub fn damage(&self, old: &DisplayList) -> Option<Rect> {
 370: pub fn damage_regions(&self, old: &DisplayList) -> Vec<Rect> {
+21: // Op::Continuous (inherited visibility)
+Continuous {
+23: // Op::rect (inherited visibility)
+rect: Rect,
+25: // Op::radius (inherited visibility)
+radius: f32,
+27: // Op::smoothing (inherited visibility)
+smoothing: f32,
+29: // Op::width (inherited visibility)
+width: f32,
+31: // Op::color (inherited visibility)
+color: Rgba,
+34: // Op::Clipped (inherited visibility)
+Clipped { rect: Rect, ops: Arc<[Op]> },
+36: // Op::RoundedClipped (inherited visibility)
+RoundedClipped { rect: Rect, radius: f32, ops: Arc<[Op]> },
+38: // Op::Emphasis (inherited visibility)
+Emphasis {
+40: // Op::rect (inherited visibility)
+rect: Rect,
+42: // Op::text (inherited visibility)
+text: Arc<str>,
+44: // Op::style (inherited visibility)
+style: TextStyle,
+46: // Op::color (inherited visibility)
+color: Rgba,
+48: // Op::italic (inherited visibility)
+italic: bool,
+50: // Op::strike (inherited visibility)
+strike: bool,
+53: // Op::Arc (inherited visibility)
+Arc {
+55: // Op::center (inherited visibility)
+center: Point,
+57: // Op::radius (inherited visibility)
+radius: f32,
+59: // Op::sweep (inherited visibility)
+sweep: f32,
+61: // Op::width (inherited visibility)
+width: f32,
+63: // Op::color (inherited visibility)
+color: Rgba,
+66: // Op::Image (inherited visibility)
+Image {
+68: // Op::rect (inherited visibility)
+rect: Rect,
+70: // Op::image (inherited visibility)
+image: Arc<crate::Image>,
+72: // Op::opacity (inherited visibility)
+opacity: f32,
+74: // Op::source (inherited visibility)
+source: Option<Rect>,
+78: // Op::RoundedImage (inherited visibility)
+RoundedImage {
+80: // Op::rect (inherited visibility)
+rect: Rect,
+82: // Op::image (inherited visibility)
+image: Arc<crate::Image>,
+84: // Op::opacity (inherited visibility)
+opacity: f32,
+86: // Op::source (inherited visibility)
+source: Option<Rect>,
+88: // Op::radius (inherited visibility)
+radius: f32,
+91: // Op::TextField (inherited visibility)
+TextField {
+93: // Op::rect (inherited visibility)
+rect: Rect,
+95: // Op::field (inherited visibility)
+field: crate::TextField,
+97: // Op::revision (inherited visibility)
+revision: u64,
+100: // Op::Fill (inherited visibility)
+Fill {
+102: // Op::rect (inherited visibility)
+rect: Rect,
+104: // Op::radius (inherited visibility)
+radius: f32,
+106: // Op::color (inherited visibility)
+color: Rgba,
+109: // Op::Stroke (inherited visibility)
+Stroke {
+111: // Op::rect (inherited visibility)
+rect: Rect,
+113: // Op::radius (inherited visibility)
+radius: f32,
+115: // Op::width (inherited visibility)
+width: f32,
+117: // Op::color (inherited visibility)
+color: Rgba,
+120: // Op::Line (inherited visibility)
+Line {
+122: // Op::from (inherited visibility)
+from: Point,
+124: // Op::to (inherited visibility)
+to: Point,
+126: // Op::width (inherited visibility)
+width: f32,
+128: // Op::color (inherited visibility)
+color: Rgba,
+132: // Op::Text (inherited visibility)
+Text {
+134: // Op::rect (inherited visibility)
+rect: Rect,
+136: // Op::text (inherited visibility)
+text: Arc<str>,
+138: // Op::style (inherited visibility)
+style: TextStyle,
+140: // Op::color (inherited visibility)
+color: Rgba,
+144: // Op::Icon (inherited visibility)
+Icon {
+146: // Op::rect (inherited visibility)
+rect: Rect,
+148: // Op::icon (inherited visibility)
+icon: crate::icons::Icon,
+150: // Op::weight (inherited visibility)
+weight: f32,
+152: // Op::color (inherited visibility)
+color: Rgba,
+156: // Op::Shadow (inherited visibility)
+Shadow {
+158: // Op::rect (inherited visibility)
+rect: Rect,
+160: // Op::radius (inherited visibility)
+radius: f32,
+162: // Op::spread (inherited visibility)
+spread: f32,
+164: // Op::drop (inherited visibility)
+drop: f32,
+166: // Op::color (inherited visibility)
+color: Rgba,
+179: // Op::SoftShadow (inherited visibility)
+SoftShadow {
+181: // Op::rect (inherited visibility)
+rect: Rect,
+183: // Op::radius (inherited visibility)
+radius: f32,
+185: // Op::blur (inherited visibility)
+blur: f32,
+187: // Op::offset (inherited visibility)
+offset: (f32, f32),
+189: // Op::spread (inherited visibility)
+spread: f32,
+191: // Op::color (inherited visibility)
+color: Rgba,
+195: // Op::Clip (inherited visibility)
+Clip { rect: Rect },
+197: // Op::Unclip (inherited visibility)
+Unclip,
 ```
 
 
@@ -2535,6 +3631,34 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 745: pub width: f32,
 747: pub gap: f32,
 749: pub opacity: f32,
+7: // Material::Glass (inherited visibility)
+Glass {
+9: // Material::clarity (inherited visibility)
+clarity: f32,
+11: // Material::blur (inherited visibility)
+blur: f32,
+13: // Material::refraction (inherited visibility)
+refraction: f32,
+15: // Material::highlight (inherited visibility)
+highlight: f32,
+17: // Material::tint (inherited visibility)
+tint: Option<Rgba>,
+19: // Material::tint_alpha (inherited visibility)
+tint_alpha: Option<f32>,
+21: // Material::lensed (inherited visibility)
+lensed: bool,
+24: // Material::Fill (inherited visibility)
+Fill {
+26: // Material::tint (inherited visibility)
+tint: Option<Rgba>,
+254: // Radius::Surface (inherited visibility)
+Surface,
+256: // Radius::Card (inherited visibility)
+Card,
+258: // Radius::Control (inherited visibility)
+Control,
+260: // Radius::Small (inherited visibility)
+Small,
 ```
 
 
@@ -2674,6 +3798,52 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 651: pub fn luminance(c: Rgba) -> f32 {
 663: pub fn contrast(a: Rgba, b: Rgba) -> f32 {
 669: pub fn over(top: Rgba, under: Rgba) -> Rgba {
+40: // Style::Liquid (inherited visibility)
+Liquid,
+42: // Style::OneUi (inherited visibility)
+OneUi,
+44: // Style::Solid (inherited visibility)
+Solid,
+46: // Style::Fluent (inherited visibility)
+Fluent,
+48: // Style::Mono (inherited visibility)
+Mono,
+77: // Scheme::Light (inherited visibility)
+Light,
+79: // Scheme::Dark (inherited visibility)
+Dark,
+135: // TextRole::LargeTitle (inherited visibility)
+LargeTitle,
+137: // TextRole::Title1 (inherited visibility)
+Title1,
+139: // TextRole::Title2 (inherited visibility)
+Title2,
+141: // TextRole::Title3 (inherited visibility)
+Title3,
+143: // TextRole::Headline (inherited visibility)
+Headline,
+145: // TextRole::Body (inherited visibility)
+Body,
+147: // TextRole::Callout (inherited visibility)
+Callout,
+149: // TextRole::Subheadline (inherited visibility)
+Subheadline,
+151: // TextRole::Footnote (inherited visibility)
+Footnote,
+153: // TextRole::Caption (inherited visibility)
+Caption,
+289: // ShadowLevel::Card (inherited visibility)
+Card,
+292: // ShadowLevel::Raised (inherited visibility)
+Raised,
+294: // ShadowLevel::Menu (inherited visibility)
+Menu,
+296: // ShadowLevel::Popover (inherited visibility)
+Popover,
+298: // ShadowLevel::Dialog (inherited visibility)
+Dialog,
+300: // ShadowLevel::Toast (inherited visibility)
+Toast,
 ```
 
 
@@ -2729,6 +3899,20 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 255: pub shadow: f32,
 257: pub glyph: f32,
 278: pub fn scaled(&self, scale: f32) -> Self {
+146: // Step::Micro (inherited visibility)
+Micro,
+148: // Step::Caption (inherited visibility)
+Caption,
+150: // Step::Body (inherited visibility)
+Body,
+152: // Step::Label (inherited visibility)
+Label,
+154: // Step::Headline (inherited visibility)
+Headline,
+156: // Step::Title (inherited visibility)
+Title,
+158: // Step::Large (inherited visibility)
+Large,
 ```
 
 
@@ -2747,4 +3931,14 @@ Inventory: 2050 explicit public declarations/re-exports across all backend alter
 72: pub fn done(self, now: Instant) -> bool {
 77: pub fn value(self, now: Instant) -> f32 {
 96: pub fn bezier_at([x1, y1, x2, y2]: [f32; 4], x: f32) -> f32 {
+11: // Easing::Bezier (inherited visibility)
+Bezier([f32; 4]),
+13: // Easing::Spring (inherited visibility)
+Spring(Spring),
+16: // Easing::TimedSpring (inherited visibility)
+TimedSpring {
+18: // Easing::spring (inherited visibility)
+spring: Spring,
+20: // Easing::settle (inherited visibility)
+settle: f32,
 ```
