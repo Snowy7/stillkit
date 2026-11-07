@@ -38,7 +38,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_SETFOCUS, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_EX_TRANSPARENT, WS_POPUP,
 };
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::core::HSTRING;
 
 use crate::a11y::{A11y, WM_A11Y_ACTION};
 use crate::geom::{PixelRect, Point};
@@ -46,7 +46,6 @@ use crate::render::{Canvas, Ui};
 use crate::scene::{DisplayList, HitId};
 
 const WM_MOUSELEAVE: u32 = 0x02A3;
-const CLASS: PCWSTR = w!("mypaper.ui");
 
 /// What kind of window a surface is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,7 +337,7 @@ impl Surface {
         let hwnd = unsafe {
             CreateWindowExW(
                 ex,
-                CLASS,
+                crate::identity::surface_class(),
                 &HSTRING::from(name),
                 style,
                 0,
@@ -400,7 +399,7 @@ impl Surface {
             if shared.desktop.is_some() {
                 let _ = windows::Win32::UI::WindowsAndMessaging::SetPropW(
                     hwnd,
-                    w!("mypaper.ui.desktop"),
+                    crate::identity::desktop_prop(),
                     Some(windows::Win32::Foundation::HANDLE(std::ptr::dangling_mut())),
                 );
             }
@@ -961,7 +960,7 @@ impl Drop for Surface {
 fn desktop_member(window: HWND) -> bool {
     // SAFETY: read-only query of a live or recently destroyed window handle.
     unsafe {
-        windows::Win32::UI::WindowsAndMessaging::GetPropW(window, w!("mypaper.ui.desktop")).0
+        windows::Win32::UI::WindowsAndMessaging::GetPropW(window, crate::identity::desktop_prop()).0
             as usize
             == 1
             || is_desktop_glass(window)
@@ -972,10 +971,7 @@ fn is_desktop_glass(window: HWND) -> bool {
     // SAFETY: bounded local buffer for a read-only class-name query.
     let len = unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(window, &mut class) }
         .max(0) as usize;
-    class[..len]
-        .iter()
-        .copied()
-        .eq("mypaper.wallpaper.glass".encode_utf16())
+    crate::identity::is_desktop_class(&class[..len])
 }
 
 fn register_class() -> Result<()> {
@@ -988,7 +984,7 @@ fn register_class() -> Result<()> {
             hInstance: GetModuleHandleW(None)?.into(),
             hCursor: LoadCursorW(None, IDC_ARROW)?,
             hIcon: HICON::default(),
-            lpszClassName: CLASS,
+            lpszClassName: crate::identity::surface_class(),
             ..Default::default()
         };
         if RegisterClassExW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {

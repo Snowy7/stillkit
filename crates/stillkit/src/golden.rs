@@ -1,5 +1,5 @@
 //! Golden images: a surface rendered headless (the same software target as on screen) and
-//! compared with a PNG in the repo. `MYPAPER_BLESS=1 cargo test` writes the PNGs anew.
+//! compared with a PNG in the repo. `STILLKIT_BLESS=1 cargo test` writes the PNGs anew.
 //!
 //! PNGs hold straight alpha so they open normally; the comparison runs on premultiplied pixels
 //! with a small tolerance for antialiasing differences between font versions.
@@ -16,16 +16,16 @@ const CHANNEL_TOLERANCE: u8 = 24;
 /// ...and this share of the pixels may differ by more.
 const PIXEL_TOLERANCE: f64 = 0.002;
 
-/// Checks `image` against the golden PNG at `path` (written instead when `MYPAPER_BLESS` is
-/// set). On a mismatch the actual image is saved to `%TEMP%\mypaper-golden` and named in the
+/// Checks `image` against the golden PNG at `path` (written instead when `STILLKIT_BLESS` is
+/// set). On a mismatch the actual image is saved to `%TEMP%\stillkit-golden` and named in the
 /// error.
 pub fn check(image: &Image, path: &Path) -> Result<()> {
-    if std::env::var_os("MYPAPER_BLESS").is_some() {
+    if std::env::var_os("STILLKIT_BLESS").is_some() {
         return write(image, path);
     }
     let golden = read(path).with_context(|| {
         format!(
-            "golden {} missing or unreadable; run with MYPAPER_BLESS=1 to write it",
+            "golden {} missing or unreadable; run with STILLKIT_BLESS=1 to write it",
             path.display()
         )
     })?;
@@ -67,7 +67,7 @@ pub fn check(image: &Image, path: &Path) -> Result<()> {
 
 fn save_actual(image: &Image, golden: &Path) -> Result<PathBuf> {
     let name = golden.file_name().context("golden has no file name")?;
-    let path = std::env::temp_dir().join("mypaper-golden").join(name);
+    let path = std::env::temp_dir().join("stillkit-golden").join(name);
     write(image, &path)?;
     Ok(path)
 }

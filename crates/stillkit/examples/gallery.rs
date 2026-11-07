@@ -1,7 +1,7 @@
 //! The kit's gallery: every component in all five styles and both schemes, over a wallpaper,
 //! written as PNGs so they can be judged side by side (docs/ui.md, "The kit").
 //!
-//!   cargo run -p mypaper-ui --example gallery [-- <out dir>]   (default docs/media/native)
+//!   cargo run -p stillkit --example gallery [-- <out dir>]   (default docs/media/native)
 //!
 //! Writes `kit-<style>-<scheme>.png`, `kit-text.png` (the text lab) and `kit-icons.png` (vector
 //! icons against the icon font). Glass is a stand-in for the engine's: the wallpaper blurred,
@@ -11,11 +11,11 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use mypaper_ui::icons::Icon;
-use mypaper_ui::interact::Interaction;
-use mypaper_ui::kit::{Accessory, ButtonKind, Frame, Lead, Row, Tile};
-use mypaper_ui::layout::{Align, Insets, Stack, grid};
-use mypaper_ui::{
+use stillkit::icons::Icon;
+use stillkit::interact::Interaction;
+use stillkit::kit::{Accessory, ButtonKind, Frame, Lead, Row, Tile};
+use stillkit::layout::{Align, Insets, Stack, grid};
+use stillkit::{
     DisplayList, Entry, Image, Point, Rect, Rgba, Scheme, Scroll, Style, TextMode, TextQuality,
     TextRole, TextStyle, Theme, Ui, render,
 };
@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     let blurred = blur(&backdrop, 18);
     for style in Style::ALL {
         for scheme in [Scheme::Dark, Scheme::Light] {
-            let theme = Theme::new(style, scheme, mypaper_ui::theme::SYSTEM_BLUE);
+            let theme = Theme::new(style, scheme, stillkit::theme::SYSTEM_BLUE);
             let started = Instant::now();
             let (list, glass) = gallery(&mut ui, &theme);
             let built = started.elapsed();
@@ -362,8 +362,8 @@ fn gallery(ui: &mut Ui, t: &Theme) -> (DisplayList, Vec<(Rect, f32)>) {
         },
     ];
     let tokens = Theme::tokens(t);
-    let layout = mypaper_ui::menu::layout(&items, &tokens, 1.0, &mut ui.text);
-    let menu = mypaper_ui::menu::view(&items, &layout, Some(1), &tokens).translated(792.0, 556.0);
+    let layout = stillkit::menu::layout(&items, &tokens, 1.0, &mut ui.text);
+    let menu = stillkit::menu::view(&items, &layout, Some(1), &tokens).translated(792.0, 556.0);
     if tokens.glass.is_some() {
         // The menu's body sits inside its shadow margin.
         let edge = if tokens.shadow { tokens.menu.shadow } else { 0.0 };
@@ -393,7 +393,7 @@ fn text_lab(ui: &mut Ui, out: &Path, backdrop: &Image, blurred: &Image) -> anyho
     let mut bg = backdrop_crop(backdrop, w, h);
     let blur_bg = backdrop_crop(blurred, w, h);
     for (i, scheme) in [Scheme::Dark, Scheme::Light].into_iter().enumerate() {
-        let t = Theme::new(Style::Liquid, scheme, mypaper_ui::theme::SYSTEM_BLUE);
+        let t = Theme::new(Style::Liquid, scheme, stillkit::theme::SYSTEM_BLUE);
         glass_stand_in(&mut bg, &blur_bg, Rect::new(i as f32 * 560.0 + 10.0, 10.0, 540.0, 500.0), 24.0, &t);
     }
     let mut composite = bg.clone();
@@ -401,7 +401,7 @@ fn text_lab(ui: &mut Ui, out: &Path, backdrop: &Image, blurred: &Image) -> anyho
         ui.set_text_quality(*quality)?;
         let mut list = DisplayList::default();
         for (i, scheme) in [Scheme::Dark, Scheme::Light].into_iter().enumerate() {
-            let t = Theme::new(Style::Liquid, scheme, mypaper_ui::theme::SYSTEM_BLUE);
+            let t = Theme::new(Style::Liquid, scheme, stillkit::theme::SYSTEM_BLUE);
             let x = i as f32 * 560.0 + 30.0;
             let y = 24.0 + row as f32 * 96.0;
             let style = |role: TextRole| -> TextStyle {
@@ -420,7 +420,7 @@ fn text_lab(ui: &mut Ui, out: &Path, backdrop: &Image, blurred: &Image) -> anyho
             };
             let put = |list: &mut DisplayList, ui: &mut Ui, x: f32, y: f32, text: &str, s: TextStyle, color: Rgba| {
                 let (tw, th) = ui.text.measure(text, &s);
-                list.ops.push(mypaper_ui::Op::Text {
+                list.ops.push(stillkit::Op::Text {
                     rect: Rect::new(x, y, tw, th),
                     text: text.into(),
                     style: s,
@@ -463,12 +463,12 @@ fn icon_sheet(ui: &mut Ui, out: &Path, backdrop: &Image, blurred: &Image) -> any
     let mut bg = backdrop_crop(backdrop, w, h);
     let blur_bg = backdrop_crop(blurred, w, h);
     let mut list = DisplayList::default();
-    let family = mypaper_ui::icons::system_family(&ui.text);
+    let family = stillkit::icons::system_family(&ui.text);
     for (i, scheme) in [Scheme::Dark, Scheme::Light].into_iter().enumerate() {
         let x0 = i as f32 * 560.0 + 10.0;
-        let vector = Theme::new(Style::Liquid, scheme, mypaper_ui::theme::SYSTEM_BLUE);
+        let vector = Theme::new(Style::Liquid, scheme, stillkit::theme::SYSTEM_BLUE);
         glass_stand_in(&mut bg, &blur_bg, Rect::new(x0, 10.0, 540.0, 280.0), 24.0, &vector);
-        let font = Theme::new(Style::Fluent, scheme, mypaper_ui::theme::SYSTEM_BLUE);
+        let font = Theme::new(Style::Fluent, scheme, stillkit::theme::SYSTEM_BLUE);
         let input = Interaction::default();
         for (row, (theme, label)) in [(&vector, "Lucide vectors"), (&font, "Segoe Fluent Icons")].into_iter().enumerate() {
             let mut f = Frame::new(&mut ui.text, theme, 1.0, &input);
@@ -479,7 +479,7 @@ fn icon_sheet(ui: &mut Ui, out: &Path, backdrop: &Image, blurred: &Image) -> any
                     let cell = Rect::new(x0 + 130.0 + j as f32 * 27.0, y - 4.0, 26.0, 26.0);
                     // Font glyphs always, for the comparison.
                     if row == 1 {
-                        let op = mypaper_ui::icons::centered(f.text, &family, *icon, size, cell, vector.color.label);
+                        let op = stillkit::icons::centered(f.text, &family, *icon, size, cell, vector.color.label);
                         f.push(op);
                     } else {
                         f.icon(cell, *icon, size, vector.color.label);

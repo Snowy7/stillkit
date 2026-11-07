@@ -1,12 +1,15 @@
-//! mypaper's native UI layer (docs/ui.md): per-pixel-alpha layered windows drawn with software
-//! Direct2D and DirectWrite on a WIC bitmap. No hardware GPU device, ever (plan Rule 1).
+//! stillkit: a native UI library (docs/ui.md). Per-pixel-alpha layered windows drawn with
+//! software Direct2D and DirectWrite on a WIC bitmap. No hardware GPU device, ever (Rule 1).
 //!
 //! A frame is `view(&model, &tokens) -> DisplayList`; [`Surface::present`] compares it with the
 //! list on screen and redraws only the bounds that changed (nothing at all when it is the same).
 //! Input arrives as [`Event`]s from [`next_event`], handled by the app's loop after dispatching
-//! window messages. [`Menu`] is the first component built on it.
+//! window messages. [`Menu`] is the first component built on it. Window class names come from
+//! [`set_identity`].
 
 mod a11y;
+mod identity;
+pub use identity::{Identity, set_identity};
 pub use a11y::{AccessibilityAction, Semantics};
 pub mod app_window;
 pub mod calendar;

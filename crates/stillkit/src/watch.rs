@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     #[test]
     fn a_thread_local_watch_can_be_dropped_during_process_exit() {
-        const CHILD: &str = "MYPAPER_UI_TLS_WATCH_CHILD";
+        const CHILD: &str = "STILLKIT_TLS_WATCH_CHILD";
         if let Some(root) = std::env::var_os(CHILD) {
             thread_local! { static WATCH: std::cell::RefCell<Option<FileWatch>> = const { std::cell::RefCell::new(None) }; }
             WATCH.with_borrow_mut(|slot| {
@@ -104,7 +104,7 @@ mod tests {
             // Exercises Windows' real process-exit TLS ordering, with another thread alive.
             std::process::exit(0);
         }
-        let root = std::env::temp_dir().join(format!("mypaper-watch-exit-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("stillkit-watch-exit-{}", std::process::id()));
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn atomic_replacement_removal_and_recreation_reload_without_a_poll_timer() {
         let root =
-            std::env::temp_dir().join(format!("mypaper-widget-watch-{}", std::process::id()));
+            std::env::temp_dir().join(format!("stillkit-watch-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("widgets.json");
         std::fs::write(&path, b"{}").unwrap();

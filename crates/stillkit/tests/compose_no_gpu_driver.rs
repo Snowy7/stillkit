@@ -1,7 +1,7 @@
 //! Plan Rule 1 for DirectComposition: composing sprites over a surface (WARP device, DWM does the
 //! scaling) loads no GPU vendor driver. Its own test binary, so nothing else is loaded.
 
-use mypaper_ui::{Image, Kind, Rect, Role, Surface, compose::Compositor, modules};
+use stillkit::{Image, Kind, Rect, Role, Surface, compose::Compositor, modules};
 
 #[test]
 fn composing_sprites_over_a_surface_loads_no_gpu_driver() {

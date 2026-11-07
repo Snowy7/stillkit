@@ -1,7 +1,7 @@
-//! Plan Rule 1: drawing with `mypaper-ui` loads no GPU vendor driver. An integration test, so
+//! Plan Rule 1: drawing with `stillkit` loads no GPU vendor driver. An integration test, so
 //! it runs in a process of its own with nothing else loaded.
 
-use mypaper_ui::{
+use stillkit::{
     DisplayList, Kind, Op, Rect, Rgba, Role, Surface, TextStyle, Ui, modules, render,
 };
 

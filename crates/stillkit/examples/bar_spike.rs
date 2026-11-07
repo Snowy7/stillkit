@@ -2,7 +2,7 @@
 //! software Direct2D into a layered window, measured from inside the process.
 //!
 //! ```text
-//! cargo run --release -p mypaper-ui --example mypaper-bar-spike -- [--seconds 60] [--redraws 200] [--x X --y Y]
+//! cargo run --release -p stillkit --example stillkit-bar-spike -- [--seconds 60] [--redraws 200] [--x X --y Y]
 //! ```
 //!
 //! It reports private memory at each step (WARP's share is the step that creates the first
@@ -14,7 +14,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use mypaper_ui::{
+use stillkit::{
     DisplayList, Kind, Op, Rect, Rgba, Role, Spring, Surface, TextStyle, Ticker, Tween, Ui, icons,
     modules,
 };
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     let mut memory = vec![("start", private_mb())];
     let mut ui = Ui::new()?;
     memory.push(("factories (D2D, DirectWrite, WIC)", private_mb()));
-    let mut surface = Surface::new(Kind::Bar, "mypaper bar spike", Role::Toolbar)?;
+    let mut surface = Surface::new(Kind::Bar, "stillkit bar spike", Role::Toolbar)?;
     memory.push(("window", private_mb()));
 
     let icons_family = icons::system_family(&ui.text);

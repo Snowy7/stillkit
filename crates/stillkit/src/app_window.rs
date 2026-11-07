@@ -44,14 +44,13 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
     WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_THEMECHANGED, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
-use windows::core::{HSTRING, PCWSTR, w};
+use windows::core::HSTRING;
 
 use crate::geom::{PixelRect, Point, Rect, Rgba};
 use crate::render::{Canvas, Ui};
 use crate::scene::DisplayList;
 use crate::surface::{Event, Pointer, Surface, SurfaceId, push};
 
-const CLASS: PCWSTR = w!("mypaper.ui.app");
 /// Height of the top resize band, in design pixels.
 const TOP_EDGE: f32 = 5.0;
 
@@ -156,7 +155,7 @@ pub(crate) fn create(
             style: CS_DBLCLKS,
             hInstance: GetModuleHandleW(None)?.into(),
             hCursor: LoadCursorW(None, IDC_ARROW)?,
-            lpszClassName: CLASS,
+            lpszClassName: crate::identity::app_class(),
             ..Default::default()
         };
         if RegisterClassExW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
@@ -164,7 +163,7 @@ pub(crate) fn create(
         }
         CreateWindowExW(
             Default::default(),
-            CLASS,
+            crate::identity::app_class(),
             &HSTRING::from(name),
             WS_OVERLAPPEDWINDOW,
             windows::Win32::UI::WindowsAndMessaging::CW_USEDEFAULT,
