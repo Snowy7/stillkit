@@ -143,6 +143,25 @@ impl Surface {
     pub fn take_focus(&self) -> &'static str {
         unimplemented!("native focus")
     }
+    // App-window services (`Kind::App`).
+    pub fn scale(&self) -> f32 {
+        unimplemented!("native window")
+    }
+    pub fn place(&self, _: (i32, i32, i32, i32)) {
+        unimplemented!("native window")
+    }
+    pub fn client_size(&self) -> (u32, u32) {
+        unimplemented!("native window")
+    }
+    pub fn show_active(&self, _: bool) {
+        unimplemented!("native window")
+    }
+    pub fn set_chrome(&self, _: &[(crate::Rect, super::app_window::Chrome)]) {
+        unimplemented!("native window")
+    }
+    pub fn set_background(&self, _: crate::Rgba) {
+        unimplemented!("native window")
+    }
 }
 impl crate::platform::Window for Surface {
     type Bitmap = ();
