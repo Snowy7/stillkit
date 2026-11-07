@@ -116,6 +116,31 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 xkbcommon-dl = "0.4"
 skrifa = "0.44"
 
+# macOS (docs/ui.md, "macOS backend"): AppKit windows, CoreGraphics and CoreText drawing, ImageIO
+# decoding and AccessKit's NSAccessibility adapter. Metal (wgpu) only with `gpu`.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-foundation = "=0.3.2"
+objc2-app-kit = "=0.3.2"
+objc2-core-foundation = "=0.3.2"
+objc2-core-graphics = "=0.3.2"
+objc2-core-text = "=0.3.2"
+objc2-quartz-core = "=0.3.2"
+objc2-image-io = "=0.3.2"
+accesskit_macos = "=0.27.2"
+# GPU mode draws glyph outlines from CoreText, so no `text` feature (no second font stack).
+vello_hybrid = { package = "vello_gpu", version = "=0.3.0", default-features = false, features = ["std", "wgpu"], optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal"], optional = true }
+stillkit-glass = { path = "../stillkit-glass", optional = true }
+pollster = { version = "0.4", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
+
 [[example]]
 name = "gallery"
 test = true
+
+# CPU mode loads no Metal driver (macOS). AppKit windows need the main thread, so the test
+# has its own `main` instead of the harness's worker threads.
+[[test]]
+name = "macos_no_gpu_driver"
+harness = false

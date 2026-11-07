@@ -766,6 +766,8 @@ mod mix_goldens {
             // Native text rasterization differs; retain each backend's own reference pixels.
             let directory = if cfg!(target_os = "linux") {
                 "../../docs/media/native/linux"
+            } else if cfg!(target_os = "macos") {
+                "tests/golden/macos"
             } else {
                 "tests/golden"
             };

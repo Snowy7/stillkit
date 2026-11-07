@@ -3,13 +3,17 @@
 pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux as current;
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+pub mod macos;
+#[cfg(target_os = "macos")]
+pub use macos as current;
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub mod stub;
 #[cfg(windows)]
 pub mod windows;
 use crate::{DisplayList, PixelRect, TextStyle};
 use anyhow::Result;
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub use stub as current;
 #[cfg(windows)]
 pub use windows as current;
@@ -60,7 +64,7 @@ pub enum Render {
     #[default]
     Cpu,
     /// Hardware Direct2D on a DirectComposition surface, with in-process Liquid Glass on the
-    /// same adapter on Windows; Vello Hybrid and Vulkan on Linux. Needs the `gpu` feature;
+    /// same adapter on Windows; Vello Hybrid on Vulkan (Linux) or Metal (macOS). Needs the `gpu` feature;
     /// unsupported platforms fall back to `Cpu`.
     Gpu,
     /// `Cpu` unless the surface wants glass ([`crate::glass::set_style`] holds a material) and no
@@ -71,7 +75,7 @@ pub enum Render {
 impl Render {
     /// The mode a new surface uses: `Cpu` or `Gpu`, never `Auto`.
     pub fn resolve(self, wants_glass: bool, external_backdrop: bool) -> Render {
-        let gpu = cfg!(all(any(windows, target_os = "linux"), feature = "gpu"));
+        let gpu = cfg!(all(any(windows, target_os = "linux", target_os = "macos"), feature = "gpu"));
         match self {
             Render::Gpu if gpu => Render::Gpu,
             Render::Auto if gpu && wants_glass && !external_backdrop => Render::Gpu,

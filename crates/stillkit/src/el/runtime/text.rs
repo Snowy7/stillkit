@@ -448,17 +448,17 @@ impl<S> Runtime<S> {
     /// The focused field's native text input follows focus; the window host calls it before
     /// each frame. On Windows a RichEdit types into the focused field (the system IME with its
     /// composition inline and candidates at the caret, the system clipboard); on Linux the
-    /// compositor's input method (text-input-v3) is told the field has focus and where its
-    /// caret is. Headless runtimes never call it.
+    /// compositor's input method (text-input-v3), on macOS the view's input context, is told
+    /// the field has focus and where its caret is. Headless runtimes never call it.
     pub fn sync_text_input(&mut self, surface: &crate::Surface) {
         #[cfg(windows)]
         self.sync_rich_edit(surface);
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             let caret = self.caret_rect().filter(|_| self.typing.is_some() && self.active);
             crate::platform::current::ime::follow(surface.id(), caret);
         }
-        #[cfg(not(any(windows, target_os = "linux")))]
+        #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
         let _ = surface;
     }
 }
