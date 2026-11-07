@@ -239,6 +239,20 @@ pub(super) fn draw_ops(
                     path(ctx, &rounded(r.inflate(grow).offset(0., *drop), radius + grow), 0., color.with_alpha(color.a * (1. - i as f32 / steps as f32)), false);
                 }
             }
+            Op::SoftShadow { rect: r, radius, blur, offset, spread, color } => {
+                // As on Linux: Vello's exact blurred rounded rectangle.
+                let (shape, radius) = crate::shadow::shape(*r, *radius, *offset, *spread);
+                let radius = radius.min(shape.width() / 2.).min(shape.height() / 2.);
+                let sigma = crate::shadow::sigma(*blur);
+                if color.a > 0. && !shape.is_empty() {
+                    if sigma < 0.25 {
+                        path(ctx, &rounded(shape, radius), 0., *color, false);
+                    } else {
+                        paint(ctx, *color);
+                        ctx.fill_blurred_rounded_rect(&rect(shape), radius, sigma, false);
+                    }
+                }
+            }
             Op::TextField { rect, field, .. } => draw_ops(ctx, res, text, &[field.op(*rect)], image_source)?,
         }
     }

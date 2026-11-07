@@ -260,31 +260,24 @@ fn op(ctx: &CGContext, text: &mut Text, images: &mut Images, op: &Op, damage: Re
                 fill(ctx, &rounded(rect.inflate(grow).offset(0.0, *drop), radius + grow), color.with_alpha(color.a * fade));
             }
         }
+        Op::SoftShadow { rect, radius, blur, offset, spread, color } => {
+            soft_shadow(ctx, *rect, *radius, *blur, *offset, *spread, *color)
+        }
         Op::TextField { rect, field, .. } => self::op(ctx, text, images, &field.op(*rect), damage),
         Op::Clip { .. } | Op::Unclip => {}
     }
 }
 
-/// A CSS box shadow under `rect`: a Gaussian blur of `blur` (2σ) around the rounded shape
-/// grown by `spread` and moved by `offset`, in `color`, not drawn under the shape itself.
-/// CoreGraphics casts it exactly: the shape is filled far outside the bitmap, and its shadow,
-/// offset back, is all that lands. For `Op::SoftShadow` once it reaches this crate.
-#[allow(dead_code)]
+/// [`Op::SoftShadow`]: a Gaussian blur of `blur` (2σ) of the rounded shape grown by `spread`
+/// and moved by `offset`, in `color`, painted under the shape too (as the other backends do;
+/// a translucent panel shows its shadow through it). CoreGraphics casts it exactly: the shape
+/// is filled far outside the bitmap, and its shadow, offset back, is all that lands.
 pub(super) fn soft_shadow(ctx: &CGContext, rect: Rect, radius: f32, blur: f32, offset: (f32, f32), spread: f32, c: Rgba) {
     let x = Some(ctx);
     let shape = rect.inflate(spread);
     // Far enough that neither the shape nor its blur's reach touches the bitmap.
     let away = (shape.right.max(0.0) + blur * 3.0 + offset.0.abs() + 1.0).ceil() as f64 + 16384.0;
     CGContext::save_g_state(x);
-    // CSS paints no shadow under the box: clip out the (unspread) shape, even-odd.
-    let outside = CGMutablePath::new();
-    // SAFETY: live paths; null transforms are the identity.
-    unsafe {
-        CGMutablePath::add_rect(Some(&outside), std::ptr::null(), CGRect::new(CGPoint::new(-1.0e6, -1.0e6), CGSize::new(2.0e6, 2.0e6)));
-        CGMutablePath::add_path(Some(&outside), std::ptr::null(), Some(&rounded(rect, radius)));
-    }
-    CGContext::add_path(x, Some(&outside));
-    CGContext::eo_clip(x);
     // Shadow offsets are in device space, unflipped: y goes up there.
     CGContext::set_shadow_with_color(x, CGSize::new(offset.0 as f64 + away, -(offset.1 as f64)), blur as f64, Some(&color(c)));
     let moved = shape.offset(-away as f32, 0.0);

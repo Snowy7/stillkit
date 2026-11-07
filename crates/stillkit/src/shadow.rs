@@ -35,10 +35,14 @@ pub(crate) fn shape(
     )
 }
 
+// The analytic mask is Windows' renderer (Linux and macOS have native blurs); elsewhere it
+// compiles only for its own unit tests.
 #[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(unused_imports))]
 pub(crate) use mask::*;
 
 #[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
 mod mask {
     use crate::Rect;
 
