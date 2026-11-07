@@ -57,6 +57,12 @@ struct State {
     /// window never shows the system caret, so views draw it from [`TextField::caret`].
     caret: Cell<(i32, i32, i32, i32)>,
     caret_shown: Cell<bool>,
+    /// Typing for an `el` field: the surface asks `el`'s key policy which keys it takes, and
+    /// the options below apply (`set_options`). Off for fields apps make themselves.
+    el: Cell<bool>,
+    password: Cell<bool>,
+    read_only: Cell<bool>,
+    limit: Cell<Option<u32>>,
 }
 impl State {
     fn invalidate(&self) {
@@ -133,6 +139,10 @@ impl TextField {
             timers: RefCell::new(Vec::new()),
             caret: Cell::new((0, 0, 1, 0)),
             caret_shown: Cell::new(false),
+            el: Cell::new(false),
+            password: Cell::new(false),
+            read_only: Cell::new(false),
+            limit: Cell::new(None),
         });
         let host: TextHost = Host {
             state: state.clone(),
@@ -278,6 +288,32 @@ impl TextField {
             let _ = self.inner.services.OnTxInPlaceDeactivate();
         }
         self.kill_timers();
+    }
+    /// Makes this an `el` field's RichEdit: keys follow `el`'s policy (a key it refuses goes to
+    /// the app as `Event::Key`, Tab and Escape always), and it is a password, read-only or
+    /// limited field as asked.
+    pub(crate) fn set_el(&self, secure: bool, read_only: bool, max: Option<usize>) {
+        let state = &self.inner.state;
+        state.el.set(true);
+        state.password.set(secure);
+        state.read_only.set(read_only);
+        state.limit.set(max.map(|m| m.min(u32::MAX as usize) as u32));
+        let bits = TXTBIT_USEPASSWORD | TXTBIT_READONLY;
+        let on = if secure { TXTBIT_USEPASSWORD } else { 0 } | if read_only { TXTBIT_READONLY } else { 0 };
+        // SAFETY: services are alive on the creating UI thread.
+        let _ = unsafe { self.inner.services.OnTxPropertyBitsChange(bits, on) };
+        if let Some(max) = state.limit.get() {
+            self.send(EM_EXLIMITTEXT, WPARAM(0), LPARAM(max as isize));
+        }
+    }
+    pub(crate) fn is_el(&self) -> bool {
+        self.inner.state.el.get()
+    }
+    /// The selection, as RichEdit's UTF-16 character positions (anchor order lost).
+    pub(crate) fn selection(&self) -> std::ops::Range<u32> {
+        let mut range = CHARRANGE::default();
+        self.send(EM_EXGETSEL, WPARAM(0), LPARAM((&mut range as *mut CHARRANGE) as isize));
+        range.cpMin.max(0) as u32..range.cpMax.max(0) as u32
     }
     pub(crate) fn invalidated(&self) {
         self.inner.state.posted.set(false);
@@ -534,7 +570,7 @@ impl ITextHost_Impl for Host_Impl {
     fn TxGetMaxLength(&self, out: *mut u32) -> windows::core::Result<()> {
         // SAFETY: RichEdit supplies valid output pointers for the duration of this callback.
         unsafe {
-            *out = if self.state.multiline { 500_000 } else { 4096 };
+            *out = self.state.limit.get().unwrap_or(if self.state.multiline { 500_000 } else { 4096 });
         }
         Ok(())
     }
@@ -550,7 +586,7 @@ impl ITextHost_Impl for Host_Impl {
         Ok(())
     }
     fn TxGetPasswordChar(&self) -> windows::core::Result<i8> {
-        Ok(0)
+        Ok(if self.state.password.get() { b'*' as i8 } else { 0 })
     }
     fn TxGetAcceleratorPos(&self, out: *mut i32) -> windows::core::Result<()> {
         // SAFETY: RichEdit supplies valid output pointers for the duration of this callback.
@@ -585,6 +621,8 @@ impl ITextHost_Impl for Host_Impl {
                 & (TXTBIT_D2DDWRITE
                     | TXTBIT_WORDWRAP
                     | TXTBIT_ALLOWBEEP
+                    | if self.state.password.get() { TXTBIT_USEPASSWORD } else { 0 }
+                    | if self.state.read_only.get() { TXTBIT_READONLY } else { 0 }
                     | if self.state.multiline {
                         TXTBIT_MULTILINE
                     } else {

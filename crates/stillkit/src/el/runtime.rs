@@ -33,6 +33,8 @@ use accesskit::Role;
 use anyhow::Result;
 
 mod layer;
+#[cfg(windows)]
+mod native;
 mod text;
 
 use super::animate::{Animator, Mode, Pose, Target};
@@ -745,6 +747,10 @@ impl<S> Runtime<S> {
             _ => {}
         }
         match *event {
+            #[cfg(windows)]
+            Event::TextChanged => return self.rich_edit_changed(),
+            #[cfg(windows)]
+            Event::TextSubmit => return self.rich_edit_submit(),
             Event::Key(0x09) => return self.tab(self.mods.shift),
             Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
             Event::Wheel(p, delta) => {
@@ -1740,7 +1746,15 @@ fn paint_el<S>(
                 let hint = token::TERTIARY.resolve(theme);
                 let selection = if focused { token::SELECTION.resolve(theme) } else { Rgba::TRANSPARENT };
                 let scroll_y = bar.map_or(0.0, |b| b.offset);
-                super::field::paint(f, field, rect, spec.placeholder.as_deref(), caret, selection, hint, scroll_y);
+                #[cfg(windows)]
+                let native = field.native.as_ref();
+                #[cfg(not(windows))]
+                let native: Option<&()> = None;
+                match native {
+                    #[cfg(windows)]
+                    Some(native) => native::paint_rich_edit(f, field, native, spec.placeholder.as_deref(), caret, hint),
+                    _ => super::field::paint(f, field, rect, spec.placeholder.as_deref(), caret, selection, hint, scroll_y),
+                }
                 if let Some(bar) = bar.filter(|_| live) {
                     let extent = field.look.as_ref().map(|l| (l.rect.width(), field.shape.height() + l.rect.height() - l.content.height()));
                     scrollbar(f, rect, extent, bar);

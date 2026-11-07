@@ -16,7 +16,9 @@
 //! `{"right": [x, y]}` (the secondary button, for context menus), `{"click": "key"}` (the
 //! centre of a keyed element), `{"key": "Tab"}` (also `Shift+Tab`,
 //! `Enter`, `Space`, `Escape`, arrows `Left` `Right` `Up` `Down`, `PageUp`, `PageDown`, `Home`,
-//! `End`, `Menu`, or a virtual-key number), `{"wheel": [x, y, delta]}` (120 a notch, positive up).
+//! `End`, `Menu`, `Backspace`, `Delete`, `Insert`, a letter or digit, or a virtual-key number;
+//! `Ctrl+`, `Alt+` and `Shift+` hold modifiers: `Ctrl+A`), `{"type": "text"}` (characters,
+//! to the focused field), `{"wheel": [x, y, delta]}` (120 a notch, positive up).
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -26,7 +28,8 @@ use anyhow::{Context, Result, bail};
 
 use super::json::{Json, parse, quote};
 use super::{El, Runtime};
-use crate::platform::current::host::{reduced_motion, screen_size, shift_down, wait};
+use super::Modifiers;
+use crate::platform::current::host::{modifiers, reduced_motion, screen_size, wait, wake_at};
 use crate::{AnimationFrames, Chrome, Event, Kind, Rect, Rgba, Surface, Theme, next_event};
 
 /// An app to [`run`]: its window and its view.
@@ -54,6 +57,10 @@ pub enum Input {
     Wheel(f32, f32, i16),
     /// The secondary button pressed and released at a point (a context menu).
     Right(f32, f32),
+    /// A virtual-key code with modifiers held (`Ctrl+A`).
+    KeyWith(u16, Modifiers),
+    /// Characters typed, to the focused field ([`Runtime::type_text`]).
+    Type(String),
 }
 
 /// Timed input in design pixels, replayed on a runtime's virtual clock ([`Runtime::play`]).
@@ -80,6 +87,8 @@ impl Script {
                 Input::Right(x, y)
             } else if let Some(key) = step.get("click").and_then(Json::str) {
                 Input::Click(key.to_owned())
+            } else if let Some(text) = step.get("type").and_then(Json::str) {
+                Input::Type(text.to_owned())
             } else if let Some(Json::Arr(w)) = step.get("wheel")
                 && let [x, y, delta] = w.as_slice()
                 && let (Some(x), Some(y), Some(delta)) = (x.num(), y.num(), delta.num())
@@ -88,7 +97,7 @@ impl Script {
             } else if let Some(key) = step.get("key") {
                 key_of(key).with_context(|| format!("step {i}: unknown key {key:?}"))?
             } else {
-                bail!("step {i}: no input (move, down, up, right, click, key or wheel)");
+                bail!("step {i}: no input (move, down, up, right, click, key, type or wheel)");
             };
             out.push((Duration::from_secs_f64(at.max(0.0)), input));
         }
@@ -106,9 +115,18 @@ fn key_of(key: &Json) -> Option<Input> {
     if let Some(vk) = key.num() {
         return Some(Input::Key { vk: vk as u16, shift: false });
     }
-    let name = key.str()?;
-    let (shift, name) = name.strip_prefix("Shift+").map_or((false, name), |rest| (true, rest));
+    let mut name = key.str()?;
+    let mut mods = Modifiers::NONE;
+    loop {
+        let held = [("Shift+", Modifiers::SHIFT), ("Ctrl+", Modifiers::CTRL), ("Alt+", Modifiers::ALT)];
+        let Some((rest, m)) = held.iter().find_map(|(p, m)| name.strip_prefix(p).map(|r| (r, *m))) else { break };
+        (name, mods) = (rest, mods | m);
+    }
     let vk = match name {
+        "Backspace" => 0x08,
+        "Delete" => 0x2E,
+        "Insert" => 0x2D,
+        one if one.len() == 1 && one.chars().all(|c| c.is_ascii_alphanumeric()) => one.as_bytes()[0].to_ascii_uppercase().into(),
         "Tab" => 0x09,
         "Enter" => 0x0D,
         "Escape" => 0x1B,
@@ -124,7 +142,11 @@ fn key_of(key: &Json) -> Option<Input> {
         "Menu" => 0x5D,
         _ => return None,
     };
-    Some(Input::Key { vk, shift })
+    Some(if mods == Modifiers::NONE || mods == Modifiers::SHIFT {
+        Input::Key { vk, shift: mods.shift }
+    } else {
+        Input::KeyWith(vk, mods)
+    })
 }
 
 impl<S> Runtime<S> {
@@ -149,7 +171,9 @@ impl<S> Runtime<S> {
                     }
                 }
                 Input::Key { vk: 0x09, shift } => self.tab(*shift),
-                Input::Key { vk, .. } => self.key(*vk),
+                Input::Key { vk, shift } => self.key_with(*vk, if *shift { Modifiers::SHIFT } else { Modifiers::NONE }),
+                Input::KeyWith(vk, mods) => self.key_with(*vk, *mods),
+                Input::Type(text) => self.type_text(text),
                 Input::Wheel(x, y, delta) => self.wheel_at(x * s, y * s, *delta),
                 Input::Right(x, y) => self.right_click(x * s, y * s),
             }
@@ -325,8 +349,6 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     let started = Instant::now();
     // Display-rate frames, only while something animates: dropping them stops the producer.
     let mut frames: Option<(AnimationFrames, Instant)> = None;
-    // One wake for the runtime's next timer (a tooltip's delay, a toast), none once it has none.
-    let mut waker = Waker::default();
     // The client area's top-left on screen (pointer events correct it), for popup surfaces,
     // and the screen area around the window last handed to the runtime.
     #[cfg(windows)]
@@ -354,7 +376,14 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                 Event::Frame => {}
                 Event::Resized(w, h) => rt.resize((w, h)),
                 Event::DpiChanged(dpi) => rt.set_scale(dpi as f32 / 96.0),
-                Event::Key(0x09) => rt.tab(shift_down()),
+                Event::Key(vk) => rt.key_with(vk, modifiers()),
+                #[cfg(target_os = "linux")]
+                Event::Char(c) => rt.type_text(c.encode_utf8(&mut [0; 4])),
+                #[cfg(target_os = "linux")]
+                Event::Preedit => {
+                    let (text, cursor) = crate::platform::current::ime::preedit();
+                    rt.preedit(&text, cursor);
+                }
                 Event::SettingChanged => rt.set_reduced_motion(args.reduced || reduced_motion()),
                 // A slider's increment or a new value comes with its invoke.
                 Event::Invoke(hit) => match surface.take_accessibility_action(hit) {
@@ -371,65 +400,28 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
             around = Some((client, rt.size()));
             rt.set_screen(Some(screen_around(client, rt.size())));
         }
+        // The focused field's native text input (Windows' RichEdit, Linux's IME) follows focus.
+        rt.sync_text_input(&surface);
         if rt.frame(started.elapsed().saturating_sub(rt.now())) {
             chrome(&surface, &rt);
             rt.present(&mut surface, origin)?;
             #[cfg(windows)]
             popups.sync(&mut rt, client)?;
         }
-        // Where the host has no one-shot wake, frames stand in while a timer waits.
-        let waits = !Waker::ONE_SHOT && rt.wake_at().is_some();
-        if !rt.animating() && !waits {
+        if !rt.animating() {
             frames = None;
         } else if frames.as_ref().is_none_or(|(_, since)| since.elapsed() >= FRAMES) {
             frames = Some((surface.animation_frames(FRAMES), Instant::now()));
         }
-        waker.arm(&surface, rt.wake_at().map(|at| started + at));
+        // One wake for the runtime's next timer (a tooltip's delay, a toast, the caret's
+        // blink), in the platform's wait; none once it has none.
+        wake_at(rt.wake_at().map(|at| started + at));
         held = next_event();
     }
 }
 
 /// How long one frame producer runs before it is renewed (if anything still moves).
 const FRAMES: Duration = Duration::from_secs(10);
-
-/// Wakes the UI thread once at the runtime's next timer: a sleeping thread posts one message
-/// to the window, unless a newer deadline (or none) replaced it. Nothing stays armed once the
-/// runtime has no timer.
-#[derive(Default)]
-struct Waker {
-    armed: Option<Instant>,
-    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
-}
-
-impl Waker {
-    /// Whether this platform wakes the message wait from another thread (else frames do).
-    const ONE_SHOT: bool = cfg!(windows);
-
-    fn arm(&mut self, surface: &Surface, at: Option<Instant>) {
-        use std::sync::atomic::Ordering;
-        if at == self.armed {
-            return;
-        }
-        self.armed = at;
-        let mine = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
-        #[cfg(windows)]
-        if let Some(at) = at {
-            let generation = self.generation.clone();
-            let hwnd = surface.hwnd().0 as isize;
-            let _ = std::thread::Builder::new().name("ui-wake".into()).spawn(move || {
-                std::thread::sleep(at.saturating_duration_since(Instant::now()));
-                if generation.load(Ordering::Relaxed) == mine {
-                    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-                    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_NULL};
-                    // SAFETY: posting is safe from any thread; a destroyed window refuses it.
-                    let _ = unsafe { PostMessageW(Some(HWND(hwnd as _)), WM_NULL, WPARAM(0), LPARAM(0)) };
-                }
-            });
-        }
-        #[cfg(not(windows))]
-        let _ = (surface, mine);
-    }
-}
 
 /// The work area of the monitor under the middle of the window, in the window's pixels
 /// (where overlays may escape to).

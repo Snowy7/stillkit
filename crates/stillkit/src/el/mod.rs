@@ -38,7 +38,7 @@
 
 mod animate;
 mod clipboard;
-mod edit;
+pub(crate) mod edit;
 mod element;
 mod field;
 mod host;

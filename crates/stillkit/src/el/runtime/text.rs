@@ -26,7 +26,7 @@ pub(super) struct Selecting {
 
 impl<S> Runtime<S> {
     /// The field with focus, by identity, with its options.
-    fn focused_field(&self) -> Option<(usize, u64, &FieldSpec)> {
+    pub(super) fn focused_field(&self) -> Option<(usize, u64, &FieldSpec)> {
         let i = self.ix.focus.and_then(|hit| self.laid.iter().position(|l| l.hit == hit))?;
         let el = flatten(&self.root).get(i).copied()?;
         let spec = el.field().filter(|_| !el.sem.disabled)?;
@@ -133,7 +133,7 @@ impl<S> Runtime<S> {
     }
 
     /// Runs `cmd` on the field `id`; whether it was used.
-    fn field_cmd(&mut self, id: u64, cmd: Cmd, read_only: bool, secure: bool) -> bool {
+    pub(super) fn field_cmd(&mut self, id: u64, cmd: Cmd, read_only: bool, secure: bool) -> bool {
         let Some(f) = self.fields.get_mut(&id) else { return false };
         let multiline = f.look.as_ref().is_some_and(|l| l.multiline);
         let changed = match cmd {
@@ -437,5 +437,24 @@ pub(super) fn tx_with(mods: Modifiers) -> Tx {
     Tx {
         mods,
         ..Tx::default()
+    }
+}
+
+impl<S> Runtime<S> {
+    /// The focused field's native text input follows focus; the window host calls it before
+    /// each frame. On Windows a RichEdit types into the focused field (the system IME with its
+    /// composition inline and candidates at the caret, the system clipboard); on Linux the
+    /// compositor's input method (text-input-v3) is told the field has focus and where its
+    /// caret is. Headless runtimes never call it.
+    pub fn sync_text_input(&mut self, surface: &crate::Surface) {
+        #[cfg(windows)]
+        self.sync_rich_edit(surface);
+        #[cfg(target_os = "linux")]
+        {
+            let caret = self.caret_rect().filter(|_| self.typing.is_some() && self.active);
+            crate::platform::current::ime::follow(surface.id(), caret);
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = surface;
     }
 }

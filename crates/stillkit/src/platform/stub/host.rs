@@ -6,6 +6,12 @@ pub fn screen_size() -> (i32, i32) {
 pub fn shift_down() -> bool {
     unimplemented!("keyboard state")
 }
+pub fn modifiers() -> crate::el::Modifiers {
+    unimplemented!("keyboard state")
+}
+pub fn wake_at(_: Option<std::time::Instant>) {
+    unimplemented!("native event wait")
+}
 pub fn wait() {
     unimplemented!("native event wait")
 }

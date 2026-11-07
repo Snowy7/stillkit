@@ -1598,6 +1598,7 @@ dependencies = [
  "stillkit-glass",
  "taffy",
  "toml",
+ "unicode-segmentation",
  "vello_cpu",
  "vello_gpu",
  "wayland-client",
