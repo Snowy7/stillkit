@@ -100,6 +100,13 @@ pub fn set_style(material: Option<GlassMaterial>) {
     STYLE.with_borrow_mut(|s| *s = material);
 }
 
+/// Whether the active style wants glass ([`set_style`] holds a material), whether or not any
+/// can show now. [`Render::Auto`](crate::platform::Render::Auto) surfaces go GPU on it when no
+/// external backdrop is installed.
+pub fn wanted() -> bool {
+    STYLE.with_borrow(|s| s.is_some())
+}
+
 /// The popups' material, if glass can show now.
 pub fn style() -> Option<GlassMaterial> {
     STYLE.with_borrow(|s| *s).filter(|_| available())

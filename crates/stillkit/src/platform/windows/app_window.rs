@@ -86,7 +86,7 @@ pub(crate) struct AppShared {
     pub(crate) hits: RefCell<Vec<Rect>>,
     /// The pixels on screen, kept to repaint what Windows uncovers.
     canvas: RefCell<Option<Canvas>>,
-    size: Cell<(u32, u32)>,
+    pub(crate) size: Cell<(u32, u32)>,
     /// Fills what the canvas doesn't cover yet (a frame mid-resize).
     background: Cell<Rgba>,
     cursor: Cell<Cursor>,
@@ -142,10 +142,12 @@ fn run_modal_hook() {
     }
 }
 
-/// Creates the (hidden) window of an app surface.
+/// Creates the (hidden) window of an app surface, with extended style `ex` (none on the CPU;
+/// no redirection bitmap for a GPU surface, which shows DirectComposition content only).
 pub(crate) fn create(
     name: &str,
     wndproc: windows::Win32::UI::WindowsAndMessaging::WNDPROC,
+    ex: windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE,
 ) -> Result<HWND> {
     // SAFETY: plain Win32 registration with a 'static window procedure, then a window of it.
     unsafe {
@@ -162,7 +164,7 @@ pub(crate) fn create(
             return Err(windows::core::Error::from_thread()).context("RegisterClassExW");
         }
         CreateWindowExW(
-            Default::default(),
+            ex,
             crate::identity::app_class(),
             &HSTRING::from(name),
             WS_OVERLAPPEDWINDOW,

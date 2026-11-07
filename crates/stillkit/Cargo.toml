@@ -21,11 +21,16 @@ toml = { version = "0.8", optional = true }
 [features]
 serde = ["dep:serde", "dep:serde_json", "dep:toml"]
 golden = ["dep:png"]
+# GPU mode (`platform::Render::Gpu`, docs/ui.md "Render modes"): hardware Direct2D on
+# DirectComposition and in-process Liquid Glass (wgpu DX12). Without it no GPU code is compiled.
+gpu = ["dep:wgpu", "dep:stillkit-glass"]
 
 [target.'cfg(windows)'.dependencies]
 accesskit_windows.workspace = true
 windows-numerics.workspace = true
 windows-core.workspace = true
+stillkit-glass = { path = "../stillkit-glass", optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12"], optional = true }
 
 [target.'cfg(windows)'.dependencies.windows]
 workspace = true
@@ -63,6 +68,16 @@ features = [
 
 [dev-dependencies]
 png.workspace = true
+
+# `glass_measure` reads per-process GPU memory counters.
+[target.'cfg(windows)'.dev-dependencies.windows]
+workspace = true
+features = ["Win32_System_Performance"]
+
+# Render modes measured (docs/ui.md, "Render modes").
+[[example]]
+name = "glass_measure"
+required-features = ["gpu"]
 
 # The N0.1 spike: a 3840x36 bar surface, measured live (docs/ui.md).
 [[example]]

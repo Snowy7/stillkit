@@ -3,6 +3,10 @@ pub mod a11y;
 pub mod app_window;
 pub mod compose;
 pub mod glass;
+#[cfg(feature = "gpu")]
+pub mod gpu;
+#[cfg(feature = "gpu")]
+pub mod gpu_glass;
 pub mod host;
 pub mod identity;
 pub mod layered_app;
