@@ -47,6 +47,7 @@ pub struct Spinner<S> {
     phase: u64,
     visible: bool,
     tick: Option<Press<S>>,
+    reduced: bool,
 }
 impl<S: 'static> Spinner<S> {
     pub fn new(label: impl Into<Arc<str>>, phase: u64) -> Self {
@@ -55,7 +56,13 @@ impl<S: 'static> Spinner<S> {
             phase,
             visible: true,
             tick: None,
+            reduced: stillkit::el::reduced_motion(),
         }
+    }
+    /// Match a host/runtime reduced-motion override as well as the system default.
+    pub fn reduced_motion(mut self, reduced: bool) -> Self {
+        self.reduced = reduced;
+        self
     }
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
@@ -69,9 +76,10 @@ impl<S: 'static> Spinner<S> {
         if !self.visible {
             return el();
         }
-        let reduced = stillkit::el::reduced_motion();
+        let reduced = self.reduced;
         let phase = if reduced { 0 } else { self.phase % 4 };
         let mut n = arc(0.27)
+            .motion(token::MOTION_INTERACTIVE)
             .no_track()
             .size(24.)
             .stroke(token::RING)

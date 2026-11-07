@@ -96,22 +96,37 @@ impl QuotaBar {
     }
     pub fn build<S: 'static>(self) -> El<S> {
         let value = format!("{}% left", (self.left * 100.).round());
-        let label = self.label.clone();
         let left = self.left;
+        let pace = self.pace;
+        let mut content = row().w_full().pad_x(8.).gap(6.).align(Align::Center).h(32.);
+        if let Some(badge) = self.badge {
+            content = content.child(Avatar::new("Account", badge).size(20.).build());
+        }
+        content = content.child(
+            text(value.clone())
+                .color(LABEL)
+                .font(TextRole::Caption)
+                .grow(1.),
+        );
+        if let Some(reset) = self.reset {
+            content = content.child(Badge::new(reset).build());
+        }
         paint(move |f, rect, _| {
             let bar = stillkit::chart::LimitBar {
                 left,
-                pace: self.pace,
+                pace,
                 fill: f.theme.color.accent_wash,
-                badge: self.badge.as_deref(),
-                label: Some(&value),
-                reset: self.reset.as_deref(),
+                badge: None,
+                label: None,
+                reset: None,
             };
             stillkit::chart::limit_bar(f, rect, &bar);
         })
         .h(32.)
         .role(Role::Meter)
-        .label(label)
+        .label(self.label)
         .range(0., 1., 0.01, left.into())
+        .value(value)
+        .child(content)
     }
 }

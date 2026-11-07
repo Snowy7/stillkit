@@ -426,6 +426,7 @@ impl<S: 'static> Slider<S> {
             .radius(token::RADIUS_CONTROL)
             .role(Role::Slider)
             .label(format!("{} {}%", self.label, (self.value * 100.).round()))
+            .range(0., 1., f64::from(self.step), f64::from(self.value))
             .child(track(
                 self.value,
                 if self.glyph.is_some() { 28. } else { 4. },
@@ -438,13 +439,11 @@ impl<S: 'static> Slider<S> {
             let change = f.clone();
             let value = self.value;
             let current = std::cell::Cell::new(f64::from(value));
-            n = n
-                .range(0., 1., f64::from(step), f64::from(value))
-                .on_step(move |s, delta| {
-                    let next = (current.get() + delta).clamp(0., 1.);
-                    current.set(next);
-                    change(s, next as f32);
-                });
+            n = n.on_step(move |s, delta| {
+                let next = (current.get() + delta).clamp(0., 1.);
+                current.set(next);
+                change(s, next as f32);
+            });
             n = n.on_drag(move |s, x, _| f(s, ((x / step).round() * step).clamp(0., 1.)));
         }
         if let Some(k) = self.key {
@@ -637,6 +636,7 @@ impl Progress {
         track(self.value, 4., None, &None, false)
             .role(Role::ProgressIndicator)
             .label(format!("{} {}%", self.label, (self.value * 100.).round()))
+            .range(0., 1., 0.01, f64::from(self.value))
     }
 }
 /// Small status label.

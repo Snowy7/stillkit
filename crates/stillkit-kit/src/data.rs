@@ -160,14 +160,7 @@ impl<S: 'static> Table<S> {
                 });
             for i in 0..count {
                 let value = cells.get(i).cloned().unwrap_or_else(|| "".into());
-                line = line.child(
-                    text(value.clone())
-                        .w(0.)
-                        .grow(1.)
-                        .color(LABEL)
-                        .role(Role::Cell)
-                        .label(value),
-                );
+                line = line.child(text(value.clone()).w(0.).grow(1.).color(LABEL));
             }
             if let Some(f) = self.select.clone() {
                 let id = key.clone();
