@@ -332,7 +332,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     let mut rt = Runtime::new(app.state, app.view, app.theme, size, s)?;
     rt.set_background(opaque);
     // Windows' fields type through RichEdit, which uses the system clipboard itself.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     rt.set_clipboard(crate::platform::current::clipboard::System);
     rt.set_reduced_motion(args.reduced || reduced_motion());
     rt.frame(Duration::ZERO);
@@ -356,7 +356,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     let mut frames: Option<(AnimationFrames, Instant)> = None;
     // The client area's top-left on screen (pointer events correct it), for popup surfaces,
     // and the screen area around the window last handed to the runtime.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     let (mut client, mut popups, mut around) = (origin, Popups::default(), None);
     // Events our own calls queued (showing, presenting) wait here instead of in the queue.
     let mut held = next_event();
@@ -366,13 +366,13 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
         }
         for (id, event) in held.take().into_iter().chain(std::iter::from_fn(next_event)) {
             if id != surface.id() {
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "macos"))]
                 if let Some(event) = popups.input(id, event) {
                     rt.handle(&event);
                 }
                 continue;
             }
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             if let Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) = event {
                 client = (p.screen.0 - p.at.x as i32, p.screen.1 - p.at.y as i32);
             }
@@ -382,9 +382,9 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                 Event::Resized(w, h) => rt.resize((w, h)),
                 Event::DpiChanged(dpi) => rt.set_scale(dpi as f32 / 96.0),
                 Event::Key(vk) => rt.key_with(vk, modifiers()),
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 Event::Char(c) => rt.type_text(c.encode_utf8(&mut [0; 4])),
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 Event::Preedit => {
                     let (text, cursor) = crate::platform::current::ime::preedit();
                     rt.preedit(&text, cursor);
@@ -400,7 +400,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                 event => rt.handle(&event),
             }
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         if around != Some((client, rt.size())) {
             around = Some((client, rt.size()));
             rt.set_screen(Some(screen_around(client, rt.size())));
@@ -410,7 +410,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
         if rt.frame(started.elapsed().saturating_sub(rt.now())) {
             chrome(&surface, &rt);
             rt.present(&mut surface, origin)?;
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             popups.sync(&mut rt, client)?;
         }
         // ...and after it, so a value the view refused or changed reaches RichEdit at once.
@@ -432,7 +432,7 @@ const FRAMES: Duration = Duration::from_secs(10);
 
 /// The work area of the monitor under the middle of the window, in the window's pixels
 /// (where overlays may escape to).
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn screen_around(client: (i32, i32), size: (u32, u32)) -> Rect {
     let (cx, cy) = (client.0 + size.0 as i32 / 2, client.1 + size.1 as i32 / 2);
     let (l, t, r, b) = crate::screen_at(cx, cy).work;
@@ -442,14 +442,14 @@ fn screen_around(client: (i32, i32), size: (u32, u32)) -> Rect {
 /// Popup surfaces showing the overlays that escaped the window ([`Runtime::popups`]): made
 /// when one opens (or taken from a pool), shown without activation so keys stay with the
 /// window, and hidden again (their bitmaps released) when it closes.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 #[derive(Default)]
 struct Popups {
     open: Vec<(u64, Surface, Rect)>,
     pool: Vec<Surface>,
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 impl Popups {
     /// A popup surface's event as the runtime takes it: pointers in the window's pixels.
     /// The pointer leaving a popup is the window's business (it gets the pointer next).
