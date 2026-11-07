@@ -620,6 +620,24 @@ impl Surface {
     }
     pub fn set_glass(&self, _: Option<crate::Glass>) {}
     pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {}
+    /// Linux draws on the CPU only for now (GPU mode is `vello_hybrid`, later), so the mode is
+    /// accepted and ignored.
+    pub fn with_render(
+        kind: Kind,
+        name: &str,
+        role: accesskit::Role,
+        _: crate::platform::Render,
+    ) -> Result<Self> {
+        Self::new(kind, name, role)
+    }
+    pub fn render(&self) -> crate::platform::Render {
+        crate::platform::Render::Cpu
+    }
+    /// No glass provider on Linux yet: views draw their own fill.
+    pub fn glass_available(&self) -> bool {
+        false
+    }
+    pub fn set_glass_group(&self, _: &[crate::Glass], _spacing: f32) {}
     /// Remaps a hidden surface with its retained CPU bitmap.
     pub fn show(&self) {
         let result = runtime(|r| {

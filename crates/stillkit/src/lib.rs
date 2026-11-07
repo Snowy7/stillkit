@@ -1,5 +1,7 @@
-//! stillkit: a native UI library (docs/ui.md). Per-pixel-alpha layered windows drawn with
-//! software Direct2D and DirectWrite on a WIC bitmap. No hardware GPU device, ever (Rule 1).
+//! stillkit: a native UI library (docs/ui.md). Surfaces are drawn on the CPU by default
+//! (software Direct2D and DirectWrite on a WIC bitmap, presented as layered windows), which loads
+//! no GPU driver. GPU mode (`platform::Render::Gpu`, the `gpu` feature) draws the same picture
+//! with hardware Direct2D and can draw Liquid Glass in-process; it is chosen per app or surface.
 //!
 //! A frame is `view(&model, &tokens) -> DisplayList`; [`Surface::present`] compares it with the
 //! list on screen and redraws only the bounds that changed (nothing at all when it is the same).

@@ -6,9 +6,15 @@ shell, Studio and Files are built on it). The plan, with phases and decisions, i
 
 ## Product rules (never break these)
 
-1. **No GPU device in the process, on any OS.** Draw on the CPU (today: software Direct2D on a WIC
-   bitmap). Vendor drivers (`nv*umx`, `nvgpucomp64`, `amdxc64`, `atidx*`; Metal devices; libEGL,
-   libGL, libvulkan) must never load. `tests/no_gpu_driver.rs` checks it on Windows.
+1. **CPU mode never loads a GPU driver, on any OS.** CPU is the default (software Direct2D on a
+   WIC bitmap; vello_cpu on Linux). Vendor drivers (`nv*umx`, `nvgpucomp64`, `amdxc64`, `amdxx64`,
+   `atidx*`; Metal devices; libEGL, libGL, libvulkan) load only when an app or surface asks for
+   GPU mode (`Render::Gpu`, the `gpu` feature), and GPU code isn't even compiled without that
+   feature. `tests/no_gpu_driver.rs` checks CPU mode, `tests/gpu_driver.rs` GPU mode. A GPU
+   device costs 30–250 MB (docs/ui.md, "Render modes"), so take it only for glass or heavy
+   animation, and keep small surfaces on the CPU beside it.
+5. **Every mode works, and mypaper never pays for it.** CPU alone, GPU alone, and both in one
+   process (per surface). mypaper runs CPU mode; its numbers must not get worse.
 2. **Nothing changes, nothing is drawn.** A frame is compared with the one on screen and only the
    changed bounds are redrawn; an identical frame costs one comparison.
 3. **Zero idle work.** No timers or tickers while nothing moves; the frame ticker runs only while

@@ -1,7 +1,7 @@
 # stillkit
 
 A native UI library that stays still: surfaces are drawn on the CPU, redraw only the rectangle
-that changed, and do no work at all while nothing moves. No GPU device, ever.
+that changed, and do no work at all while nothing moves. CPU by default, with no GPU driver loaded; GPU mode and in-process Liquid Glass when an app asks for them.
 
 Status: **pre-release, Windows only.** It was extracted from
 [mypaper](https://github.com/Snowy7/desktop-wallpaper) (its shell and Studio are built on it), with
