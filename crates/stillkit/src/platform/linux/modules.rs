@@ -21,6 +21,8 @@ pub fn is_gpu_driver(module: &str) -> bool {
         "libvulkan",
         "libgbm",
         "radeonsi",
+        "libgallium",
+        "_dri.so",
         "libdrm_amdgpu",
         "nvidia",
     ]

@@ -1,0 +1,17 @@
+Validation on m6u, 2026-11-07
+
+test-cpu: PASS
+test-gpu: PASS
+clippy: PASS
+windows: PASS
+Live ignored native integration test explicitly run: PASS (mixed, resize, remap, opacity, client backdrop).
+Clippy: eight pre-existing a11y dead-code warnings; no new warnings.
+GPU parity: max 56 channel levels; 0.094% of channels >4 (limits 128 / 0.5%).
+Partial GPU update equals complete GPU render byte-for-byte.
+CPU feature-off and feature-on driver-boundary tests pass.
+
+Exact gates:
+cargo test --workspace --features stillkit/golden,stillkit/serde
+cargo test --workspace --features stillkit/golden,stillkit/serde,stillkit/gpu
+cargo clippy --workspace --all-targets --features stillkit/golden,stillkit/serde,stillkit/gpu
+cargo check --workspace --all-targets --features stillkit/golden,stillkit/serde,stillkit/gpu --target x86_64-pc-windows-msvc

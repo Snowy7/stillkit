@@ -1,6 +1,10 @@
-//! CPU rendering and native Wayland surfaces.
+//! CPU rendering and native Wayland surfaces, plus opt-in Vulkan rendering and glass.
 pub mod app_window;
 pub mod glass;
+#[cfg(feature = "gpu")]
+pub mod gpu;
+#[cfg(feature = "gpu")]
+mod gpu_glass;
 pub mod host;
 mod keyboard;
 pub mod render;

@@ -23,7 +23,7 @@ serde = ["dep:serde", "dep:serde_json", "dep:toml"]
 golden = ["dep:png"]
 # GPU mode (`platform::Render::Gpu`, docs/ui.md "Render modes"): hardware Direct2D on
 # DirectComposition and in-process Liquid Glass (wgpu DX12). Without it no GPU code is compiled.
-gpu = ["dep:wgpu", "dep:stillkit-glass"]
+gpu = ["dep:wgpu", "dep:stillkit-glass", "dep:vello_hybrid", "dep:pollster", "dep:raw-window-handle", "wayland-client/system", "wayland-client/dlopen"]
 
 [target.'cfg(windows)'.dependencies]
 accesskit_windows.workspace = true
@@ -88,6 +88,12 @@ path = "examples/bar_spike.rs"
 workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Vello Hybrid was renamed vello_gpu in 0.3 (same common scene API and wgpu 30).
+vello_hybrid = { package = "vello_gpu", version = "0.3", default-features = false, features = ["std", "wgpu", "text"], optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "vulkan"], optional = true }
+stillkit-glass = { path = "../stillkit-glass", optional = true }
+pollster = { version = "0.4", optional = true }
+raw-window-handle = { version = "0.6", optional = true }
 vello_cpu = { version = "0.3", default-features = false, features = ["std", "text", "u8_pipeline"] }
 cosmic-text = { version = "0.19", features = ["peniko"] }
 wayland-client = "0.31"

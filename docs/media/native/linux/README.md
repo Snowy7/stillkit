@@ -1,7 +1,7 @@
 # Linux native gallery and evidence
 
 Generated on m6u, Ubuntu 26.04 / GNOME 50.1 Wayland / Ryzen 5 7640HS,
-2026-11-07. The twelve `kit-*.png` pages use the same gallery code as Windows.
+2026-11-07. The fourteen `kit-*.png` pages use the same gallery code as Windows.
 Opened every page in the contact sheet, and compared Liquid Dark directly with
 `../kit-liquid-dark.png`. Titles, buttons, clipping, rings, translucent surfaces,
 icons and menus are legible, without missing legacy menu glyphs.
@@ -12,9 +12,9 @@ Differences from Windows:
   baselines, advance widths and wrapping differ slightly from DirectWrite.
   Weight 600 uses normalized font coordinates; a focused test verifies its ink
   coverage lies between 400 and 700. Tracking is converted from pixels to em.
-- The extracted repo has no `themes/rain-city/preview.jpg`. On Linux the gallery
-  uses a deterministic blue gradient fallback, so glass samples have no wallpaper
-  texture. Other platforms retain their existing wallpaper behavior.
+- The generated dusk backdrop now matches the gallery on every platform. The mix
+  page retains its own diagnostic coloured backdrop. Gallery glass is a CPU stand-in;
+  `gpu/glass.png` demonstrates actual in-process Vulkan optics.
 - Windows-only private-use icon fonts are replaced by bundled Lucide paths.
   Thus the icon sheet's “Segoe” rows show the vector fallback, not a font specimen.
 - Text-quality lab rows intentionally look identical: DirectWrite's gamma,
@@ -128,3 +128,31 @@ ignored. Clippy reports only the eight existing accessibility dead-code warnings
 The only source changes outside the Linux backend are `linux_hello`'s explicit
 wait for the new nonblocking queue contract, and gallery's Linux reference path.
 No `src/el/` or core runtime changes were needed.
+
+## In-process Vulkan mode
+
+The `gpu/` directory contains the four final release measurements (`measurements.json`,
+individual JSON files, protocol logs and client-frame PNGs). The full table and contract
+are in `docs/ui.md`, “Linux GPU mode”. Opened and inspected CPU, GPU and merged glass
+frames, plus the regenerated gallery contact sheet and Linux motion strips.
+
+Reproduce from the root (run measurement scripts sequentially):
+
+```sh
+cargo build --release -p stillkit --features golden --example linux_gpu_measure
+cp target/release/examples/linux_gpu_measure /tmp/stillkit-cpu-measure
+cargo build --release -p stillkit --features gpu,golden --example linux_gpu_measure
+python3 docs/media/native/linux/measure_gpu.py --cpu-binary /tmp/stillkit-cpu-measure
+```
+
+The drag is scripted application state at 60 Hz, not pointer injection. Idle blocks on
+Wayland and stdin; it has no polling timeout. The GPU feature adds a libwayland system
+backend (dlopen) to supply native Vulkan handles; the feature-off CPU path keeps its
+original pure-Rust Wayland client. A preliminary feature-enabled CPU-only trial used
+6.83 MiB private versus 5.60 MiB in the final feature-off CPU trial; no GPU libraries
+loaded in either. Normal CPU applications retain their original dependency boundary.
+
+The explicit live integration test is ignored by default because it needs a Wayland
+session with strict focus policy: `cargo test -p stillkit --features gpu --test
+linux_gpu_native -- --ignored`. It exercises mixed surfaces, retained partial frames,
+resize, hide/show, opacity and a client-owned glass backdrop.

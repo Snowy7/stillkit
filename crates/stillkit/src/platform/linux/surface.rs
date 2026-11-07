@@ -116,6 +116,8 @@ struct Native {
     shell: Shell,
     configured: bool,
     buffers: Option<Buffers>,
+    #[cfg(feature = "gpu")]
+    gpu: Option<super::gpu::Window>,
     scale: u32,
     animation: Option<(Rc<Cell<bool>>, Instant)>,
     callback: bool,
@@ -125,6 +127,8 @@ struct Native {
 }
 impl Drop for Native {
     fn drop(&mut self) {
+        #[cfg(feature = "gpu")]
+        drop(self.gpu.take());
         match &self.shell {
             Shell::Top(s, t) => {
                 t.destroy();
@@ -204,10 +208,15 @@ impl Drop for AnimationFrames {
     }
 }
 fn frame(n: &mut Native, q: &QueueHandle<State>, id: SurfaceId) {
+    #[cfg(feature = "gpu")]
+    let glass = n.gpu.as_ref().is_some_and(|g| g.animating());
+    #[cfg(not(feature = "gpu"))]
+    let glass = false;
     if !n.callback
-        && n.animation
-            .as_ref()
-            .is_some_and(|(a, end)| a.get() && Instant::now() < *end)
+        && (glass
+            || n.animation
+                .as_ref()
+                .is_some_and(|(a, end)| a.get() && Instant::now() < *end))
     {
         n.surface.frame(q, id);
         n.callback = true;
@@ -239,6 +248,11 @@ pub fn next_event() -> Option<(SurfaceId, Event)> {
         None
     })
 }
+/// Wayland's borrowed connection descriptor, for integrating stdin or other descriptors into
+/// an application's poll loop. Dispatch with `next_event` when it becomes readable.
+pub fn connection_fd() -> Result<std::os::fd::RawFd> {
+    runtime(|r| Ok(r.conn.as_fd().as_raw_fd()))
+}
 /// Sleeps on the Wayland display fd until an application event is queued. No idle timer.
 pub(super) fn wait() {
     if let Err(e) = runtime(|r| {
@@ -269,13 +283,17 @@ pub fn queue_event(id: usize, event: Event) {
         Ok(())
     });
 }
-/// A Wayland surface with retained display list and CPU damage bitmap.
+/// A Wayland surface with a retained display list and a CPU bitmap or Vulkan texture.
 pub struct Surface {
     id: SurfaceId,
     alpha: u8,
     shown: DisplayList,
     canvas: Option<super::render::Canvas>,
     origin: (i32, i32),
+    #[cfg(feature = "gpu")]
+    glass: RefCell<super::gpu::GlassState>,
+    mode: crate::platform::Render,
+    size: (u32, u32),
 }
 impl Surface {
     pub fn new(kind: Kind, name: &str, role: accesskit::Role) -> Result<Self> {
@@ -370,6 +388,8 @@ impl Surface {
                     shell,
                     configured: false,
                     buffers: None,
+                    #[cfg(feature = "gpu")]
+                    gpu: None,
                     scale: r.state.scale,
                     animation: None,
                     callback: false,
@@ -387,6 +407,11 @@ impl Surface {
                 shown: DisplayList::default(),
                 canvas: None,
                 origin: (0, 0),
+                #[cfg(feature = "gpu")]
+                glass: RefCell::default(),
+                mode: crate::platform::render()
+                    .resolve(crate::glass::wanted(), super::glass::backdrop().is_some()),
+                size: (0, 0),
             })
         })
     }
@@ -400,20 +425,84 @@ impl Surface {
         size: (u32, u32),
         list: DisplayList,
     ) -> Result<bool> {
-        let resized = self.canvas.as_ref().is_none_or(|c| c.size() != size);
-        let damage = if resized {
+        let resized = self.size != size;
+        #[cfg(feature = "gpu")]
+        let glass_changed = self.mode == crate::platform::Render::Gpu
+            && runtime(|r| {
+                Ok(r.state.windows[&self.id]
+                    .gpu
+                    .as_ref()
+                    .is_none_or(|g| g.glass_revision() != self.glass.borrow().revision))
+            })?;
+        #[cfg(not(feature = "gpu"))]
+        let glass_changed = false;
+        let damage = if resized || glass_changed {
             Some(crate::Rect::new(0., 0., size.0 as f32, size.1 as f32))
         } else {
             list.damage(&self.shown)
         };
         self.origin = origin;
         if let Some(area) = damage.and_then(|d| d.pixels(size.0, size.1)) {
+            #[cfg(feature = "gpu")]
+            if self.mode == crate::platform::Render::Gpu {
+                runtime(|r| {
+                    let n = r
+                        .state
+                        .windows
+                        .get_mut(&self.id)
+                        .context("surface released")?;
+                    if n.gpu.is_none() {
+                        let display = std::ptr::NonNull::new(r.conn.backend().display_ptr().cast())
+                            .context("Wayland display pointer")?;
+                        let surface = std::ptr::NonNull::new(n.surface.id().as_ptr().cast())
+                            .context("Wayland surface pointer")?;
+                        // SAFETY: Native owns Window, destroys it before wl_surface, and the
+                        // thread's runtime connection outlives every Native.
+                        let mut gpu = unsafe { super::gpu::Window::new(display, surface, size) }?;
+                        gpu.opacity(self.alpha);
+                        n.gpu = Some(gpu);
+                    }
+                    n.size = size;
+                    n.surface.set_buffer_scale(n.scale as i32);
+                    if let Shell::Top(xdg, _) = &n.shell {
+                        xdg.set_window_geometry(
+                            0,
+                            0,
+                            (size.0 / n.scale).max(1) as i32,
+                            (size.1 / n.scale).max(1) as i32,
+                        );
+                    }
+                    n.surface.damage_buffer(
+                        area.x as i32,
+                        area.y as i32,
+                        area.width as i32,
+                        area.height as i32,
+                    );
+                    frame(n, &r.queue.handle(), self.id);
+                    n.gpu.as_mut().unwrap().draw(
+                        ui,
+                        &list,
+                        size,
+                        area,
+                        &self.glass.borrow(),
+                        n.scale as f32,
+                    )?;
+                    frame(n, &r.queue.handle(), self.id);
+                    n.surface.commit();
+                    r.conn.flush()?;
+                    Ok(())
+                })?;
+                self.size = size;
+                self.shown = list;
+                return Ok(true);
+            }
             if resized {
                 self.canvas = Some(super::render::Canvas::new(ui, size.0, size.1)?);
             }
             let c = self.canvas.as_ref().unwrap();
             c.draw(&mut ui.text, &list, area)?;
             self.send(&c.image(), area)?;
+            self.size = size;
             self.shown = list;
             Ok(true)
         } else {
@@ -523,6 +612,21 @@ impl Surface {
             Ok(())
         })
     }
+    /// Reads the retained client frame (including in-process glass) for screenshots. GPU
+    /// readback waits for submitted work; it is never part of normal presentation.
+    pub fn image(&self) -> Result<crate::Image> {
+        #[cfg(feature = "gpu")]
+        if self.mode == crate::platform::Render::Gpu {
+            return runtime(|r| {
+                r.state.windows[&self.id]
+                    .gpu
+                    .as_ref()
+                    .context("no GPU frame")?
+                    .image()
+            });
+        }
+        Ok(self.canvas.as_ref().context("no CPU frame")?.image())
+    }
     pub fn shown(&self) -> &DisplayList {
         &self.shown
     }
@@ -602,6 +706,21 @@ impl Surface {
     pub fn set_alpha(&mut self, alpha: u8) -> Result<()> {
         if self.alpha != alpha {
             self.alpha = alpha;
+            #[cfg(feature = "gpu")]
+            if self.mode == crate::platform::Render::Gpu {
+                return runtime(|r| {
+                    if let Some(g) = r
+                        .state
+                        .windows
+                        .get_mut(&self.id)
+                        .and_then(|n| n.gpu.as_mut())
+                    {
+                        g.set_alpha(alpha)?;
+                    }
+                    r.conn.flush()?;
+                    Ok(())
+                });
+            }
             if let Some(c) = &self.canvas {
                 let image = c.image();
                 self.send(&image, crate::PixelRect::full(image.width, image.height))?;
@@ -618,26 +737,68 @@ impl Surface {
     pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
         None
     }
-    pub fn set_glass(&self, _: Option<crate::Glass>) {}
-    pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {}
-    /// Linux draws on the CPU only for now (GPU mode is `vello_hybrid`, later), so the mode is
-    /// accepted and ignored.
+    pub fn set_glass(&self, glass: Option<crate::Glass>) {
+        self.set_glass_group(glass.as_slice(), 16.0);
+    }
+    pub fn set_glass_style(&self, style: crate::glass::GlassStyle) {
+        #[cfg(feature = "gpu")]
+        {
+            let mut g = self.glass.borrow_mut();
+            if g.style != style {
+                g.style = style;
+                g.revision += 1;
+            }
+        }
+        #[cfg(not(feature = "gpu"))]
+        let _ = style;
+    }
+    /// Supplies client-owned premultiplied BGRA pixels to refract. No desktop capture is possible
+    /// on Wayland; without this bitmap GPU glass uses a generated test pattern.
+    #[cfg(feature = "gpu")]
+    pub fn set_glass_backdrop(&self, image: crate::Image) -> Result<()> {
+        anyhow::ensure!(
+            image.width > 0
+                && image.height > 0
+                && image.pixels.len() == image.width as usize * image.height as usize * 4,
+            "invalid glass backdrop"
+        );
+        let mut g = self.glass.borrow_mut();
+        g.backdrop = Some(image);
+        g.backdrop_revision += 1;
+        g.revision += 1;
+        Ok(())
+    }
+    /// Chooses CPU or Vulkan independently of other surfaces on this thread.
     pub fn with_render(
         kind: Kind,
         name: &str,
         role: accesskit::Role,
-        _: crate::platform::Render,
+        mode: crate::platform::Render,
     ) -> Result<Self> {
-        Self::new(kind, name, role)
+        let mut surface = Self::new(kind, name, role)?;
+        surface.mode = mode.resolve(crate::glass::wanted(), super::glass::backdrop().is_some());
+        Ok(surface)
     }
     pub fn render(&self) -> crate::platform::Render {
-        crate::platform::Render::Cpu
+        self.mode
     }
-    /// No glass provider on Linux yet: views draw their own fill.
+    /// In-process glass is available only on a GPU surface.
     pub fn glass_available(&self) -> bool {
-        false
+        self.mode == crate::platform::Render::Gpu
     }
-    pub fn set_glass_group(&self, _: &[crate::Glass], _spacing: f32) {}
+    pub fn set_glass_group(&self, glasses: &[crate::Glass], spacing: f32) {
+        #[cfg(feature = "gpu")]
+        {
+            let mut g = self.glass.borrow_mut();
+            if g.glasses != glasses || g.spacing != spacing {
+                g.glasses = glasses.to_vec();
+                g.spacing = spacing;
+                g.revision += 1;
+            }
+        }
+        #[cfg(not(feature = "gpu"))]
+        let _ = (glasses, spacing);
+    }
     /// Remaps a hidden surface with its retained CPU bitmap.
     pub fn show(&self) {
         let result = runtime(|r| {
@@ -654,6 +815,24 @@ impl Surface {
         });
         match result {
             Ok(true) => {
+                #[cfg(feature = "gpu")]
+                if self.mode == crate::platform::Render::Gpu {
+                    let result = runtime(|r| {
+                        if let Some(g) = r
+                            .state
+                            .windows
+                            .get_mut(&self.id)
+                            .and_then(|n| n.gpu.as_mut())
+                        {
+                            g.present()?;
+                        }
+                        r.conn.flush()?;
+                        Ok(())
+                    });
+                    if let Err(e) = result {
+                        log::error!("Wayland GPU show: {e}");
+                    }
+                }
                 if let Some(c) = &self.canvas {
                     let image = c.image();
                     if let Err(e) =
@@ -1007,6 +1186,17 @@ impl Dispatch<wl_callback::WlCallback, SurfaceId> for State {
     ) {
         if let Some(n) = a.windows.get_mut(id) {
             n.callback = false;
+            #[cfg(feature = "gpu")]
+            if n.configured
+                && let Some(g) = n.gpu.as_mut()
+                && g.animating()
+            {
+                if let Err(e) = g.present() {
+                    log::error!("Wayland glass frame: {e}");
+                }
+                frame(n, q, *id);
+                n.surface.commit();
+            }
             if n.animation
                 .as_ref()
                 .is_some_and(|(active, end)| active.get() && Instant::now() < *end)
