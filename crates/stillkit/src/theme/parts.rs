@@ -302,6 +302,74 @@ impl Metrics {
         Self::solid()
     }
 }
+/// Per-look elevation. Strengths multiply the shadow colour's alpha (0.18 light, 0.45 dark), so
+/// a strength of 0.8 is about 0.14 in light schemes.
+impl Shadows {
+    /// macOS: a faint contact edge under a wide, soft lift (a menu's ambient shadow is about
+    /// `0 12px 32px` at 0.15, as Tahoe's menus are).
+    pub fn liquid() -> Self {
+        let key = ShadowLayer::new(3.0, 1.0, 0.0, 0.4);
+        Self {
+            card: [ShadowLayer::new(2.0, 1.0, 0.0, 0.3), ShadowLayer::new(10.0, 3.0, 0.0, 0.35)],
+            raised: [key, ShadowLayer::new(18.0, 6.0, 0.0, 0.55)],
+            menu: [key, ShadowLayer::new(32.0, 12.0, 0.0, 0.85)],
+            popover: [key, ShadowLayer::new(36.0, 14.0, 0.0, 0.85)],
+            dialog: [ShadowLayer::new(6.0, 2.0, 0.0, 0.45), ShadowLayer::new(60.0, 24.0, 0.0, 1.0)],
+            toast: [key, ShadowLayer::new(28.0, 10.0, 0.0, 0.75)],
+        }
+    }
+    /// One UI: lighter and more diffuse than Liquid, barely offset.
+    pub fn one_ui() -> Self {
+        let key = ShadowLayer::new(4.0, 1.0, 0.0, 0.25);
+        Self {
+            card: [ShadowLayer::new(2.0, 0.5, 0.0, 0.2), ShadowLayer::new(14.0, 2.0, 0.0, 0.3)],
+            raised: [key, ShadowLayer::new(24.0, 4.0, 0.0, 0.45)],
+            menu: [key, ShadowLayer::new(40.0, 8.0, 0.0, 0.7)],
+            popover: [key, ShadowLayer::new(44.0, 10.0, 0.0, 0.7)],
+            dialog: [ShadowLayer::new(6.0, 2.0, 0.0, 0.3), ShadowLayer::new(64.0, 16.0, 0.0, 0.85)],
+            toast: [key, ShadowLayer::new(36.0, 8.0, 0.0, 0.65)],
+        }
+    }
+    /// Windows 11 (Fluent 2's shadow ramp: a 0.12 outline blur and a 0.14 drop, `blur = 2y`):
+    /// cards shadow4, raised shadow8, menus and flyouts shadow16, popovers and toasts
+    /// shadow28 (teaching tips), dialogs shadow64.
+    pub fn fluent() -> Self {
+        let ramp = |key: f32, depth: f32| {
+            [ShadowLayer::new(key, 0.0, 0.0, 0.67), ShadowLayer::new(depth, depth / 2.0, 0.0, 0.78)]
+        };
+        Self {
+            card: ramp(2.0, 4.0),
+            raised: ramp(2.0, 8.0),
+            menu: ramp(2.0, 16.0),
+            popover: ramp(8.0, 28.0),
+            dialog: ramp(8.0, 64.0),
+            toast: ramp(8.0, 28.0),
+        }
+    }
+    /// Opaque surfaces with a hairline: a crisp contact edge and a short, quiet lift.
+    pub fn solid() -> Self {
+        let key = ShadowLayer::new(2.0, 1.0, 0.0, 0.4);
+        Self {
+            card: [ShadowLayer::new(2.0, 1.0, 0.0, 0.35), ShadowLayer::NONE],
+            raised: [key, ShadowLayer::new(8.0, 3.0, 0.0, 0.35)],
+            menu: [key, ShadowLayer::new(16.0, 6.0, 0.0, 0.5)],
+            popover: [key, ShadowLayer::new(18.0, 7.0, 0.0, 0.5)],
+            dialog: [ShadowLayer::new(3.0, 1.0, 0.0, 0.45), ShadowLayer::new(32.0, 12.0, 0.0, 0.6)],
+            toast: [key, ShadowLayer::new(14.0, 5.0, 0.0, 0.45)],
+        }
+    }
+    /// Monochrome: Solid's, a little quieter.
+    pub fn mono() -> Self {
+        let mut s = Self::solid();
+        for level in [&mut s.card, &mut s.raised, &mut s.menu, &mut s.popover, &mut s.dialog, &mut s.toast] {
+            for layer in level {
+                layer.strength *= 0.85;
+            }
+        }
+        s
+    }
+}
+
 impl MotionTokens {
     pub fn liquid() -> Self {
         Self {
@@ -368,7 +436,7 @@ macro_rules! presets {
         impl Palette { $(pub fn $name(scheme: Scheme, accent: Rgba) -> Self { palette(&$palette, scheme == Scheme::Dark, accent) })* }
         impl Theme { $(pub fn $name(scheme: Scheme, accent: Rgba) -> Self {
             let mut t = Self::compose(Style::$style, scheme, [Palette::$name(Scheme::Light, accent), Palette::$name(Scheme::Dark, accent)],
-                Material::$name(), Shape::$name(), TypeRamp::$name(), Spacing::$name(), Motion::$name(), Icons::$name());
+                Material::$name(), Shape::$name(), TypeRamp::$name(), Spacing::$name(), Motion::$name(), Icons::$name(), Shadows::$name());
             t.border = if $border { Some(t.color.separator) } else { None };
             t
         })* }
@@ -396,6 +464,7 @@ impl Theme {
         metrics: Metrics,
         motion: Motion,
         icons: Icons,
+        shadows: Shadows,
     ) -> Self {
         let color = palettes[usize::from(scheme == Scheme::Dark)];
         Self {
@@ -415,6 +484,7 @@ impl Theme {
                 drop: 4.0,
                 color: color.shadow,
             },
+            shadows,
             motion,
             icons: icons.set,
             icon_weight: icons.weight,
@@ -458,6 +528,12 @@ impl Theme {
     }
     pub fn spacing(mut self, spacing: Spacing) -> Self {
         self.metrics = spacing;
+        self.recompute();
+        self
+    }
+    /// Another look's elevation levels (`Shadows::fluent()` under a Liquid theme, say).
+    pub fn shadows(mut self, shadows: Shadows) -> Self {
+        self.shadows = shadows;
         self.recompute();
         self
     }
@@ -640,6 +716,28 @@ mod tests {
         assert_eq!(light.radius, t.radius);
         assert_eq!(light.font, t.font);
         assert!(light.check().is_empty(), "{:?}", light.check());
+    }
+    #[test]
+    fn shadow_levels_follow_the_scheme_survive_mixing_and_turn_off_with_the_colour() {
+        let t = Theme::liquid(Scheme::Light, SYSTEM_BLUE).shadows(Shadows::fluent());
+        let [key, ambient] = t.shadow(ShadowLevel::Menu);
+        // Fluent's shadow16 (0 8px 16px at 0.14) in a light scheme.
+        assert_eq!((ambient.blur, ambient.offset), (16.0, (0.0, 8.0)));
+        assert!((ambient.color.a - 0.14).abs() < 0.005, "{}", ambient.color.a);
+        assert!(key.color.a > 0.0);
+        let mixed = t.clone().shape(Shape::one_ui()).with_scheme(Scheme::Dark);
+        assert_eq!(mixed.shadows, Shadows::fluent());
+        assert!(mixed.shadow(ShadowLevel::Menu)[1].color.a > ambient.color.a, "dark is stronger");
+        // Each look rises from cards to dialogs.
+        for style in Style::ALL {
+            let t = Theme::new(style, Scheme::Light, SYSTEM_BLUE);
+            let reach = |l| t.shadow(l).map(|s| s.blur + s.offset.1).into_iter().fold(0.0, f32::max);
+            assert!(reach(ShadowLevel::Card) < reach(ShadowLevel::Menu), "{style:?}");
+            assert!(reach(ShadowLevel::Menu) < reach(ShadowLevel::Dialog), "{style:?}");
+        }
+        let mut off = t;
+        off.elevation.color = Rgba::TRANSPARENT;
+        assert!(off.shadow(ShadowLevel::Dialog).iter().all(|s| s.color.a == 0.0));
     }
     #[test]
     fn lens_is_owned_by_material_and_contrast_is_resolved_after_tint_changes() {

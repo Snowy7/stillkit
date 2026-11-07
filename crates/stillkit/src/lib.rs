@@ -70,7 +70,7 @@ pub use surface::AnimationFrames;
 pub use surface::{Button, Event, Kind, Pointer, Surface, SurfaceId, next_event, queue_event};
 pub use text::{Text, TextStyle, VARIABLE};
 pub use text_field::TextField;
-pub use theme::{Palette, Scheme, Style, TextRole, Theme};
+pub use theme::{Palette, Scheme, ShadowLevel, SoftShadow, Style, TextRole, Theme};
 pub use tokens::{Colors, Ink, Material, MenuMetrics, Step, Tokens, Typeface};
 pub use watch::FileWatch;
 
