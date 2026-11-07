@@ -1,11 +1,15 @@
 //! Static backend boundary. Core selects concrete types through `current`.
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+pub mod linux;
+#[cfg(target_os = "linux")]
+pub use linux as current;
+#[cfg(not(any(windows, target_os = "linux")))]
 pub mod stub;
 #[cfg(windows)]
 pub mod windows;
 use crate::{DisplayList, PixelRect, TextStyle};
 use anyhow::Result;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub use stub as current;
 #[cfg(windows)]
 pub use windows as current;

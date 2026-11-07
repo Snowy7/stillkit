@@ -11,6 +11,11 @@
 //! loop sleeps in `MsgWaitForMultipleObjectsEx`), and every DLL loaded (no GPU driver may be).
 //! It shows a topmost bar across the top of the primary monitor: run it under the desktop lock.
 
+#[cfg(not(windows))]
+fn main() { eprintln!("This measurement example requires Windows; use linux_hello on Linux."); }
+
+#[cfg(windows)]
+mod native {
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
@@ -30,7 +35,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const WIDTH: u32 = 3840;
 const HEIGHT: u32 = 36;
 
-fn main() -> Result<()> {
+pub fn main() -> Result<()> {
     let mut seconds = 60u64;
     let mut redraws = 200usize;
     let (mut x, mut y) = (0i32, 0i32);
@@ -297,3 +302,7 @@ fn process_age() -> Duration {
     let now = ticks(unsafe { GetSystemTimePreciseAsFileTime() });
     Duration::from_nanos(now.saturating_sub(ticks(created)) * 100)
 }
+
+}
+#[cfg(windows)]
+fn main() -> anyhow::Result<()> { native::main() }

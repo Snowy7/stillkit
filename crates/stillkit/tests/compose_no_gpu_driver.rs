@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! Plan Rule 1 for DirectComposition: composing sprites over a surface (WARP device, DWM does the
 //! scaling) loads no GPU vendor driver. Its own test binary, so nothing else is loaded.
 
