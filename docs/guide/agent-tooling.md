@@ -43,4 +43,4 @@ input.json:
 [{"at":0.1,"click":"name"}]
 ```
 
-[All guides](../../README.md#guides) ? [Element reference](../el.md)
+[All guides](../../README.md#guides) | [Element reference](../el.md)

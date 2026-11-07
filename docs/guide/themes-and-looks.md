@@ -31,4 +31,4 @@ base = "liquid"
 [Executable source](../../crates/stillkit/examples/guide_themes_and_looks.rs).
 
 
-[All guides](../../README.md#guides) ? [Element reference](../el.md)
+[All guides](../../README.md#guides) | [Element reference](../el.md)

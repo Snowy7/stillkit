@@ -75,4 +75,4 @@ pub fn glass_panel() -> anyhow::Result<stillkit::Surface> {
 [Executable source](../../crates/stillkit/examples/guide_render_modes_and_glass.rs).
 
 
-[All guides](../../README.md#guides) ? [Element reference](../el.md)
+[All guides](../../README.md#guides) | [Element reference](../el.md)

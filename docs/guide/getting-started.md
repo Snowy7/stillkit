@@ -1,6 +1,14 @@
 # Getting started
 
-Install Rust with rustup. Clone this repository to run the examples. For a downstream app use edition = "2024" and these dependencies, pinning YOUR_COMMIT to a tested revision:
+Install Rust with rustup. Clone this repository to run the examples. For a downstream app, create a Rust binary:
+
+```sh
+cargo new hello-stillkit
+cd hello-stillkit
+rustup override set nightly
+```
+
+Keep edition = "2024" in Cargo.toml and add these dependencies, pinning YOUR_COMMIT to a tested revision:
 
 ```toml
 [dependencies]
@@ -45,7 +53,9 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-[Executable source](../../crates/stillkit/examples/guide_getting_started.rs).
+Run your downstream app with `cargo run`, or `cargo run -- --snap app.png --tree app.json` for headless output.
+
+From the stillkit checkout, run the [executable source](../../crates/stillkit/examples/guide_getting_started.rs) instead:
 
 ```sh
 cargo run -p stillkit --example guide_getting_started -- --snap app.png --tree app.json
@@ -58,4 +68,4 @@ input.json:
 [{"at":0.1,"click":"count"}]
 ```
 
-[All guides](../../README.md#guides) ? [Element reference](../el.md)
+[All guides](../../README.md#guides) | [Element reference](../el.md)

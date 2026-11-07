@@ -59,4 +59,4 @@ fn main() -> anyhow::Result<()> {
 [Executable source](../../crates/stillkit/examples/guide_text_input.rs).
 
 
-[All guides](../../README.md#guides) ? [Element reference](../el.md)
+[All guides](../../README.md#guides) | [Element reference](../el.md)

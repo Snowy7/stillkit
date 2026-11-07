@@ -57,4 +57,4 @@ fn main() -> anyhow::Result<()> {
 [Executable source](../../crates/stillkit-kit/examples/guide_overlays.rs).
 
 
-[All guides](../../README.md#guides) ? [Element reference](../el.md)
+[All guides](../../README.md#guides) | [Element reference](../el.md)
