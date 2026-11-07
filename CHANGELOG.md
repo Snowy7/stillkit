@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- macOS AppKit/CoreGraphics/CoreText backend, native input, AccessKit and optional Metal (compile-checked; native verification pending).
+- Real soft shadows and Windows system backdrop frost for CPU surfaces.
+- Kit text components and Linux Vulkan/Vello Hybrid GPU rendering and glass.
+- Portable process Identity and Wayland app_id, preserving Windows window class names.
+- Opt-in Linux AT-SPI via AccessKit Unix, lazy trees and event-driven action delivery (compile-checked; compositor verification pending).
+
+### Changed
+- Interaction motion has one implementation; interact::motion remains a compatibility re-export.
+
+### Added
 - Newcomer guides, executable examples and a settings showcase.
 - 0.1 metadata groundwork and Windows/Linux CI with advisory macOS cross-check.
 
@@ -22,8 +32,8 @@ A draft inventory, not a published release. The target is a real small Windows/W
 - Element text input/area, editing, selection, clipboard and IME; Windows RichEdit and UI Automation text runs.
 
 ### Known limits
-- No Linux X11 or AT-SPI; GNOME bars need an extension. Native Linux editing needs broader live verification.
-- macOS backend is in progress and untested.
+- No Linux X11; AT-SPI requires STILLKIT_ACCESSIBILITY=1 and live verification; GNOME bars need an extension. Native Linux editing needs broader live verification.
+- macOS backend is compile-checked; native behavior is unverified.
 - el::run does not attach glass bodies from theme materials; use Surface hooks.
 - Kit hover/press washes snap; tree parent/child focus and continuous spinner visibility need further runtime support.
 
