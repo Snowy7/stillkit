@@ -2,7 +2,9 @@
 //! The built-in system backdrop (docs/ui.md, "System backdrop"): DWM's frost in a window of its
 //! own directly under a CPU surface, made on the first open and gone with the last close; and an
 //! installed backdrop always winning over it. Live windows show (never activated, no input).
-//! The frost checks skip where the system backdrop is unavailable (Windows 10, transparency off).
+//! The frost checks skip, saying so, where the system backdrop is unavailable (Windows 10,
+//! transparency off, or a session where no compositor or desktop window target can be made); the
+//! unavailable path itself is checked everywhere by making each step fail.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,6 +12,7 @@ use std::rc::Rc;
 use stillkit::glass::{self, Backdrop, Glass, GlassMaterial, Shape};
 use stillkit::platform::Render;
 use stillkit::platform::windows::glass::system;
+use stillkit::platform::windows::system_backdrop::{Step, SystemBackdrop};
 use stillkit::{DisplayList, Kind, Op, Rect, Rgba, Role, Surface, Ui};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{GW_HWNDNEXT, GetWindow, GetWindowRect, IsWindow, IsWindowVisible};
@@ -42,6 +45,15 @@ fn shown(ui: &mut Ui, at: (i32, i32)) -> Surface {
     s
 }
 
+/// Whether the system backdrop can make frost here; says so when it can't.
+fn frost_here(system: &SystemBackdrop) -> bool {
+    let available = system.available();
+    if !available {
+        eprintln!("skipped: the system backdrop is unavailable here (Windows 10, transparency off, or no usable composition)");
+    }
+    available
+}
+
 fn rect(window: HWND) -> (i32, i32, i32, i32) {
     let mut r = RECT::default();
     // SAFETY: a query into a local.
@@ -58,8 +70,7 @@ fn under(window: HWND) -> Option<HWND> {
 fn frost_sits_directly_under_its_surface_and_follows_it() {
     let mut ui = Ui::new().unwrap();
     let system = system();
-    if !system.available() {
-        eprintln!("the system backdrop is unavailable here");
+    if !frost_here(&system) {
         return;
     }
     let mut s = shown(&mut ui, (120, 140));
@@ -90,8 +101,7 @@ fn frost_sits_directly_under_its_surface_and_follows_it() {
 fn the_compositor_stays_while_any_frost_is_open() {
     let mut ui = Ui::new().unwrap();
     let system = system();
-    if !system.available() {
-        eprintln!("the system backdrop is unavailable here");
+    if !frost_here(&system) {
         return;
     }
     let a = shown(&mut ui, (100, 100));
@@ -107,6 +117,68 @@ fn the_compositor_stays_while_any_frost_is_open() {
     a.hide();
     b.hide();
     assert!(!system.active());
+}
+
+/// Opens a frost on a thread of its own, which then exits; `false` where there is none.
+fn frost_on_a_new_thread() -> bool {
+    std::thread::spawn(|| {
+        let mut ui = Ui::new().unwrap();
+        let system = system();
+        if !frost_here(&system) {
+            return false;
+        }
+        let s = shown(&mut ui, (100, 100));
+        assert!(s.has_glass() && system.window(s.hwnd()).is_some());
+        true
+    })
+    .join()
+    .unwrap()
+}
+
+#[test]
+fn a_thread_after_a_finished_frost_thread_gets_its_own() {
+    if !frost_on_a_new_thread() {
+        return;
+    }
+    // The first UI thread is gone. A compositor from a factory cached by it was an access
+    // violation here; each thread now makes its own.
+    assert!(frost_on_a_new_thread());
+}
+
+#[test]
+fn without_usable_composition_views_get_their_fill_and_nothing_crashes() {
+    let mut ui = Ui::new().unwrap();
+    let system = system();
+    glass::set_style(Some(FROST));
+    for step in [Step::Queue, Step::Compositor, Step::Window, Step::Target, Step::Brush] {
+        system.fail_at(Some(step));
+        assert!(!system.available() && !glass::cpu_backdrop(), "{step:?}: unavailable, so Auto doesn't count on it");
+        let s = shown(&mut ui, (100, 100));
+        assert!(!s.glass_available(), "{step:?}: views draw their fill");
+        assert!(!s.has_glass() && !system.active() && system.window(s.hwnd()).is_none(), "{step:?}: no frost was made");
+    }
+    system.fail_at(None);
+    glass::set_style(None);
+}
+
+#[test]
+fn a_failed_open_closes_its_frost_and_turns_the_backdrop_off() {
+    let mut ui = Ui::new().unwrap();
+    let system = system();
+    if !frost_here(&system) {
+        return;
+    }
+    let a = shown(&mut ui, (100, 100));
+    // The probe still passes (it never places a frost); the next open fails while placing.
+    system.fail_at(Some(Step::Place));
+    let b = shown(&mut ui, (360, 100));
+    assert!(!b.has_glass() && system.window(b.hwnd()).is_none(), "b got no frost");
+    assert!(!system.available() && !b.glass_available(), "views draw their fill from now on");
+    assert!(system.window(a.hwnd()).is_some(), "a's frost was fine and stays");
+    a.hide();
+    assert!(!system.active(), "the last open frost closed: everything goes");
+    system.fail_at(None);
+    assert!(system.available(), "probed again");
 }
 
 /// An installed backdrop that records what it is asked.
@@ -166,8 +238,7 @@ fn a_desktop_surface_keeps_its_frost_inside_the_desktop_band() {
         return;
     };
     let system = system();
-    if !system.available() {
-        eprintln!("the system backdrop is unavailable here");
+    if !frost_here(&system) {
         return;
     }
     let mut ui = Ui::new().unwrap();

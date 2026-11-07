@@ -859,15 +859,32 @@ material's tint as given (its alpha is the stain). `blur` under half a pixel is 
 tint alone. It speaks the same `Backdrop` contract as the engine, so views and components don't
 change: the surface opens it after `show`, places it **before** every move and on reshapes,
 closes it on `hide` and drop; the surface's `WM_WINDOWPOSCHANGED` puts the frost back under it
-when its z-order changes. Nothing is made until a surface opens glass; the windows, visuals and
+when its z-order changes. Nothing is opened until a surface opens glass; the windows, visuals and
 compositor all go when the last one closes (the thread's `DispatcherQueue` stays: a few KB).
 
 **Which backdrop.** `glass::install`ed (mypaper's engine) **always** wins, available or not, so
 mypaper, which installs its overlay client in the shell and Files before any surface, is
 unchanged (`tests/backdrop_system.rs`). Without one, Windows uses the system backdrop; other
-platforms have none. `glass::available()` is true while it is (Windows 11, and Settings' "Transparency effects" on: read
-per call, one registry value), so menus and `Frame::surface` take glass; otherwise views draw
+platforms have none. `glass::available()` is true while it is: Windows 11, Settings'
+"Transparency effects" on (read per call, one registry value), and this thread able to make
+frost at all. That last check is a probe, run once per thread the first time anything asks: it
+makes the dispatcher queue, a compositor and a hidden frost window with its target and blur, then
+drops them. While it is available, menus and `Frame::surface` take glass; otherwise views draw
 their fill as before.
+
+**Failing closed, one per thread.** Every step can fail: a session with no usable composition (a
+service or CI session), a refused target, a window that can't be placed. Any failure, in the
+probe or in an open, means no frost: `open` returns false, a partly made frost is torn down, and
+`available()` stays false on that thread from then on. Nothing is `unwrap`ped. Each UI thread has
+its own provider, queue and compositor. A compositor always comes from an activation factory
+fetched on its own thread, never `Compositor::new()`: windows-rs caches that factory for the whole
+process (it reports `IAgileObject`). Once the thread that first used it for a desktop window target
+had exited, the next `Compositor::new()` on another thread was an access violation
+(`0xc0000005`, every time with `--test-threads=1`). Targets and visuals are released before
+their window and before the compositor. A call that re-enters while an open or close is under way
+finds no frost instead of panicking. `SystemBackdrop::fail_at(Step)` (hidden, for tests) makes one
+step fail, so `tests/backdrop_system.rs` checks the unavailable path on any machine. The frost
+tests themselves skip, saying so, where the backdrop is unavailable.
 
 | Surface kind | System frost |
 | --- | --- |
