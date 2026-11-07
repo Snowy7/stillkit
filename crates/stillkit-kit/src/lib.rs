@@ -33,12 +33,7 @@ pub fn readable(ink: Rgba, surface: Rgba, floor: f32) -> Rgba {
 }
 /// Composite the surface over the preset's scheme-relative headless backdrop.
 pub fn surface(t: &Theme, fill: Rgba) -> Rgba {
-    let bg = if t.dark() {
-        Rgba::new(0., 0., 0., 1.)
-    } else {
-        Rgba::new(1., 1., 1., 1.)
-    };
-    stillkit::theme::over(fill, stillkit::theme::over(t.color.surface, bg))
+    stillkit::theme::over(fill, t.color.surface.with_alpha(1.))
 }
 // Text must survive every neutral component surface, including nested cards and fields.
 fn neutral_ink(t: &Theme, mut ink: Rgba, floor: f32) -> Rgba {
@@ -860,6 +855,7 @@ impl TextFieldFrame {
             ))
             .focusable()
             .disabled(self.disabled)
+            .opacity(if self.disabled { 0.45 } else { 1. })
             .child(
                 text(if empty { self.placeholder } else { self.value })
                     .key("value")

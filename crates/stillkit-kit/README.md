@@ -86,12 +86,13 @@ Contrast resolves against each component's own composited surface. Neutral label
 ink is adjusted across the neutral surfaces; button emphasis has its own surface
 and ink pair. A mid-luminance accent may need a darker filled-button surface to
 make 7:1 possible. Disabled content is intentionally dimmed and excluded from the
-contrast floor. Glass checks use the theme's scheme-relative headless backdrop;
+contrast floor. Glass checks use the theme's opaque surface fallback;
 real hosts remain responsible for adaptive schemes over arbitrary wallpapers.
 
 ## Comparison with the immediate-mode kit
 
-Verified visually against `docs/media/native/kit-liquid-dark.png`. Type, vector
+Verified visually against `docs/media/native/kit-liquid-dark.png` and
+`docs/media/native/kit-oneui-light.png`. Type, vector
 icons, 40x24 switch, 18px slider thumb, 28px icon bar, capsule buttons and concentric
 cards read as the same family. Deliberate differences: neutral fallback backgrounds
 replace the native gallery's wallpaper/glass stand-in; all presets use an accent
@@ -101,3 +102,14 @@ the parent unless the caller chooses cross-axis alignment or a width. The runtim
 currently washes/focuses the slider's whole target rather than only its thumb.
 Tooltip and rings are absent pending the public primitives above. Studio is a
 composition of existing parts, not a duplicate controls implementation.
+
+The One UI + Liquid material sheets currently match One UI in this glassless
+snapshot path: optics are supplied by a host backdrop, not component code. The
+Fluent + Mono palette mix changes ink while keeping Fluent geometry and type.
+`docs/media/kit/overview.png` records the visual audit of all sixteen sheets.
+
+Validation on Windows: eight tests pass (including all sixteen golden sheets),
+clippy is clean for all targets, and `cargo check --target
+x86_64-unknown-linux-gnu` passes. The Linux core reports existing dead-code warnings
+in its compile-only platform path. All commands used the assigned target directory;
+tests used the documented LLVM override after the Cranelift panic exit.
