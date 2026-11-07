@@ -136,10 +136,6 @@ pub use crate::platform::current::timing::{Ticker, display_frame};
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(windows)]
-    use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
-    #[cfg(windows)]
-    use windows::Win32::System::Threading::WaitForSingleObject;
 
     #[test]
     fn springs_start_at_rest_and_settle_on_one_in_every_damping_regime() {
@@ -173,26 +169,5 @@ mod tests {
         assert_eq!(tween.value(later), 0.0);
     }
 
-    #[cfg(windows)]
-    #[test]
-    fn the_ticker_fires_only_while_armed() {
-        let mut ticker = Ticker::new().unwrap();
-        ticker.schedule(true);
-        assert!(ticker.armed());
-        // SAFETY: waits on our own timer.
-        assert_eq!(
-            // SAFETY: the ticker owns this valid timer handle throughout the bounded wait.
-            unsafe { WaitForSingleObject(ticker.handle(), 200) },
-            WAIT_OBJECT_0
-        );
-        ticker.schedule(true);
-        ticker.schedule(false);
-        assert!(!ticker.armed());
-        // SAFETY: as above.
-        assert_eq!(
-            // SAFETY: the disarmed ticker still owns this valid handle throughout the wait.
-            unsafe { WaitForSingleObject(ticker.handle(), 100) },
-            WAIT_TIMEOUT
-        );
-    }
+
 }

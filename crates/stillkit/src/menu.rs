@@ -12,6 +12,7 @@ use std::sync::Arc;
 use accesskit::Role;
 use anyhow::Result;
 
+use crate::platform::keys::{DOWN, UP, LEFT, RIGHT, ESCAPE, RETURN};
 use crate::focus;
 use crate::geom::{Point, Rect, Rgba};
 use crate::icons;
@@ -881,8 +882,8 @@ impl<C: Clone> Menu<C> {
             )
         });
         match key {
-            k if k == 40 || k == 38 => {
-                let delta = if k == 40 { 1 } else { -1 };
+            k if k == DOWN || k == UP => {
+                let delta = if k == DOWN { 1 } else { -1 };
                 let hits: Vec<_> = self.panels[current]
                     .items
                     .iter()
@@ -900,11 +901,11 @@ impl<C: Clone> Menu<C> {
                 self.select(ui, current, next.map(|id| id as usize), false);
                 None
             }
-            k if k == 39 && on_submenu => {
+            k if k == RIGHT && on_submenu => {
                 self.select(ui, current, hover, true);
                 None
             }
-            37 | 27 => {
+            LEFT | ESCAPE => {
                 if current > 0 {
                     self.close_innermost();
                     None
@@ -913,7 +914,7 @@ impl<C: Clone> Menu<C> {
                     Some(Outcome::Closed)
                 }
             }
-            13 => {
+            RETURN => {
                 if on_submenu {
                     self.select(ui, current, hover, true);
                     None
@@ -1184,7 +1185,7 @@ mod tests {
         let screen = screen_at(100, 100);
         assert!(menu.panels[0].layout.height <= (screen.work.3 - screen.work.1) as f32);
         for _ in 0..150 {
-            menu.key(&mut ui, 40);
+            menu.key(&mut ui, DOWN);
         }
         let p = &menu.panels[0];
         assert_eq!(p.hover, Some(149));

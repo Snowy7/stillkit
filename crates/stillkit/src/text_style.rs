@@ -44,5 +44,4 @@ impl TextStyle {
             ..self.clone()
         }
     }
-
 }

@@ -1,6 +1,6 @@
-use std::sync::Arc;
-use crate::{Text, TextStyle, Rect, Rgba, Op};
 use crate::icons::{Icon, SYSTEM_FAMILY};
+use crate::{Op, Rect, Rgba, Text, TextStyle};
+use std::sync::Arc;
 const SYSTEM_FALLBACK: &str = "Segoe MDL2 Assets";
 /// The system icon font that is installed here.
 pub fn system_family(text: &Text) -> Arc<str> {
@@ -35,4 +35,3 @@ pub fn centered(
         color,
     }
 }
-

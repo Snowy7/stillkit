@@ -1,9 +1,9 @@
+use crate::menu::Edges;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use crate::menu::Edges;
 /// A monitor as a popup sees it: where it may go, and how large its pixels are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Screen {
@@ -35,8 +35,13 @@ pub fn screen_at(x: i32, y: i32) -> Screen {
 pub(crate) fn animations_enabled() -> bool {
     let mut animations = windows::core::BOOL(1);
     // SAFETY: the system query writes one BOOL into our local.
-    let _ = unsafe { windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
-        windows::Win32::UI::WindowsAndMessaging::SPI_GETCLIENTAREAANIMATION, 0,
-        Some((&raw mut animations).cast()), Default::default()) };
+    let _ = unsafe {
+        windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
+            windows::Win32::UI::WindowsAndMessaging::SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some((&raw mut animations).cast()),
+            Default::default(),
+        )
+    };
     animations.as_bool()
 }

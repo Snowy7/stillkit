@@ -1,14 +1,14 @@
 //! Static backend boundary. Core selects concrete types through `current`.
-#[cfg(windows)]
-pub mod windows;
 #[cfg(not(windows))]
 pub mod stub;
 #[cfg(windows)]
-pub use windows as current;
-#[cfg(not(windows))]
-pub use stub as current;
+pub mod windows;
 use crate::{DisplayList, PixelRect, TextStyle};
 use anyhow::Result;
+#[cfg(not(windows))]
+pub use stub as current;
+#[cfg(windows)]
+pub use windows as current;
 /// CPU bitmap target: draw only the requested damage, then read its pixels.
 pub trait Renderer: Sized {
     type Context;
@@ -30,7 +30,11 @@ pub trait Window: Sized {
     type Bitmap;
     fn new(kind: current::Kind, name: &str, role: accesskit::Role) -> Result<Self>;
     /// Presents the native bitmap's dirty rect (and resize flag), or moves without repainting.
-    fn present_bitmap(&mut self, origin: (i32, i32), bitmap: Option<(&Self::Bitmap, PixelRect, bool)>) -> Result<()>;
+    fn present_bitmap(
+        &mut self,
+        origin: (i32, i32),
+        bitmap: Option<(&Self::Bitmap, PixelRect, bool)>,
+    ) -> Result<()>;
     fn next_event() -> Option<(current::SurfaceId, current::Event)>;
 }
 /// Windowless native text editing/IME; the backend owns focus and composition.
@@ -48,4 +52,14 @@ pub trait Backend {
     type Text: TextSystem;
     type Window: Window;
     type TextInput: TextInput;
+}
+
+/// Existing `Event::Key` codes, mapped by native backends before reaching core.
+pub(crate) mod keys {
+    pub const DOWN: u16 = 0x28;
+    pub const UP: u16 = 0x26;
+    pub const LEFT: u16 = 0x25;
+    pub const RIGHT: u16 = 0x27;
+    pub const ESCAPE: u16 = 0x1b;
+    pub const RETURN: u16 = 0x0d;
 }

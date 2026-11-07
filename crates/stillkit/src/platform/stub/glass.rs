@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 type HWND = usize;
-use crate::glass::{Shape, GlassMaterial, GlassStyle};
+use crate::glass::{GlassMaterial, GlassStyle, Shape};
 /// Where glass requests go: the engine, through the shell's overlay client. Every call is for
 /// `client`, the surface's window.
 pub trait Backdrop {
@@ -42,4 +42,3 @@ pub fn install(backdrop: Rc<dyn Backdrop>) {
 pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
     BACKDROP.with_borrow(Clone::clone)
 }
-

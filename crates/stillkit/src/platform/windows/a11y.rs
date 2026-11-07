@@ -1,11 +1,15 @@
 //! Native accessibility adapter; snapshots and trees live in core.
-use std::{collections::VecDeque, rc::Rc, sync::{Arc, Mutex}};
-use accesskit::{Action, ActionHandler, ActionRequest, ActivationHandler, Role, TreeUpdate};
-use accesskit_windows::{Adapter, QueuedEvents};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 use crate::a11y::*;
 use crate::scene::{Hit, HitId};
+use accesskit::{Action, ActionHandler, ActionRequest, ActivationHandler, Role, TreeUpdate};
+use accesskit_windows::{Adapter, QueuedEvents};
+use std::{
+    collections::VecDeque,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_APP};
 type Pending = Arc<Mutex<VecDeque<(HitId, AccessibilityAction)>>>;
 pub(crate) const WM_A11Y_ACTION: u32 = WM_APP + 0x3a11;
 /// A surface's accessibility: the adapter and the latest snapshot.
@@ -207,8 +211,8 @@ impl ActionHandler for Actions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use accesskit::{NodeId, Toggled};
     use crate::geom::Rect;
+    use accesskit::{NodeId, Toggled};
 
     #[test]
     fn deferred_adapter_keeps_the_latest_hits_before_activation() {

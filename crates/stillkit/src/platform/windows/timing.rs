@@ -1,5 +1,5 @@
-use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
+use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND};
 use windows::Win32::Graphics::Dwm::{DWM_TIMING_INFO, DwmGetCompositionTimingInfo};
 use windows::Win32::System::Threading::{
@@ -90,3 +90,30 @@ pub fn display_frame() -> Duration {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows::Win32::System::Threading::WaitForSingleObject;
+    #[test]
+    fn the_ticker_fires_only_while_armed() {
+        let mut ticker = Ticker::new().unwrap();
+        ticker.schedule(true);
+        assert!(ticker.armed());
+        // SAFETY: waits on our own timer.
+        assert_eq!(
+            // SAFETY: the ticker owns this valid timer handle throughout the bounded wait.
+            unsafe { WaitForSingleObject(ticker.handle(), 200) },
+            WAIT_OBJECT_0
+        );
+        ticker.schedule(true);
+        ticker.schedule(false);
+        assert!(!ticker.armed());
+        // SAFETY: as above.
+        assert_eq!(
+            // SAFETY: the disarmed ticker still owns this valid handle throughout the wait.
+            unsafe { WaitForSingleObject(ticker.handle(), 100) },
+            WAIT_TIMEOUT
+        );
+    }
+}
