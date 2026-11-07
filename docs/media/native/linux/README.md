@@ -58,7 +58,7 @@ cargo clippy -p stillkit --all-targets --features golden
 cargo check -p stillkit --all-targets --features golden --target x86_64-pc-windows-msvc
 cargo run --release -p stillkit --example gallery -- /tmp/stillkit-gallery
 cargo build --release -p stillkit --features golden --example linux_hello
-python3 docs/media/native/linux/measure.py
+python3 docs/media/native/linux/measure.py --example linux_hello --settle 3 --out /tmp/stillkit-live
 # Optional callback-driven animation (no idle ticker afterwards):
 cargo run --release -p stillkit --example linux_hello -- --animate
 ```
@@ -78,3 +78,53 @@ damage was the ring's **38×38 physical pixels**, rather than the whole window.
 `animation.log` and `animation.json` retain the trace and summary. Full suite:
 **56 unit tests + 1 Linux GPU-boundary integration test passed**, with one ignored
 documentation example and the Windows-only integration tests gated out on Linux.
+
+## Element host (merged main)
+
+`el-hello-{1,2}x.png` and `el-sound-{1,2}x.png` are headless exports, inspected at
+both scales. The hello label and switch, and Sound's slider, volume icon, mute
+label and switch render without clipping. `kit-mix-{light,dark}.png` are the
+Linux gallery test references: cosmic-text/Vello differs from Windows text ink,
+so the test selects these without changing the Windows references.
+
+`--snap` and `--tree` were run with an invalid Wayland display. A `--script`
+click on `switch` changed checked to true and the label to “The light is on”.
+The real GNOME session mapped both hello (320×180) and sound (340×160); protocol
+traces confirm buffer attachment, damage and output enter. No activation request
+or synthetic pointer/keyboard input was sent. These PNGs remain client exports,
+not compositor screenshots. Chrome actions retain the real-input serial handling:
+caption move, minimize, maximize/unmaximize and close; interactive chrome and
+physical mixed-DPI hardware have not been exercised in this pass.
+
+Final release hello: after 10 s settling, over 30 s, **5,992 → 5,688 KiB private**,
+RSS **9,056 → 8,752 KiB**, PSS **6,299 → 5,995 KiB**. Private is the sum of
+Private_Clean and Private_Dirty in smaps_rollup. CPU deltas **0 / 0 ticks**
+(100 Hz), context-switch deltas **0 / 0**, GPU-library mappings **0**.
+Resident pages fell rather than growing. A separate earlier run before the final
+geometry update held 5,964 KiB private; it is not a paired memory comparison.
+`el-measurement.json`, `el-maps.txt` and `el-protocol.log` retain final evidence.
+The trace contains one content attach/damage and zero frame requests or activated
+configure states. The process slept on the Wayland fd, with no idle ticker.
+
+Reproduce the current element evidence:
+
+```sh
+cargo build --release -p stillkit --example el_hello --example el_sound
+python3 docs/media/native/linux/measure.py
+# Defaults: --example el_hello --settle 10 --out /tmp/stillkit-el-live
+for app in hello sound; do
+  for scale in 1 2; do
+    target/release/examples/el_$app --snap /tmp/el-$app-${scale}x.png --scale $scale
+  done
+done
+cargo test -p stillkit --features golden,serde
+cargo clippy -p stillkit --all-targets --features golden,serde
+cargo check -p stillkit --all-targets --features golden,serde --target x86_64-pc-windows-msvc
+```
+
+All gates pass: 64 unit tests, 7 element-runtime tests, 2 Sound tests, 1 Linux
+GPU-boundary test, 1 gallery golden test and 1 compiled doc example; 1 doc example
+ignored. Clippy reports only the eight existing accessibility dead-code warnings.
+The only source changes outside the Linux backend are `linux_hello`'s explicit
+wait for the new nonblocking queue contract, and gallery's Linux reference path.
+No `src/el/` or core runtime changes were needed.

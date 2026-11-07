@@ -691,7 +691,8 @@ records visual differences and measurement evidence.
 
 Native windows use raw Wayland + xdg-shell and two released-buffer-tracked ARGB8888
 `wl_shm` buffers. Damage is physical pixels; callers draw at `Surface::scale()`.
-Unchanged lists do not draw or commit. `next_event()` blocks instead of polling;
+Unchanged lists do not draw or commit. `next_event()` drains pending input without blocking;
+`host::wait()` sleeps on the Wayland display fd with no idle timeout;
 `animation_frames()` requests compositor callbacks only for its guard's lifetime/duration.
 Use `Surface::popup(parent, name, at)` for parent-relative popups; parentless `Kind::Popup`
 falls back to a toplevel. `set_chrome`, `start_move` and `start_resize` use real input
@@ -706,6 +707,29 @@ The measurement temporarily used GNOME's strict new-window focus policy, restore
 and sent no activation request or synthetic input. The protocol's configure states
 contained no activation. The saved hello PNG is the client's rendered frame; GNOME denied
 a desktop screenshot, so it is not a capture of compositor output.
+
+The element host now runs on Linux too. `Surface::place` sets the physical client size;
+the compositor chooses its global position. `scale` returns the host's floating-point
+scale contract; configure and preferred-buffer-scale events update physical dimensions.
+Opaque app backings advertise an opaque region. Caption drags use `xdg_toplevel.move`
+with the real press serial; chrome buttons minimize, toggle maximize or queue close.
+`host::shift_down` reads the compositor-provided XKB state. `--snap`, `--tree` and
+`--script` run without a Wayland connection, with hello and sound exports at 1×/2×
+in `docs/media/native/linux/el-*.png`. No element-runtime or core changes were needed.
+
+Release `el_hello`, 320×180 on the same GNOME session, after a **10 s settle** and over
+**30 s**: private memory (**Private_Clean + Private_Dirty**, smaps_rollup)
+**5,992 → 5,688 KiB**, RSS **9,056 → 8,752 KiB**, PSS **6,299 → 5,995 KiB**.
+User/system CPU deltas: **0 / 0 ticks** (100 Hz); voluntary/involuntary context-switch
+deltas: **0 / 0**; GPU-library mappings: **0**. Private memory did not grow; resident
+pages fell during the interval. The earlier host implementation run was 5,964 KiB
+at both endpoints; these are separate launches, not a paired memory optimization claim.
+The final trace has one content attachment/damage, no frame requests and no activated
+configure state. Evidence: `el-measurement.json`, `el-maps.txt`, `el-protocol.log` in the
+Linux media directory; `measure.py` reproduces this run and restores GNOME's focus policy.
+All Linux golden/serde tests (76 passing, one ignored doc example), all-target Clippy,
+and Windows MSVC all-target checking pass. The eight existing non-Windows accessibility
+dead-code warnings remain.
 
 Not yet supported: Wayland text-input-v3/IBus IME, field selection/caret interaction,
 AT-SPI accessibility, X11, fractional scaling, complete mixed-monitor placement, cursor
