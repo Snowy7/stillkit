@@ -96,6 +96,11 @@ pub(crate) enum Flow {
     Grid(u16),
 }
 
+/// A press handler ([`El::on_press`]).
+pub(crate) type Press<S> = Box<dyn Fn(&mut S)>;
+/// A drag handler ([`El::on_drag`]): the pointer's place across the box, 0..=1 each way.
+pub(crate) type Drag<S> = Box<dyn Fn(&mut S, f32, f32)>;
+
 pub(crate) enum What {
     /// `el()`, `row()`, `col()` and `grid(..)`: a container.
     Box(Flow),
@@ -154,8 +159,8 @@ pub struct El<S> {
     pub(crate) sizing: Sizing,
     pub(crate) look: Look,
     pub(crate) sem: Sem,
-    pub(crate) on_press: Option<Box<dyn Fn(&mut S)>>,
-    pub(crate) on_drag: Option<Box<dyn Fn(&mut S, f32, f32)>>,
+    pub(crate) on_press: Option<Press<S>>,
+    pub(crate) on_drag: Option<Drag<S>>,
     pub(crate) children: Vec<El<S>>,
 }
 

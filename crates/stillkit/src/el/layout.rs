@@ -109,7 +109,7 @@ impl Layout {
         self.generation += 1;
         self.touched = 0;
         let mut order = Vec::new();
-        let node = self.sync(root, ROOT, cx, Some(size), text, &mut order);
+        let node = self.sync(root, ROOT, cx, Some(size), &mut order);
         let generation = self.generation;
         let taffy = &mut self.taffy;
         self.nodes.retain(|_, r| {
@@ -152,7 +152,7 @@ impl Layout {
             }
             let at = stack.last().map(|&(_, i)| i);
             parents.push(at);
-            let l = self.taffy.layout(node).map(|l| *l).unwrap_or_default();
+            let l = self.taffy.layout(node).copied().unwrap_or_default();
             let base = at.map_or((0.0, 0.0), |p| origin[p]);
             let (x, y) = (base.0 + l.location.x, base.1 + l.location.y);
             origin.push((x, y));
@@ -172,7 +172,6 @@ impl Layout {
         id: u64,
         cx: &Cx,
         root: Option<(f32, f32)>,
-        text: &mut Text,
         order: &mut Vec<(u64, NodeId)>,
     ) -> NodeId {
         let at = order.len();
@@ -189,7 +188,7 @@ impl Layout {
                     child_id = self::child_id(id, None, i);
                 }
                 ids.push(child_id);
-                self.sync(child, child_id, cx, None, text, order)
+                self.sync(child, child_id, cx, None, order)
             })
             .collect();
         let style = style_of(el, cx, root);

@@ -28,6 +28,9 @@ use crate::{
     Surface, Theme, Ui, render,
 };
 
+/// A view: the element tree for a state.
+type View<S> = Box<dyn Fn(&S) -> El<S>>;
+
 /// Input waiting for its handler, run at the start of the next frame.
 enum Action {
     Press(HitId),
@@ -77,7 +80,7 @@ pub struct Shown {
 /// hosts one in a window.
 pub struct Runtime<S> {
     state: S,
-    view: Box<dyn Fn(&S) -> El<S>>,
+    view: View<S>,
     theme: Theme,
     ui: Ui,
     scale: f32,
@@ -148,14 +151,14 @@ impl<S> Runtime<S> {
         if !self.queue.is_empty() {
             self.run_handlers();
         }
-        if self.stale_view {
-            self.root = (self.view)(&self.state);
-            self.views += 1;
-            self.stale_view = false;
-            self.stale_layout = true;
-        }
-        if self.stale_layout {
-            self.relayout();
+        if self.stale_view || self.stale_layout {
+            let before = keyed(&self.root, &self.laid, &self.theme);
+            if self.stale_view {
+                self.root = (self.view)(&self.state);
+                self.views += 1;
+                self.stale_view = false;
+            }
+            self.relayout(before);
         }
         if !self.stale_paint {
             return false;
@@ -181,8 +184,7 @@ impl<S> Runtime<S> {
         }
     }
 
-    fn relayout(&mut self) {
-        let before = keyed(&self.root, &self.laid, &self.theme);
+    fn relayout(&mut self, before: HashMap<u64, (Key, Snapshot)>) {
         let cx = Cx {
             theme: &self.theme,
             s: self.scale,
