@@ -1,10 +1,11 @@
 //! Portable process identity, frozen before the first native window.
 use std::sync::OnceLock;
 
-/// An app's names for its windows. See the module docs.
+/// Portable process names. Configure before the first window; Windows uses class names,
+/// Wayland uses `prefix` as app_id, and macOS leaves native bundle names unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Identity {
-    /// The window class prefix, e.g. `"stillkit"`.
+    /// Windows class prefix and Wayland app_id, e.g. `"stillkit"`.
     pub prefix: &'static str,
     /// Window classes of other windows that live in the desktop band beside this app's
     /// desktop surfaces (another process's backdrop, say). Desktop surfaces keep their order
@@ -31,3 +32,5 @@ pub fn set_identity(identity: Identity) -> Result<(), Identity> {
     let current = IDENTITY.get_or_init(|| identity);
     if *current == identity { Ok(()) } else { Err(*current) }
 }
+#[cfg(windows)]
+pub(crate) use crate::platform::windows::identity::{app_class, desktop_prop, is_desktop_class, surface_class};
