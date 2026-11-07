@@ -1,0 +1,54 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_CODEGEN_BACKEND: llvm
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: D:\stillkit-targets\O
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install repository toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> D:\\stillkit-targets\\O"
+      # GPU integration tests are feature-gated: compile/lint GPU code, never run it here.
+      - run: cargo test --workspace --features stillkit/golden,stillkit/serde
+      - run: cargo clippy --workspace --all-targets --features stillkit/golden,stillkit/serde,stillkit/gpu -- -D warnings
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Wayland and font dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev fonts-dejavu-core
+      - name: Install repository toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --features stillkit/golden,stillkit/serde
+  check-macos:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install repository toolchain and target
+        run: |
+          rustup show
+          rustup target add aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-check
+      - run: cargo check --workspace --target aarch64-apple-darwin
