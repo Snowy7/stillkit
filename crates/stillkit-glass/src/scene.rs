@@ -102,7 +102,7 @@ pub struct Container {
 /// Description of one glass element.
 ///
 /// ```
-/// use liquid_rust::{Glass, Material, Rect, Shape};
+/// use stillkit_glass::{Glass, Material, Rect, Shape};
 /// let button = Glass::new(Rect::new(20.0, 40.0, 58.0, 58.0))
 ///     .material(Material::clear())
 ///     .interactive();
@@ -279,7 +279,7 @@ const LENS_LIFT: f32 = 0.3;
 /// All glass on screen plus the shared appearance, light and touch state.
 ///
 /// ```
-/// use liquid_rust::{Glass, Rect, Scene};
+/// use stillkit_glass::{Glass, Rect, Scene};
 /// let mut scene = Scene::new();
 /// let id = scene.add(Glass::new(Rect::new(0.0, 0.0, 120.0, 44.0)));
 /// while scene.update(1.0 / 120.0) {} // materializes, then rests
@@ -506,7 +506,7 @@ impl Scene {
     /// act) instead of switching. Interrupting it mid-way carries on from where it is.
     ///
     /// ```
-    /// use liquid_rust::{Color, Glass, Material, Rect, Scene, Spring};
+    /// use stillkit_glass::{Color, Glass, Material, Rect, Scene, Spring};
     /// let mut scene = Scene::new();
     /// let copy = scene.add(Glass::new(Rect::new(0.0, 0.0, 100.0, 40.0)).interactive());
     /// scene.set_material_with(copy, Material::tinted(Color::BLUE), Spring::new(0.3, 0.0));

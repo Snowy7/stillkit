@@ -12,6 +12,8 @@ pub const PAD: Len = Len::Theme(|t| t.metrics.pad);
 pub const GAP: Len = Len::Theme(|t| t.metrics.gap);
 /// The space between the items of a list or a row of controls (a gap, not a height).
 pub const ITEM: Len = Len::Theme(|t| t.metrics.item);
+/// A one-line list row's height.
+pub const ROW_SINGLE: Len = Len::Theme(|t| t.metrics.row_single);
 /// A list row's height (two lines).
 pub const ROW: Len = Len::Theme(|t| t.metrics.row);
 /// A control's height (buttons, fields).

@@ -838,10 +838,10 @@ impl Renderer {
     /// texture to a second renderer as the `content` of the upper layers.
     ///
     /// ```no_run
-    /// # fn demo(device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, scene: &liquid_rust::Scene,
-    /// #     lower: &mut liquid_rust::Renderer, upper: &mut liquid_rust::Renderer,
+    /// # fn demo(device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, scene: &stillkit_glass::Scene,
+    /// #     lower: &mut stillkit_glass::Renderer, upper: &mut stillkit_glass::Renderer,
     /// #     content: &wgpu::TextureView, middle: &wgpu::TextureView, target: &wgpu::TextureView) {
-    /// # use liquid_rust::Frame;
+    /// # use stillkit_glass::Frame;
     /// # let (size, scale) = ((1206, 2622), 3.0);
     /// lower.render_layers(device, queue, encoder, &Frame { content, target: middle, size, scale, content_changed: false, copy_content: true }, scene, ..2);
     /// // ... draw the labels of layers 0 and 1 into `middle` ...

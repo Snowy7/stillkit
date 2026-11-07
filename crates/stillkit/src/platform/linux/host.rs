@@ -11,3 +11,16 @@ pub fn shift_down() -> bool {
 pub fn wait() {
     super::surface::wait();
 }
+
+/// Whether the user asked for less motion: GNOME's `enable-animations` set to false (Settings >
+/// Accessibility > Reduce animation). Read once through `gsettings`; elsewhere, or when it
+/// can't be read, motion stays on.
+pub fn reduced_motion() -> bool {
+    static REDUCED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *REDUCED.get_or_init(|| {
+        std::process::Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "enable-animations"])
+            .output()
+            .is_ok_and(|out| out.status.success() && out.stdout.trim_ascii() == b"false")
+    })
+}
