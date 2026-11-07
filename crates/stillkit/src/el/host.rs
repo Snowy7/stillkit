@@ -325,6 +325,12 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     let started = Instant::now();
     // Display-rate frames, only while something animates: dropping them stops the producer.
     let mut frames: Option<(AnimationFrames, Instant)> = None;
+    // One wake for the runtime's next timer (a tooltip's delay, a toast), none once it has none.
+    let mut waker = Waker::default();
+    // The client area's top-left on screen (pointer events correct it), for popup surfaces,
+    // and the screen area around the window last handed to the runtime.
+    #[cfg(windows)]
+    let (mut client, mut popups, mut around) = (origin, Popups::default(), None);
     // Events our own calls queued (showing, presenting) wait here instead of in the queue.
     let mut held = next_event();
     loop {
@@ -333,7 +339,15 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
         }
         for (id, event) in held.take().into_iter().chain(std::iter::from_fn(next_event)) {
             if id != surface.id() {
+                #[cfg(windows)]
+                if let Some(event) = popups.input(id, event) {
+                    rt.handle(&event);
+                }
                 continue;
+            }
+            #[cfg(windows)]
+            if let Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) = event {
+                client = (p.screen.0 - p.at.x as i32, p.screen.1 - p.at.y as i32);
             }
             match event {
                 Event::Close => return Ok(()),
@@ -352,21 +366,147 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                 event => rt.handle(&event),
             }
         }
+        #[cfg(windows)]
+        if around != Some((client, rt.size())) {
+            around = Some((client, rt.size()));
+            rt.set_screen(Some(screen_around(client, rt.size())));
+        }
         if rt.frame(started.elapsed().saturating_sub(rt.now())) {
             chrome(&surface, &rt);
             rt.present(&mut surface, origin)?;
+            #[cfg(windows)]
+            popups.sync(&mut rt, client)?;
         }
-        if !rt.animating() {
+        // Where the host has no one-shot wake, frames stand in while a timer waits.
+        let waits = !Waker::ONE_SHOT && rt.wake_at().is_some();
+        if !rt.animating() && !waits {
             frames = None;
         } else if frames.as_ref().is_none_or(|(_, since)| since.elapsed() >= FRAMES) {
             frames = Some((surface.animation_frames(FRAMES), Instant::now()));
         }
+        waker.arm(&surface, rt.wake_at().map(|at| started + at));
         held = next_event();
     }
 }
 
 /// How long one frame producer runs before it is renewed (if anything still moves).
 const FRAMES: Duration = Duration::from_secs(10);
+
+/// Wakes the UI thread once at the runtime's next timer: a sleeping thread posts one message
+/// to the window, unless a newer deadline (or none) replaced it. Nothing stays armed once the
+/// runtime has no timer.
+#[derive(Default)]
+struct Waker {
+    armed: Option<Instant>,
+    generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Waker {
+    /// Whether this platform wakes the message wait from another thread (else frames do).
+    const ONE_SHOT: bool = cfg!(windows);
+
+    fn arm(&mut self, surface: &Surface, at: Option<Instant>) {
+        use std::sync::atomic::Ordering;
+        if at == self.armed {
+            return;
+        }
+        self.armed = at;
+        let mine = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        #[cfg(windows)]
+        if let Some(at) = at {
+            let generation = self.generation.clone();
+            let hwnd = surface.hwnd().0 as isize;
+            let _ = std::thread::Builder::new().name("ui-wake".into()).spawn(move || {
+                std::thread::sleep(at.saturating_duration_since(Instant::now()));
+                if generation.load(Ordering::Relaxed) == mine {
+                    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+                    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_NULL};
+                    // SAFETY: posting is safe from any thread; a destroyed window refuses it.
+                    let _ = unsafe { PostMessageW(Some(HWND(hwnd as _)), WM_NULL, WPARAM(0), LPARAM(0)) };
+                }
+            });
+        }
+        #[cfg(not(windows))]
+        let _ = (surface, mine);
+    }
+}
+
+/// The work area of the monitor under the middle of the window, in the window's pixels
+/// (where overlays may escape to).
+#[cfg(windows)]
+fn screen_around(client: (i32, i32), size: (u32, u32)) -> Rect {
+    let (cx, cy) = (client.0 + size.0 as i32 / 2, client.1 + size.1 as i32 / 2);
+    let (l, t, r, b) = crate::screen_at(cx, cy).work;
+    Rect::new((l - client.0) as f32, (t - client.1) as f32, (r - l) as f32, (b - t) as f32)
+}
+
+/// Popup surfaces showing the overlays that escaped the window ([`Runtime::popups`]): made
+/// when one opens (or taken from a pool), shown without activation so keys stay with the
+/// window, and hidden again (their bitmaps released) when it closes.
+#[cfg(windows)]
+#[derive(Default)]
+struct Popups {
+    open: Vec<(u64, Surface, Rect)>,
+    pool: Vec<Surface>,
+}
+
+#[cfg(windows)]
+impl Popups {
+    /// A popup surface's event as the runtime takes it: pointers in the window's pixels.
+    /// The pointer leaving a popup is the window's business (it gets the pointer next).
+    fn input(&self, id: crate::SurfaceId, event: Event) -> Option<Event> {
+        let (_, _, rect) = self.open.iter().find(|(_, s, _)| s.id() == id)?;
+        let shift = |mut p: crate::Pointer| {
+            p.at = crate::Point::new(p.at.x + rect.left, p.at.y + rect.top);
+            p
+        };
+        Some(match event {
+            Event::Move(p) => Event::Move(shift(p)),
+            Event::Press(p, b) => Event::Press(shift(p), b),
+            Event::Release(p, b) => Event::Release(shift(p), b),
+            Event::DoubleClick(p, b) => Event::DoubleClick(shift(p), b),
+            Event::Wheel(p, d) => Event::Wheel(shift(p), d),
+            Event::Invoke(_) | Event::Focus(_) => event,
+            _ => return None,
+        })
+    }
+
+    fn sync<S>(&mut self, rt: &mut Runtime<S>, client: (i32, i32)) -> Result<()> {
+        let want = rt.popups().to_vec();
+        let mut i = 0;
+        while i < self.open.len() {
+            if want.iter().any(|p| p.id == self.open[i].0) {
+                i += 1;
+                continue;
+            }
+            let (_, mut surface, _) = self.open.swap_remove(i);
+            surface.hide();
+            surface.release();
+            surface.discard_events();
+            self.pool.push(surface);
+        }
+        for popup in want {
+            let k = match self.open.iter().position(|(id, ..)| *id == popup.id) {
+                Some(k) => k,
+                None => {
+                    let surface = match self.pool.pop() {
+                        Some(surface) => surface,
+                        None => Surface::new(Kind::Popup { activate: false }, "Overlay", Role::Menu)?,
+                    };
+                    self.open.push((popup.id, surface, popup.rect));
+                    self.open.len() - 1
+                }
+            };
+            let r = popup.rect;
+            let at = (client.0 + r.left as i32, client.1 + r.top as i32);
+            let (_, surface, rect) = &mut self.open[k];
+            *rect = r;
+            surface.present(rt.ui(), at, (r.width() as u32, r.height() as u32), popup.list)?;
+            surface.show();
+        }
+        Ok(())
+    }
+}
 
 /// The top-left that centres `size` on the primary screen.
 fn centred((w, h): (u32, u32)) -> (i32, i32) {

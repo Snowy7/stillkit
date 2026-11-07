@@ -17,6 +17,9 @@ pub struct Demo {
     /// Where the context menu is open, design px.
     pub menu: Option<(f32, f32)>,
     pub confirm: bool,
+    /// The chosen size, and whether its menu is open.
+    pub size: usize,
+    pub sizes: bool,
     pub toasts: Vec<(u32, &'static str)>,
     pub next: u32,
     pub deleted: u32,
@@ -28,6 +31,11 @@ impl Demo {
         self.toasts.push((self.next, message));
     }
 }
+
+/// The size menu's choices: a long menu, taller than the room above or below its button, so
+/// it opens in a popup surface outside the window when the host can show one.
+pub const SIZES: [&str; 10] =
+    ["Tiny", "Small", "Medium", "Large", "Huge", "Giant", "Vast", "Immense", "Colossal", "Titanic"];
 
 /// How long a toast stays.
 pub const TOAST: Duration = Duration::from_secs(3);
@@ -106,6 +114,24 @@ pub fn view(s: &Demo) -> El<Demo> {
     .open(s.confirm)
     .on_dismiss(|s: &mut Demo| s.confirm = false);
 
+    let sizes = menu(col().key("sizes").pad(4.0).fill(token::ELEVATED).radius(token::RADIUS_CARD).shadow().children(
+        SIZES.iter().enumerate().map(|(i, name)| {
+            row()
+                .key(*name)
+                .role(Role::MenuItemRadio)
+                .checked(i == s.size)
+                .h(28.0)
+                .pad_x(10.0)
+                .radius(6.0)
+                .align(Align::Center)
+                .child(text(*name))
+                .on_press(move |s: &mut Demo| (s.size, s.sizes) = (i, false))
+        }),
+    ))
+    .match_width()
+    .open(s.sizes)
+    .on_dismiss(|s: &mut Demo| s.sizes = false);
+
     let context = s.menu.map(|(x, y)| {
         menu(
             col()
@@ -153,7 +179,15 @@ pub fn view(s: &Demo) -> El<Demo> {
                         .tooltip("Copy the link")
                         .on_press(|s: &mut Demo| s.toast("Link copied")),
                 )
-                .child(button("delete", "Delete…").on_press(|s: &mut Demo| s.confirm = true).overlay(confirm)),
+                .child(button("delete", "Delete…").on_press(|s: &mut Demo| s.confirm = true).overlay(confirm))
+                .child(
+                    button("size", SIZES[s.size])
+                        .w(110.0)
+                        .label("Size")
+                        .value(SIZES[s.size])
+                        .on_press(|s: &mut Demo| s.sizes = !s.sizes)
+                        .overlay(sizes),
+                ),
         )
         .child(
             col()
