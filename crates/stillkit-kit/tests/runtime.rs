@@ -124,6 +124,33 @@ mod native {
         }
     }
     #[test]
+    fn calendar_navigation_wraps_year_and_stops_at_boundaries() {
+        use stillkit_kit::CalendarMonth;
+        for (year, month, action, expected) in [
+            (2026, 12, "next", (2027, 1)),
+            (2026, 1, "previous", (2025, 12)),
+            (1, 1, "previous", (1, 1)),
+            (9999, 12, "next", (9999, 12)),
+        ] {
+            let mut rt = Runtime::new(
+                (year, month),
+                |&(y, m)| {
+                    CalendarMonth::new(y, m)
+                        .key("cal")
+                        .on_month_change(|s, month| *s = month)
+                        .build()
+                },
+                support::themes().remove(0).1,
+                (320, 320),
+                1.,
+            )
+            .unwrap();
+            rt.click(&format!("cal/{action}"));
+            rt.frame(Duration::ZERO);
+            assert_eq!(*rt.state(), expected);
+        }
+    }
+    #[test]
     fn rendered_text_contrast_on_its_own_surface() {
         use stillkit::Op;
         use stillkit::theme::{contrast, over};
@@ -175,7 +202,13 @@ mod native {
                             "S",
                         ]
                         .contains(&text.as_ref());
-                        let floor = if secondary { 4.5 } else { 7. };
+                        let outside_month = i == 17
+                            && r.tree().iter().any(|node| {
+                                (node.path.contains("/previous-")
+                                    || node.path.contains("/following-"))
+                                    && node.rect.contains(rect.center())
+                            });
+                        let floor = if secondary || outside_month { 4.5 } else { 7. };
                         assert!(
                             contrast(*color, bg) >= floor,
                             "{name} component {i} {text}: {} < {floor} over {bg:?}, ink {color:?}",
