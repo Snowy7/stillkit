@@ -94,10 +94,12 @@ impl Snapshot {
                 x1: f64::from(hit.rect.right),
                 y1: f64::from(hit.rect.bottom),
             });
-            if hit.enabled {
+            // A label is announced as it is; only what does something offers actions.
+            if hit.actionable {
                 node.add_action(Action::Click);
                 node.add_action(Action::Focus);
-            } else {
+            }
+            if !hit.enabled {
                 node.set_disabled();
             }
             if let Some(on) = hit.checked {
@@ -115,7 +117,7 @@ impl Snapshot {
                         node.set_min_numeric_value(*min);
                         node.set_max_numeric_value(*max);
                         node.set_numeric_value_step(*step);
-                        if hit.enabled {
+                        if hit.actionable {
                             for action in [Action::SetValue, Action::Increment, Action::Decrement] {
                                 node.add_action(action);
                             }
@@ -123,11 +125,11 @@ impl Snapshot {
                     }
                     Semantics::Text(value) => {
                         node.set_value(&**value);
-                        if hit.enabled {
+                        if hit.actionable {
                             node.add_action(Action::SetValue);
                         }
                     }
-                    Semantics::Reorder if hit.enabled => {
+                    Semantics::Reorder if hit.actionable => {
                         node.add_action(Action::CustomAction);
                         node.set_custom_actions(vec![
                             accesskit::CustomAction {
@@ -149,7 +151,7 @@ impl Snapshot {
             (node_id(hit.id), node)
         }));
         for hit in &hits {
-            if !hit.enabled
+            if !hit.actionable
                 || !self
                     .semantics
                     .iter()

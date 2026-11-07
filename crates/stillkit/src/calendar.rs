@@ -196,6 +196,7 @@ impl MonthGrid {
                 role: Role::Button,
                 label: date.key().into(),
                 enabled: true,
+                actionable: true,
                 checked: Some(*date == today),
             });
         }

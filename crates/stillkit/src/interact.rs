@@ -100,7 +100,7 @@ impl Interaction {
     /// Feeds one event; `list` is the display list on screen (its hits).
     pub fn handle(&mut self, list: &DisplayList, event: &Event) -> Response {
         let before = self.clone();
-        let at = |p: Point| list.hit_at(p).filter(|h| h.enabled).map(|h| h.id);
+        let at = |p: Point| list.hit_at(p).filter(|h| h.actionable).map(|h| h.id);
         let mut fired = None;
         match *event {
             Event::Move(p) => self.hover = at(p.at),
@@ -131,7 +131,7 @@ impl Interaction {
                 0x0D | 0x20 => {
                     fired = self
                         .focus
-                        .filter(|id| list.hits.iter().any(|h| h.id == *id && h.enabled));
+                        .filter(|id| list.hits.iter().any(|h| h.id == *id && h.actionable));
                 }
                 0x1B if self.focus_visible => {
                     self.focus = None;
@@ -153,7 +153,7 @@ impl Interaction {
         }
     }
 
-    /// Moves keyboard focus `delta` items through the enabled hits, wrapping (Tab is +1,
+    /// Moves keyboard focus `delta` items through the actionable hits, wrapping (Tab is +1,
     /// Shift+Tab -1; the caller knows the modifier).
     pub fn step(&mut self, list: &DisplayList, delta: i32) {
         self.focus = focus::step(&list.hits, self.focus, delta);
@@ -175,6 +175,7 @@ mod tests {
             role: accesskit::Role::Button,
             label: "".into(),
             enabled,
+            actionable: enabled,
             checked: None,
         };
         DisplayList {
@@ -247,5 +248,15 @@ mod tests {
         assert_eq!(i.focus, Some(1), "wraps over the disabled item");
         assert_eq!(i.handle(&list, &Event::Key(0x0D)), Response::Activate(1));
         assert_eq!(i.handle(&list, &Event::Leave), Response::Unchanged);
+    }
+
+    #[test]
+    fn an_enabled_label_takes_no_hover_or_press() {
+        let mut list = list();
+        list.hits[0].actionable = false;
+        let mut i = Interaction::default();
+        assert_eq!(i.handle(&list, &Event::Move(at(5.0))), Response::Unchanged);
+        i.handle(&list, &Event::Press(at(5.0), Button::Left));
+        assert_eq!((i.hover, i.pressed), (None, None));
     }
 }

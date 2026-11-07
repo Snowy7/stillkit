@@ -28,7 +28,7 @@ use super::layout::{Cx, Laid, Layout};
 use super::token;
 use crate::interact::{Response, State};
 use crate::{
-    Button, DisplayList, Event, Frame, HitId, Image, Interaction, Op, Point, Pointer, Rect, Rgba,
+    Button, DisplayList, Event, Frame, Hit, HitId, Image, Interaction, Op, Point, Pointer, Rect, Rgba,
     Surface, Theme, Ui, render,
 };
 
@@ -825,8 +825,7 @@ fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses
     let paints = matches!(el.what, What::Paint(_));
     let controls = live && el.interactive() && !paints;
     if live && el.hit() && !paints {
-        let label = label_of(el);
-        f.hit(me.hit, rect, role_of(el), &label, enabled, el.sem.checked);
+        f.list.hits.push(hit(el, me.hit, rect));
     }
     if pose.shadow > 0.0 {
         let e = theme.elevation;
@@ -880,8 +879,7 @@ fn paint_el<S>(f: &mut Frame, scene: &Scene<S>, el: &El<S>, laid: &[Laid], poses
         What::Paint(painter) => {
             painter(f, rect, me.hit);
             if live && el.hit() && !f.list.hits[hits..].iter().any(|h| h.id == me.hit) {
-                let label = label_of(el);
-                f.hit(me.hit, rect, role_of(el), &label, enabled, el.sem.checked);
+                f.list.hits.push(hit(el, me.hit, rect));
             }
         }
     }
@@ -919,5 +917,19 @@ fn fade(ops: &mut [Op], by: f32) {
             Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
             Op::TextField { .. } | Op::Clip { .. } | Op::Unclip => {}
         }
+    }
+}
+
+/// `el`'s hit item at `rect`: announced (as disabled when it is), and actionable, taking
+/// hover, press and focus, only when it has a handler or is `focusable`.
+fn hit<S>(el: &El<S>, id: HitId, rect: Rect) -> Hit {
+    Hit {
+        id,
+        rect,
+        role: role_of(el),
+        label: label_of(el),
+        enabled: !el.sem.disabled,
+        actionable: el.interactive() && !el.sem.disabled,
+        checked: el.sem.checked,
     }
 }
