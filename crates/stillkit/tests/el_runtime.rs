@@ -107,7 +107,7 @@ fn tab_focuses_the_switch_and_enter_presses_it() {
 #[test]
 fn a_snapshot_renders_at_the_requested_scale() {
     let mut rt = runtime(2.0);
-    rt.update(|s| s.on = true);
+    rt.update_instant(|s| s.on = true); // the settled frame: the knob springs otherwise
     rt.frame(FRAME);
     let image = rt.snap().unwrap();
     assert_eq!((image.width, image.height), (640, 360));

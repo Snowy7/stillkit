@@ -10,7 +10,7 @@ use super::{Len, Motion, Paint};
 pub const PAD: Len = Len::Theme(|t| t.metrics.pad);
 /// The space between a surface's blocks.
 pub const GAP: Len = Len::Theme(|t| t.metrics.gap);
-/// A menu or list item's height.
+/// The space between the items of a list or a row of controls (a gap, not a height).
 pub const ITEM: Len = Len::Theme(|t| t.metrics.item);
 /// A list row's height (two lines).
 pub const ROW: Len = Len::Theme(|t| t.metrics.row);

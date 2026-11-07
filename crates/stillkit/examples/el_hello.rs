@@ -1,4 +1,5 @@
-//! The element tree's hello: a switch flipping a label, drawn with elements only.
+//! The element tree's hello: a switch flipping a label, drawn with elements only; its knob
+//! springs across.
 //!
 //!   cargo run -p stillkit --example el_hello
 //!   cargo run -p stillkit --example el_hello -- --snap hello.png --scale 2
@@ -33,7 +34,9 @@ pub fn view(s: &Hello) -> El<Hello> {
                 .fill(if s.on { token::ACCENT } else { token::FILL })
                 .on_press(|s: &mut Hello| s.on = !s.on)
                 .child(
+                    // The view says where the knob ends up; it springs across.
                     el().key("knob")
+                        .animate()
                         .size(knob)
                         .radius(knob / 2.0)
                         .fill(token::KNOB)
