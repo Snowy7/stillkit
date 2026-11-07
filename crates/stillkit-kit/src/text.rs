@@ -147,6 +147,7 @@ impl<S: 'static> TextField<S> {
         self
     }
     pub fn build(self) -> El<S> {
+        let radius = if self.rows.is_some() { token::RADIUS_CARD } else { token::RADIUS_CONTROL };
         let mut editor = if let Some(rows) = self.rows {
             el::text_area(self.key.clone()).rows(rows)
         } else {
@@ -166,9 +167,9 @@ impl<S: 'static> TextField<S> {
             .font(TextRole::Body)
             .color(LABEL)
             .pad_x(10.)
-            .pad_y(8.)
+            .pad_y(token::ITEM)
             .grow(1.)
-            .radius(token::RADIUS_CONTROL)
+            .radius(radius)
             .motion(token::MOTION_INTERACTIVE);
         if self.secure && !self.revealed {
             editor = editor.secure();
@@ -204,9 +205,9 @@ impl<S: 'static> TextField<S> {
         let mut well = row()
             .align(Align::Center)
             .fill(token::WELL)
-            .radius(token::RADIUS_CONTROL);
+            .radius(radius);
         if let Some(glyph) = self.glyph {
-            well = well.child(icon(glyph).size(18.).color(token::TERTIARY).pad_x(6.));
+            well = well.pad_x(10.).gap(token::ITEM).child(icon(glyph).size(token::ICON).color(token::TERTIARY));
         }
         if self.inside && !self.label.is_empty() {
             well = well.child(text(self.label.clone()).color(SECONDARY).pad_x(8.));

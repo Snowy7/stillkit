@@ -173,7 +173,7 @@ impl<S: 'static> Button<S> {
         let mut n = row()
             .h(token::CONTROL)
             .pad_x(14.)
-            .gap(6.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .justify(Justify::Center)
             .radius(token::RADIUS_CONTROL)
@@ -319,7 +319,7 @@ impl<S: 'static> Checkbox<S> {
         }
         let n = row()
             .min_h(token::HIT)
-            .gap(8.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .radius(token::RADIUS_SMALL)
             .role(Role::CheckBox)
@@ -710,10 +710,10 @@ impl<S: 'static> ListRow<S> {
             .min_h(if self.subtitle.is_some() {
                 token::ROW
             } else {
-                Len::Theme(|t| t.metrics.row_single)
+                token::ROW_SINGLE
             })
             .pad_x(10.)
-            .gap(10.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .radius(token::RADIUS_CARD)
             .role(Role::ListItem)
@@ -863,7 +863,7 @@ impl EmptyState {
     pub fn build<S>(self) -> El<S> {
         col()
             .pad(token::PAD)
-            .gap(8.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .role(Role::Group)
             .label(self.title.clone())
