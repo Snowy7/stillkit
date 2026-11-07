@@ -39,6 +39,17 @@ pub fn install(backdrop: Rc<dyn Backdrop>) {
     BACKDROP.with_borrow_mut(|b| *b = Some(backdrop));
 }
 
-pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
+/// The installed backdrop, if any.
+pub(crate) fn installed() -> Option<Rc<dyn Backdrop>> {
     BACKDROP.with_borrow(Clone::clone)
+}
+
+/// Where this thread's glass goes: only an installed backdrop (no system one on this platform).
+pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
+    installed()
+}
+
+/// Whether a built-in system backdrop can show `material`: there is none on this platform.
+pub(crate) fn system_serves(_material: &GlassMaterial) -> bool {
+    false
 }

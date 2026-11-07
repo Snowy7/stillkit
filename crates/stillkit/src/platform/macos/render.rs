@@ -79,7 +79,7 @@ impl Image {
 /// Hybrid on Metal when this thread renders on the GPU (`gpu` feature).
 pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
     #[cfg(feature = "gpu")]
-    if crate::platform::render().resolve(crate::glass::wanted(), crate::glass::backdrop().is_some())
+    if crate::platform::render().resolve(crate::glass::wanted(), crate::glass::cpu_backdrop())
         == crate::platform::Render::Gpu
     {
         return super::gpu::render(ui, list, width, height);

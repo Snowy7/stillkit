@@ -15,6 +15,7 @@ pub mod modules;
 pub mod render;
 pub mod screen;
 pub mod surface;
+pub mod system_backdrop;
 pub mod text;
 pub mod text_field;
 pub mod timing;

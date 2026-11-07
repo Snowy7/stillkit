@@ -51,8 +51,21 @@ pub fn install_system() {
     SYSTEM.with_borrow_mut(|b| *b = Some(Rc::new(SystemBackdrop::default())));
 }
 
+/// The app's own backdrop, if one is installed.
+pub(crate) fn installed() -> Option<Rc<dyn Backdrop>> {
+    BACKDROP.with_borrow(Clone::clone)
+}
+
+/// Where this thread's glass goes: the installed backdrop, else the system one if enabled.
 pub(crate) fn backdrop() -> Option<Rc<dyn Backdrop>> {
-    BACKDROP.with_borrow(Clone::clone).or_else(|| SYSTEM.with_borrow(Clone::clone))
+    installed().or_else(|| SYSTEM.with_borrow(Clone::clone))
+}
+
+/// Whether the system frost can draw `material` on a CPU surface: only lens-free materials
+/// (the system views have no refraction or rim), and only once [`install_system`] enabled it.
+/// This keeps `Render::Auto` on the CPU for them, as on Windows.
+pub(crate) fn system_serves(material: &GlassMaterial) -> bool {
+    !material.lensed() && SYSTEM.with_borrow(|s| s.as_ref().is_some_and(|s| s.available()))
 }
 
 /// AppKit's own material views under a surface's content view, one per surface.

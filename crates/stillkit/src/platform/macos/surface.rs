@@ -331,7 +331,7 @@ impl Surface {
             canvas: None,
             origin: (i32::MIN, i32::MIN),
             size: (0, 0),
-            mode: render.resolve(crate::glass::wanted(), super::glass::backdrop().is_some()),
+            mode: render.resolve(crate::glass::wanted(), crate::glass::cpu_backdrop()),
             semantics: RefCell::default(),
             glass: Cell::new(None),
             glass_style: Cell::new(Default::default()),

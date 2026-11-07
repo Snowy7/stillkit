@@ -453,7 +453,7 @@ impl Surface {
                 #[cfg(feature = "gpu")]
                 glass: RefCell::default(),
                 mode: crate::platform::render()
-                    .resolve(crate::glass::wanted(), super::glass::backdrop().is_some()),
+                    .resolve(crate::glass::wanted(), crate::glass::cpu_backdrop()),
                 size: (0, 0),
             })
         })
@@ -819,7 +819,7 @@ impl Surface {
         mode: crate::platform::Render,
     ) -> Result<Self> {
         let mut surface = Self::new(kind, name, role)?;
-        surface.mode = mode.resolve(crate::glass::wanted(), super::glass::backdrop().is_some());
+        surface.mode = mode.resolve(crate::glass::wanted(), crate::glass::cpu_backdrop());
         Ok(surface)
     }
     pub fn render(&self) -> crate::platform::Render {

@@ -7,9 +7,13 @@
 //! The surface still fills its whole body at least at [`Rgba::HIT`](crate::Rgba::HIT): clicks
 //! land on it, and the glass under it is never hit. Without a backdrop (no engine, a golden
 //! test) [`available`] is false and views draw their own fill instead.
+//!
+//! **Which backdrop.** An installed one ([`install`]: mypaper's engine) always wins. Without one,
+//! Windows has a built-in system backdrop (docs/ui.md, "System backdrop"): DWM's blur under
+//! the surface, frost with no lens, in CPU mode with no GPU device in the process. Other
+//! platforms have none yet.
 
 use std::cell::RefCell;
-
 
 use crate::geom::{Rect, Rgba};
 
@@ -92,8 +96,16 @@ impl Glass {
     }
 }
 
+impl GlassMaterial {
+    /// Whether it has a lens: refraction or a rim light, which only the GPU glass and the engine
+    /// draw. The flat looks (One UI, Fluent) keep both at 0.
+    pub fn lensed(&self) -> bool {
+        self.refraction > 0.0 || self.highlight > 0.0
+    }
+}
+
 pub use crate::platform::current::glass::{Backdrop, install};
-pub(crate) use crate::platform::current::glass::backdrop;
+pub(crate) use crate::platform::current::glass::{backdrop, installed, system_serves};
 thread_local! { static STYLE: RefCell<Option<GlassMaterial>> = const { RefCell::new(None) }; }
 /// Sets the popups' material for the active style (`None`: no glass, a drawn fill).
 pub fn set_style(material: Option<GlassMaterial>) {
@@ -101,10 +113,17 @@ pub fn set_style(material: Option<GlassMaterial>) {
 }
 
 /// Whether the active style wants glass ([`set_style`] holds a material), whether or not any
-/// can show now. [`Render::Auto`](crate::platform::Render::Auto) surfaces go GPU on it when no
-/// external backdrop is installed.
+/// can show now. [`Render::Auto`](crate::platform::Render::Auto) surfaces go GPU on it unless
+/// [`cpu_backdrop`] draws it.
 pub fn wanted() -> bool {
     STYLE.with_borrow(|s| s.is_some())
+}
+
+/// Whether a CPU surface gets the wanted glass in full from a backdrop: always from an
+/// installed one; from the system backdrop when it is available and the material has no lens.
+/// The second argument of [`Render::resolve`](crate::platform::Render::resolve).
+pub fn cpu_backdrop() -> bool {
+    installed().is_some() || STYLE.with_borrow(|s| s.is_some_and(|m| system_serves(&m)))
 }
 
 /// The popups' material, if glass can show now.

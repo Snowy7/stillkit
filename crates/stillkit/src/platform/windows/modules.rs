@@ -36,7 +36,8 @@ pub fn loaded() -> Vec<String> {
 }
 
 /// Is `name` (a DLL's base name) a GPU vendor's user-mode driver: `nv*umx`, `nvgpucomp64`,
-/// `amdxc64`, `amdxx64` (AMD's Direct3D 11 driver, measured on the Ryzen iGPU) or `atidx*`?
+/// `amdxc64`, `amdxx64` (AMD's Direct3D 11 driver, measured on the Ryzen iGPU), `atidx*` or
+/// Intel's `igd*`?
 pub fn is_gpu_driver(name: &str) -> bool {
     let name = name.to_lowercase();
     let stem = name.strip_suffix(".dll").unwrap_or(&name);
@@ -45,6 +46,7 @@ pub fn is_gpu_driver(name: &str) -> bool {
         || stem == "amdxc64"
         || stem == "amdxx64"
         || stem.starts_with("atidx")
+        || stem.starts_with("igd")
 }
 
 /// The GPU drivers loaded into this process (empty while it has only CPU surfaces).
@@ -65,6 +67,8 @@ mod tests {
             "amdxc64.dll",
             "amdxx64.dll",
             "atidxx64.dll",
+            "igd10iumd64.dll",
+            "igd12umd64.dll",
         ] {
             assert!(is_gpu_driver(driver), "{driver}");
         }
