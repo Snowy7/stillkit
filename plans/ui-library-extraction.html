@@ -274,6 +274,44 @@ tx.set_theme(Theme::one_ui(..))                      // live switch; colours spr
   <li>IME: text-input-v3 in Mutter and KWin, IBus as fallback. Accessibility: AccessKit's AT-SPI adapter. Blur: KDE's blur protocol; newer Mutter has <code>ext-background-effect-v1</code>, not yet on this host.</li>
 </ul>
 
+<h2>Status, 2026-11-08: feature-complete for 0.1, live testing left</h2>
+<div class="answer">
+  <p><strong>On stillkit <code>main</code> (CI green on Windows, Linux and the macOS check):</strong></p>
+  <ul>
+    <li><strong>Platforms.</strong>
+      <ul>
+        <li>Windows: CPU and GPU.</li>
+        <li>Linux: Wayland, CPU and GPU, AT-SPI opt-in.</li>
+        <li>macOS: AppKit, CoreGraphics + CoreText, GPU on Metal. Compile-checked only.</li>
+      </ul>
+    </li>
+    <li><strong>Core.</strong> Element tree with layout, animation, keys and focus groups, scroll views, anchored overlays (popups escape the window), text input with IME, rotation, spin, and arcs from any angle.</li>
+    <li><strong>Looks and render modes.</strong> Looks as mixable parts. Render modes Cpu, Gpu and Auto, chosen per surface.</li>
+    <li><strong>Glass and shadows.</strong>
+      <ul>
+        <li>Liquid Glass in-process via <code>stillkit-glass</code>.</li>
+        <li>System frost on Windows CPU via DWM: 8.4 MB, no GPU driver.</li>
+        <li>Real soft shadows with elevation levels.</li>
+      </ul>
+    </li>
+    <li><strong>Components.</strong> <code>stillkit-kit</code>, about 45 components: buttons, fields, text area, combobox, command palette, select, menus, dialogs, toasts, tabs, table, tree, sidebar, chart and more, polished.</li>
+    <li><strong>Docs and process.</strong> README, eleven guides, a showcase app, CI, an API review, and a doc comment on every public item.</li>
+  </ul>
+  <p><strong>mypaper:</strong> branch <code>t3/0d9e3250</code> builds on it. After every merge the same 15 tests fail as on <code>main</code>, with identical golden pixel diffs.</p>
+  <p><strong>Left:</strong></p>
+  <ul>
+    <li>Live tests:
+      <ul>
+        <li>the macOS checklist (docs/ui.md);</li>
+        <li>Linux typing and AT-SPI on m6u;</li>
+        <li>mypaper's live before/after against <code>main</code> before its branch merges.</li>
+      </ul>
+    </li>
+    <li>A lazy AT-SPI start on Linux, so it needs no opt-in.</li>
+    <li>Your call on darker Solid and Mono shadows in dark mode.</li>
+  </ul>
+</div>
+
 <h2>Render modes and glass (added 2026-11-07)</h2>
 <p>Liquid Glass is now stillkit's own: <code>crates/stillkit-glass</code> is liquid-rust by al1h3n (MIT OR Apache-2.0, credited), with mypaper's speedups. It already does liquid merging (a smooth signed-distance union per container) and morphs. mypaper never wired those up.</p>
 <table>
