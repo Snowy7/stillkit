@@ -622,8 +622,6 @@ impl<S> Runtime<S> {
         if escaped.is_empty() {
             return None;
         }
-        let e = self.theme.elevation;
-        let room = ((e.spread + e.drop) * self.scale).ceil();
         let mut window = DisplayList {
             focus: list.focus,
             ..DisplayList::default()
@@ -631,11 +629,12 @@ impl<S> Runtime<S> {
         let (mut op, mut hit) = (0, 0);
         for (id, ops, hits) in escaped {
             let Some(&panel) = self.lifted.get(id) else { continue };
+            let room = shadow_room(&list.ops[ops.clone()]);
             let rect = Rect {
-                left: (panel.left - room).floor(),
-                top: (panel.top - room).floor(),
-                right: (panel.right + room).ceil(),
-                bottom: (panel.bottom + room).ceil(),
+                left: (panel.left - room.left).floor(),
+                top: (panel.top - room.top).floor(),
+                right: (panel.right + room.right).ceil(),
+                bottom: (panel.bottom + room.bottom).ceil(),
             };
             let own = DisplayList {
                 ops: list.ops[ops.clone()].to_vec(),
@@ -726,6 +725,29 @@ impl<S> Runtime<S> {
 pub(super) const MENU: KeyCode = KeyCode(0x5D);
 
 /// The tooltip layer and entry for `trigger`.
+/// How far past its panel, per side, a popup's shadows reach (from their geometry, not their
+/// place, so a panel scaling in keeps one window size).
+fn shadow_room(ops: &[crate::Op]) -> Rect {
+    let mut room = Rect::default();
+    let mut grow = |reach: f32, (dx, dy): (f32, f32)| {
+        room.left = room.left.max(reach - dx);
+        room.right = room.right.max(reach + dx);
+        room.top = room.top.max(reach - dy);
+        room.bottom = room.bottom.max(reach + dy);
+    };
+    for op in ops {
+        match op {
+            crate::Op::SoftShadow { blur, offset, spread, .. } => {
+                let reach = crate::shadow::REACH * crate::shadow::sigma(*blur) + spread + 2.0;
+                grow(reach, *offset);
+            }
+            crate::Op::Shadow { spread, drop, .. } => grow(spread + 1.0, (0.0, *drop)),
+            _ => {}
+        }
+    }
+    room
+}
+
 fn tip_layer<S>(trigger: u64, text: &Arc<str>) -> (Layer<S>, El<S>) {
     let key: super::super::Key = format!("tooltip:{trigger:x}").into();
     let id = child_id(ROOT, Some(&key), 0);

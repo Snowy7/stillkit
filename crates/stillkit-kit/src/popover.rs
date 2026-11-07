@@ -1,5 +1,5 @@
 //! Elevated, composable popover content; attach with `el::popover(content)`.
-use crate::overlay_surface::{DIM, INK, panel};
+use crate::overlay_surface::{DIM, INK, ShadowLevel, panel};
 use std::sync::Arc;
 use stillkit::el::{El, col, text, token};
 use stillkit::{Role, TextRole};
@@ -26,7 +26,7 @@ impl<S: 'static> Popover<S> {
         self
     }
     pub fn build(self) -> El<S> {
-        let mut p = panel()
+        let mut p = panel(ShadowLevel::Popover)
             .pad(token::PAD)
             .gap(token::GAP)
             .min_w(240.)

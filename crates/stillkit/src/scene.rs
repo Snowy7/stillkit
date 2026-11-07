@@ -103,12 +103,32 @@ pub enum Op {
         weight: f32,
         color: Rgba,
     },
-    /// A soft shadow under `rect`: `spread` pixels of falloff, moved down by `drop`.
+    /// A stepped shadow under `rect`: fading rings `spread` pixels out, moved down by `drop`.
+    /// The immediate-mode kit's; new code draws [`Op::SoftShadow`].
     Shadow {
         rect: Rect,
         radius: f32,
         spread: f32,
         drop: f32,
+        color: Rgba,
+    },
+    /// A real soft shadow with CSS `box-shadow` semantics (outset): the rounded rectangle
+    /// `rect` (corner `radius`) grown by `spread` on every side (its corners by `spread` too,
+    /// never below 0), moved by `offset`, filled with `color` and blurred by a Gaussian of
+    /// σ = `blur / 2`. So `color` is the shadow's peak opacity, reached under a shape larger
+    /// than its blur (half of it on a straight edge); it is zero past 3σ outside the grown
+    /// shape. It paints under the shape too (draw the shape over it).
+    ///
+    /// Windows draws it from an analytic, cached 9-slice mask (CPU and GPU alike), Linux with
+    /// Vello's blurred rounded rectangle; a macOS backend can use CoreGraphics' shadow
+    /// (`CGContextSetShadowWithColor` with `offset`, a blur of `blur` and `color`) under the
+    /// grown shape, drawn outside the clip so only its shadow lands.
+    SoftShadow {
+        rect: Rect,
+        radius: f32,
+        blur: f32,
+        offset: (f32, f32),
+        spread: f32,
         color: Rgba,
     },
     /// Clips what follows to `rect` (intersected with any clip already pushed) until the
@@ -157,6 +177,18 @@ impl Op {
             Self::Shadow {
                 rect, spread, drop, ..
             } => rect.inflate(spread + 1.0).offset(0.0, *drop),
+            // Its reach past the grown shape, plus the pixel its edges snap by.
+            Self::SoftShadow {
+                rect,
+                radius,
+                blur,
+                offset,
+                spread,
+                ..
+            } => {
+                let (shape, _) = crate::shadow::shape(*rect, *radius, *offset, *spread);
+                shape.inflate(crate::shadow::REACH * crate::shadow::sigma(*blur) + 2.0)
+            }
             // A changed clip changes what everything inside it may show.
             Self::Clip { rect } => *rect,
             Self::Unclip => Rect::default(),
@@ -245,7 +277,8 @@ impl DisplayList {
                     | Op::Text { rect, .. }
                     | Op::Emphasis { rect, .. }
                     | Op::Clip { rect }
-                    | Op::Shadow { rect, .. } => *rect = rect.offset(dx, dy),
+                    | Op::Shadow { rect, .. }
+                    | Op::SoftShadow { rect, .. } => *rect = rect.offset(dx, dy),
                     Op::Unclip => {}
                 }
             }
@@ -503,6 +536,33 @@ mod tests {
             ]
         );
         assert!(before.damage_regions(&before).is_empty());
+    }
+
+    #[test]
+    fn a_moving_soft_shadow_redraws_its_old_and_new_bounds_only() {
+        let panel = |x: f32| {
+            let rect = Rect::new(x, 40.0, 300.0, 400.0);
+            vec![
+                Op::SoftShadow {
+                    rect,
+                    radius: 12.0,
+                    blur: 24.0,
+                    offset: (0.0, 8.0),
+                    spread: 2.0,
+                    color: Rgba::new(0.0, 0.0, 0.0, 0.3),
+                },
+                Op::Fill { rect, radius: 12.0, color: Rgba::new(1.0, 1.0, 1.0, 1.0) },
+            ]
+        };
+        let still = fill(2000.0);
+        let before = list([panel(100.0), vec![still.clone()]].concat());
+        let after = list([panel(112.0), vec![still]].concat());
+        let (old, new) = (before.ops[0].bounds(), after.ops[0].bounds());
+        // The shadow's old and new place (the panel lies inside them); the still fill stays.
+        assert_eq!(after.damage_regions(&before), vec![old.union(new)]);
+        // The shadow reaches 3σ (36 px) past its grown, offset shape, and no further.
+        assert_eq!(old, Rect::new(100.0 - 2.0 - 38.0, 40.0 + 8.0 - 2.0 - 38.0, 380.0, 480.0));
+        assert_eq!(after.damage(&after), None);
     }
 
     #[test]

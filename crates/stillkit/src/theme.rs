@@ -8,8 +8,8 @@
 //! - **Type** ([`TypeRamp`], [`TextRole`]): Segoe UI Variable through its axes, so a 500
 //!   weight is a real medium and the optical size follows the size, with tracking and line
 //!   heights per role.
-//! - **Space, radii, elevation, motion** ([`Metrics`], [`Radii`], [`Elevation`],
-//!   [`MotionTokens`]). Radii are concentric: a card inside a panel is the panel's radius less
+//! - **Space, radii, elevation, motion** ([`Metrics`], [`Radii`], [`Shadows`] per
+//!   [`ShadowLevel`] in [`Elevation`]'s colour, [`MotionTokens`]). Radii are concentric: a card inside a panel is the panel's radius less
 //!   the padding between them ([`Radii::concentric`]).
 //! - **Glass**: the five styles are token sets over the same components. Liquid, One UI and
 //!   Fluent put engine glass under a surface (one border total, drawn by the engine); Solid and
@@ -244,12 +244,90 @@ impl Radii {
     }
 }
 
-/// A shadow under shell-drawn popovers (glass surfaces get theirs from the engine).
+/// The stepped shadow under shell-drawn popovers ([`crate::Op::Shadow`]; glass surfaces get
+/// theirs from the engine), and the colour every [`ShadowLevel`] is drawn in: a transparent
+/// `color` turns all of a theme's shadows off.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Elevation {
     pub spread: f32,
     pub drop: f32,
     pub color: Rgba,
+}
+
+/// How high a surface floats, from a card on its panel to a dialog: which of the look's
+/// [`Shadows`] it casts ([`Theme::shadow`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ShadowLevel {
+    /// A card or tile on its surface.
+    Card,
+    /// Something lifted off its surface (a dragged item, a floating button); el's `.shadow()`.
+    #[default]
+    Raised,
+    /// Menus, selects, tooltips and command palettes.
+    Menu,
+    /// Popovers anchored to their trigger.
+    Popover,
+    /// Dialogs and sheets over the window.
+    Dialog,
+    /// Toasts and notifications.
+    Toast,
+}
+
+/// One soft shadow, CSS `box-shadow` style (outset): the box grown by `spread`, moved by
+/// `offset`, filled with `color` and blurred by `blur` (σ = `blur / 2`). Design px in a theme
+/// and in el, device px in [`crate::Op::SoftShadow`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoftShadow {
+    pub blur: f32,
+    pub offset: (f32, f32),
+    pub spread: f32,
+    pub color: Rgba,
+}
+
+/// One layer of a [`ShadowLevel`], design px: straight down by `y`. Its colour is the theme's
+/// [`Elevation::color`] with `strength` times its alpha (which is 0.18 in light schemes and
+/// 0.45 in dark ones), so one colour tunes, and one switch clears, every level.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ShadowLayer {
+    pub blur: f32,
+    pub y: f32,
+    pub spread: f32,
+    pub strength: f32,
+}
+
+impl ShadowLayer {
+    /// No shadow (the second layer of a one-layer level).
+    pub const NONE: Self = Self { blur: 0.0, y: 0.0, spread: 0.0, strength: 0.0 };
+
+    pub const fn new(blur: f32, y: f32, spread: f32, strength: f32) -> Self {
+        Self { blur, y, spread, strength }
+    }
+}
+
+/// A look's elevation: per level a tight key shadow (the contact edge) and a wide ambient one
+/// (the lift), the way Apple's and Fluent's menus are built. A theme part, mixed like the others
+/// ([`Theme::shadows`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shadows {
+    pub card: [ShadowLayer; 2],
+    pub raised: [ShadowLayer; 2],
+    pub menu: [ShadowLayer; 2],
+    pub popover: [ShadowLayer; 2],
+    pub dialog: [ShadowLayer; 2],
+    pub toast: [ShadowLayer; 2],
+}
+
+impl Shadows {
+    pub fn level(&self, level: ShadowLevel) -> &[ShadowLayer; 2] {
+        match level {
+            ShadowLevel::Card => &self.card,
+            ShadowLevel::Raised => &self.raised,
+            ShadowLevel::Menu => &self.menu,
+            ShadowLevel::Popover => &self.popover,
+            ShadowLevel::Dialog => &self.dialog,
+            ShadowLevel::Toast => &self.toast,
+        }
+    }
 }
 
 /// Motion tokens, Apple's duration/bounce springs (see [`Spring::apple`]).
@@ -287,6 +365,8 @@ pub struct Theme {
     pub metrics: Metrics,
     pub radius: Radii,
     pub elevation: Elevation,
+    /// The soft shadows of each [`ShadowLevel`], drawn in `elevation.color`.
+    pub shadows: Shadows,
     pub motion: MotionTokens,
     pub icons: IconSet,
     /// Icon stroke per 24 units of icon size (Lucide draws 2; SF-like is lighter).
@@ -325,6 +405,18 @@ impl Theme {
 
     pub fn dark(&self) -> bool {
         self.scheme == Scheme::Dark
+    }
+
+    /// The soft shadows `level` casts, design px, in this theme's shadow colour (layers of no
+    /// strength come out transparent).
+    pub fn shadow(&self, level: ShadowLevel) -> [SoftShadow; 2] {
+        let base = self.elevation.color;
+        self.shadows.level(level).map(|l| SoftShadow {
+            blur: l.blur,
+            offset: (0.0, l.y),
+            spread: l.spread,
+            color: base.with_alpha((base.a * l.strength).min(1.0)),
+        })
     }
 
     /// The scheme of content on glass whose smaller side is `min_side` design px, over a

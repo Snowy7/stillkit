@@ -77,6 +77,37 @@ fn the_gpu_draws_the_cpu_picture_within_tolerance() {
 }
 
 #[test]
+fn soft_shadows_match_on_the_gpu() {
+    let mut ui = Ui::new().unwrap();
+    let shadow = |rect, radius, blur, y, spread, a| Op::SoftShadow {
+        rect,
+        radius,
+        blur,
+        offset: (0.0, y),
+        spread,
+        color: Rgba::new(0.0, 0.0, 0.0, a),
+    };
+    let list = DisplayList {
+        ops: vec![
+            // A stretched 9-slice menu (key and ambient layers), and a tooltip too short to stretch.
+            shadow(Rect::new(40.0, 30.0, 300.0, 400.0), 10.0, 6.0, 2.0, 0.0, 0.25),
+            shadow(Rect::new(40.0, 30.0, 300.0, 400.0), 10.0, 40.0, 16.0, -2.0, 0.3),
+            shadow(Rect::new(400.0, 60.0, 180.0, 28.0), 6.0, 12.0, 4.0, 0.0, 0.35),
+        ],
+        ..Default::default()
+    };
+    let cpu = render(&mut ui, &list, 640, 500).unwrap();
+    let Some(gpu) = gpu::render(&mut ui, &list, 640, 500).unwrap() else {
+        eprintln!("no hardware adapter: nothing to compare");
+        return;
+    };
+    let (max, share) = compare(&cpu, &gpu);
+    eprintln!("soft shadows, GPU vs CPU: max {max} levels, {:.3}% of channels over {MOST}", share * 100.0);
+    // One mask and the same slices: only the hardware's mask filtering may differ, by a level.
+    assert!(max <= 2, "max {max}, share {share}");
+}
+
+#[test]
 fn headless_renders_follow_the_threads_render_mode() {
     let mut ui = Ui::new().unwrap();
     let list = page(&mut ui);

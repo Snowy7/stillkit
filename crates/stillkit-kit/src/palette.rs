@@ -1,6 +1,6 @@
 //! Searchable command dialog. Attach its overlay to the opening control for focus return.
 use crate::combobox::matches;
-use crate::overlay_surface::panel;
+use crate::overlay_surface::{ShadowLevel, panel};
 use crate::{Change, Icon, Menu, MenuItem, Press, QueryState, SearchField};
 use std::sync::Arc;
 use stillkit::Role;
@@ -115,7 +115,7 @@ impl<S: 'static> CommandPalette<S> {
             .build();
         let (change, state) = (self.change.clone(), self.state.clone());
         let empty = actions.is_empty();
-        let content = panel()
+        let content = panel(ShadowLevel::Popover)
             .key(self.key)
             .w(360.)
             .pad(12.)

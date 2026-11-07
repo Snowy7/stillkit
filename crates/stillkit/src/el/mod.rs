@@ -62,5 +62,7 @@ pub use clipboard::{Clipboard, Memory as MemoryClipboard};
 pub use host::{App, Input, Script, run};
 /// What a trigger opens, as [`crate::Detail::popup`] tells assistive technology.
 pub use accesskit::HasPopup;
+/// Shadows for [`El::shadow_level`] and [`El::box_shadow`].
+pub use crate::theme::{ShadowLevel, SoftShadow};
 pub use overlay::{Overlay, Side, TOOLTIP_DELAY, dialog, menu, popover, toasts};
 pub use runtime::{Change, Popup, Runtime, Shown, Snapshot};

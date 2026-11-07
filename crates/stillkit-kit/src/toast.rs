@@ -1,5 +1,5 @@
 //! Model-owned notifications with one-shot deadlines; no kit ticker or background task.
-use crate::overlay_surface::{INK, panel};
+use crate::overlay_surface::{INK, ShadowLevel, panel};
 use crate::{Button, ButtonKind, Icon};
 use std::{sync::Arc, time::Duration};
 use stillkit::Role;
@@ -38,7 +38,7 @@ impl<S: 'static> Toast<S> {
         if let Some(action) = self.action {
             content = content.child(action.build());
         }
-        panel()
+        panel(ShadowLevel::Toast)
             .key(self.key)
             .role(Role::Status)
             .label(self.message)

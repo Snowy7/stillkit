@@ -277,6 +277,26 @@ pub(super) fn draw_ops(
                     );
                 }
             }
+            Op::SoftShadow {
+                rect: r,
+                radius,
+                blur,
+                offset,
+                spread,
+                color,
+            } => {
+                let (shape, radius) = crate::shadow::shape(*r, *radius, *offset, *spread);
+                let radius = radius.min(shape.width() / 2.).min(shape.height() / 2.);
+                let sigma = crate::shadow::sigma(*blur);
+                if color.a > 0. && !shape.is_empty() {
+                    if sigma < 0.25 {
+                        path(ctx, &rounded(shape, radius), 0., *color);
+                    } else {
+                        paint(ctx, *color);
+                        ctx.fill_blurred_rounded_rect(&rect(shape), radius, sigma, false);
+                    }
+                }
+            }
             Op::TextField { rect, field, .. } => {
                 draw_ops(ctx, res, text, &[field.op(*rect)], image_source)?;
             }

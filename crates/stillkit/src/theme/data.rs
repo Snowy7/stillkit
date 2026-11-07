@@ -39,6 +39,13 @@ struct Look {
     palette: Option<PaletteData>,
     border: Option<BorderData>,
     focus_ring: Option<FocusData>,
+    shadows: Option<ShadowsData>,
+}
+/// Another look's elevation levels.
+#[derive(Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct ShadowsData {
+    base: Option<Preset>,
 }
 fn rgba([r, g, b, a]: [f32; 4]) -> anyhow::Result<Rgba> {
     anyhow::ensure!(
@@ -409,6 +416,10 @@ impl Look {
                 gap: p.gap.unwrap_or(ring.gap),
                 opacity: p.opacity.unwrap_or(ring.opacity),
             });
+        }
+        if let Some(p) = self.shadows {
+            let shadows = preset(p.base, &t).map_or(t.shadows, |t| t.shadows);
+            t = t.shadows(shadows);
         }
         Ok(t)
     }
