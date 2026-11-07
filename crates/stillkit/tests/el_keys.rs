@@ -189,8 +189,7 @@ fn values_reach_the_tree_dump_and_the_accessibility_table() {
             Semantics::Detail(Detail {
                 description: Some("How loud".into()),
                 value: Some("40%".into()),
-                selected: None,
-                expanded: None,
+                ..Detail::default()
             }),
         ]
     );

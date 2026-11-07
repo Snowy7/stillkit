@@ -32,12 +32,16 @@
 //!   state changes re-run the view (hover, press and focus repaint the retained tree).
 //! - [`run`] hosts a runtime in a window, and doubles as the agent tooling (`--snap`,
 //!   `--tree`, `--script`).
+//! - [`El::overlay`] with [`popover`], [`menu`], [`dialog`] or [`toasts`], and
+//!   [`El::tooltip`], put anchored content above the window's (in a popup surface when it
+//!   doesn't fit).
 
 mod animate;
 mod element;
 mod host;
 mod json;
 mod layout;
+mod overlay;
 mod png;
 mod runtime;
 mod scroll;
@@ -49,4 +53,7 @@ pub use element::{
 };
 pub use crate::platform::current::host::reduced_motion;
 pub use host::{App, Input, Script, run};
-pub use runtime::{Change, Runtime, Shown, Snapshot};
+/// What a trigger opens, as [`crate::Detail::popup`] tells assistive technology.
+pub use accesskit::HasPopup;
+pub use overlay::{Overlay, Side, TOOLTIP_DELAY, dialog, menu, popover, toasts};
+pub use runtime::{Change, Popup, Runtime, Shown, Snapshot};

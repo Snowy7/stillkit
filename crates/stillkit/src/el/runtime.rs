@@ -17,6 +17,9 @@
 //!   in a scroll view is reached and scrolled into view.
 //! - **Size, scale and theme** re-lay out the retained tree without running the view (size
 //!   and scale land at once; a theme's colours animate where elements have motion).
+//! - **Overlays** ([`layer`]) are lifted out of the tree after each view run and appended to
+//!   the root, placed against their anchors, and take Escape, outside presses and focus first.
+//!   Tooltips and timers run on the clock without running the view.
 //!
 //! The headless methods (`pointer_down`, `click`, `find`, `presented`, `tree`, `snap`) drive
 //! the same runtime the window host does, on a virtual clock.
@@ -29,9 +32,14 @@ use std::time::Duration;
 use accesskit::Role;
 use anyhow::Result;
 
+mod layer;
+
 use super::animate::{Animator, Mode, Pose, Target};
 use super::element::{ArcLook, Axis, El, Handled, Key, KeyCode, Range, Transition, Tx, What};
 use super::layout::{Cx, Laid, Layout};
+use super::overlay::{Dismiss, Kind};
+use layer::{Entry, Layer, MENU, Relation, Tip};
+pub use layer::Popup;
 use super::scroll::{LINE, NOTCH, ScrollView};
 use super::token;
 use crate::a11y::Detail;
@@ -45,11 +53,16 @@ use crate::{
 type View<S> = Box<dyn Fn(&S) -> El<S>>;
 
 /// Input waiting for its handler, run at the start of the next frame.
-enum Action {
+enum Action<S> {
     Press(HitId),
     Drag(HitId, f32, f32),
     /// A range stepped by this much.
     Step(HitId, f64),
+    /// A context menu asked for at this point (design px).
+    Context(HitId, f32, f32),
+    Timeout(HitId),
+    /// An overlay should close.
+    Dismiss(Dismiss<S>),
 }
 
 /// A keyed element's layout and look, before or after a view run.
@@ -156,7 +169,7 @@ pub struct Runtime<S> {
     /// How the next re-layout lands.
     mode: Mode,
     ix: Interaction,
-    queue: Vec<Action>,
+    queue: Vec<Action<S>>,
     dragging: Option<HitId>,
     /// Scroll views by identity.
     scrolls: HashMap<u64, ScrollView>,
@@ -182,6 +195,33 @@ pub struct Runtime<S> {
     views: u64,
     paints: u64,
     changes: Vec<Change>,
+    // ---- Overlays (`layer`) ------------------------------------------------------------
+    /// Open overlays in paint order; their entries are the root's last children.
+    layers: Vec<Layer<S>>,
+    /// Where the entries start among the root's children.
+    entries: usize,
+    /// Tooltip triggers of the last view run, by identity.
+    tips: Vec<(u64, Arc<str>)>,
+    tip: Tip,
+    /// Elements with a timeout, by identity: when it fires (`None` once it has).
+    timers: HashMap<u64, Option<Duration>>,
+    /// Where focus goes back to when an overlay that took it closes, by its identity.
+    returns: HashMap<u64, Option<HitId>>,
+    /// The overlays open at the last relayout.
+    shown: Vec<u64>,
+    /// Anchor rects last seen, by overlay (an orphan stays where it was).
+    anchors: HashMap<u64, Rect>,
+    /// Overlays already told that their anchor went.
+    orphans: HashSet<u64>,
+    /// Triggers' and panels' accessibility relations, by identity.
+    relations: HashMap<u64, Relation>,
+    /// Where overlays may go beyond the window ([`Runtime::set_screen`]).
+    screen: Option<Rect>,
+    /// Overlays drawn outside the window at the last paint, and the window's list without them.
+    popups: Vec<Popup>,
+    window_list: Option<DisplayList>,
+    /// Overlays drawn outside the window, open or leaving.
+    lifted: HashMap<u64, Rect>,
 }
 
 impl<S: 'static> Runtime<S> {
@@ -231,6 +271,20 @@ impl<S: 'static> Runtime<S> {
             views: 0,
             paints: 0,
             changes: Vec::new(),
+            layers: Vec::new(),
+            entries: 0,
+            tips: Vec::new(),
+            tip: Tip::default(),
+            timers: HashMap::new(),
+            returns: HashMap::new(),
+            shown: Vec::new(),
+            anchors: HashMap::new(),
+            orphans: HashSet::new(),
+            relations: HashMap::new(),
+            screen: None,
+            popups: Vec::new(),
+            window_list: None,
+            lifted: HashMap::new(),
         };
         runtime.frame(Duration::ZERO);
         Ok(runtime)
@@ -244,16 +298,23 @@ impl<S> Runtime<S> {
     pub fn frame(&mut self, dt: Duration) -> bool {
         self.clock += dt;
         self.anim.t += dt.as_secs_f64() * f64::from(self.time_scale);
-        if !self.queue.is_empty() {
-            self.run_handlers();
-        }
-        if self.stale_view || self.stale_layout {
+        self.fire_timers();
+        // A dismissal found while laying out (an anchor that went) runs in the same frame.
+        for _ in 0..3 {
+            if !self.queue.is_empty() {
+                self.run_handlers();
+            }
+            if !(self.stale_view || self.stale_layout) {
+                break;
+            }
             let before = keyed(&self.root, &self.laid, &self.theme);
             let old = self.stale_view.then(|| {
                 self.views += 1;
                 self.stale_view = false;
                 self.stepped.clear();
-                std::mem::replace(&mut self.root, (self.view)(&self.state))
+                let old = std::mem::replace(&mut self.root, (self.view)(&self.state));
+                self.hoist();
+                old
             });
             self.relayout(before, old);
         }
@@ -270,6 +331,11 @@ impl<S> Runtime<S> {
             self.ghosts.retain(|g| !left.contains(&g.id));
         }
         let scrolled = self.tick_scrolls();
+        // Overlays follow an anchor that scrolled.
+        if scrolled && self.layers.iter().any(|l| l.anchor != super::overlay::Anchor::Window) {
+            let before = keyed(&self.root, &self.laid, &self.theme);
+            self.relayout(before, None);
+        }
         if moved || !left.is_empty() || scrolled {
             self.stale_paint = true;
         }
@@ -307,18 +373,47 @@ impl<S> Runtime<S> {
     fn run_handlers(&mut self) {
         let mut tx = Tx::default();
         for action in std::mem::take(&mut self.queue) {
-            let (Action::Press(hit) | Action::Drag(hit, ..) | Action::Step(hit, _)) = action;
+            let hit = match &action {
+                Action::Dismiss(handler) => {
+                    handler(&mut self.state);
+                    self.stale_view = true;
+                    continue;
+                }
+                Action::Press(hit)
+                | Action::Drag(hit, ..)
+                | Action::Step(hit, _)
+                | Action::Context(hit, ..)
+                | Action::Timeout(hit) => *hit,
+            };
             let Some(el) = element(&self.root, &self.laid, hit) else {
                 continue;
             };
-            match (action, &el.on_press, &el.on_drag, &el.on_step) {
-                (Action::Press(_), Some(handler), ..) => handler(&mut self.state, &mut tx),
-                (Action::Drag(_, x, y), _, Some(handler), _) => {
-                    handler(&mut self.state, x, y);
-                    tx.instant();
-                }
-                (Action::Step(_, delta), .., Some(handler)) => handler(&mut self.state, delta),
-                _ => continue,
+            let state = &mut self.state;
+            match action {
+                Action::Press(_) => match &el.on_press {
+                    Some(handler) => handler(state, &mut tx),
+                    None => continue,
+                },
+                Action::Drag(_, x, y) => match &el.on_drag {
+                    Some(handler) => {
+                        handler(state, x, y);
+                        tx.instant();
+                    }
+                    None => continue,
+                },
+                Action::Step(_, delta) => match &el.on_step {
+                    Some(handler) => handler(state, delta),
+                    None => continue,
+                },
+                Action::Context(_, x, y) => match &el.on_context {
+                    Some(handler) => handler(state, x, y),
+                    None => continue,
+                },
+                Action::Timeout(_) => match &el.on_timeout {
+                    Some((_, handler)) => handler(state),
+                    None => continue,
+                },
+                Action::Dismiss(_) => continue,
             }
             self.stale_view = true;
         }
@@ -345,12 +440,10 @@ impl<S> Runtime<S> {
 
     fn relayout(&mut self, before: HashMap<u64, (Key, Snapshot)>, old: Option<El<S>>) {
         let mode = std::mem::replace(&mut self.mode, Mode::Animate);
-        let cx = Cx {
-            theme: &self.theme,
-            s: self.scale,
-        };
-        let size = (self.size.0 as f32, self.size.1 as f32);
-        let laid = self.layout.update(&self.root, size, &cx, &mut self.ui.text);
+        let mut laid = self.lay_out();
+        if !self.layers.is_empty() {
+            laid = self.place_layers(laid);
+        }
         let targets = targets(&self.root, &laid, &self.theme, self.scale);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
@@ -367,10 +460,24 @@ impl<S> Runtime<S> {
         self.laid = laid;
         self.targets = targets;
         self.sync_scrolls();
+        self.sync_timers();
+        if !self.layers.is_empty() || !self.shown.is_empty() {
+            self.follow_layers();
+        }
         let after = keyed(&self.root, &self.laid, &self.theme);
         self.diff(before, after);
         self.stale_layout = false;
         self.stale_paint = true;
+    }
+
+    /// Lays the root out at the surface's size.
+    fn lay_out(&mut self) -> Vec<Laid> {
+        let cx = Cx {
+            theme: &self.theme,
+            s: self.scale,
+        };
+        let size = (self.size.0 as f32, self.size.1 as f32);
+        self.layout.update(&self.root, size, &cx, &mut self.ui.text)
     }
 
     /// Keeps a scroll state for every scroll view laid out, with its new extent.
@@ -410,33 +517,39 @@ impl<S> Runtime<S> {
         let mut taken = Vec::new();
         take(&mut old, &self.laid, &mut 0, &leaving, &mut taken);
         for (start, index, el) in taken {
-            let len = count(&el);
-            let me = self.laid[start];
-            let (Some(parent), Some(shown)) = (me.parent, self.poses.get(start..start + len)) else {
-                continue;
-            };
-            if !self.anim.leave(me.id) {
-                continue;
-            }
-            let origin = self.child_origin(parent);
-            let mut frozen: Vec<Pose> = shown
-                .iter()
-                .map(|p| Pose {
-                    local: p.local.offset(-origin.x, -origin.y),
-                    ..*p
-                })
-                .collect();
-            // It leaves from its own opacity, not from wherever its entrance was.
-            frozen[0].opacity = self.targets[start].opacity;
-            self.ghosts.push(Ghost {
-                id: me.id,
-                parent: self.laid[parent].id,
-                index,
-                el,
-                laid: self.laid[start..start + len].to_vec(),
-                frozen,
-            });
+            self.exit(start, index, el);
         }
+    }
+
+    /// Keeps `el`, which left from place `index` among its parent's children and was laid out
+    /// at `start`, drawn as a ghost until its exit settles (if it has a transition).
+    fn exit(&mut self, start: usize, index: usize, el: El<S>) {
+        let len = count(&el);
+        let me = self.laid[start];
+        let (Some(parent), Some(shown)) = (me.parent, self.poses.get(start..start + len)) else {
+            return;
+        };
+        if !self.anim.leave(me.id) {
+            return;
+        }
+        let origin = self.child_origin(parent);
+        let mut frozen: Vec<Pose> = shown
+            .iter()
+            .map(|p| Pose {
+                local: p.local.offset(-origin.x, -origin.y),
+                ..*p
+            })
+            .collect();
+        // It leaves from its own opacity, not from wherever its entrance was.
+        frozen[0].opacity = self.targets[start].opacity;
+        self.ghosts.push(Ghost {
+            id: me.id,
+            parent: self.laid[parent].id,
+            index,
+            el,
+            laid: self.laid[start..start + len].to_vec(),
+            frozen,
+        });
     }
 
     /// Where the children of the element at `index` hang from now: its top-left, less its
@@ -518,12 +631,29 @@ impl<S> Runtime<S> {
             ghosts: &self.ghosts,
             poses: &ghosts,
         };
+        let entries = self.entries_by_index();
+        let ghosted: HashSet<u64> = self.ghosts.iter().map(|g| g.id).collect();
+        // An escaped overlay keeps its popup (at its open size) until its exit ends.
+        let (layers, laid) = (&self.layers, &self.laid);
+        self.lifted
+            .retain(|id, _| ghosted.contains(id) || layers.iter().any(|l| l.id == *id && l.escaped));
+        self.lifted.extend(
+            layers
+                .iter()
+                .filter(|l| l.escaped)
+                .filter_map(|l| laid.get(l.at).map(|e| (l.id, e.rect))),
+        );
         let mut walk = Walk {
             scene: &scene,
             nav: Vec::with_capacity(self.nav.len()),
             semantics: Vec::with_capacity(self.semantics.len()),
             focus: self.ix.focus,
             bars: &bars,
+            entries: &entries,
+            relations: &self.relations,
+            inert: None,
+            lifted: &self.lifted,
+            escaped: Vec::new(),
         };
         let mut f = Frame::new(&mut self.ui.text, &self.theme, self.scale, &self.ix);
         if let Some(background) = self.background {
@@ -533,11 +663,22 @@ impl<S> Runtime<S> {
         paint_el(&mut f, &mut walk, &self.laid, &self.poses, &self.root, &mut 0, true, None);
         let mut list = f.list;
         list.focus = self.ix.focus;
-        self.nav = walk.nav;
-        if walk.semantics != self.semantics {
-            self.semantics = walk.semantics;
+        let (mut nav, semantics, mut escaped) = (walk.nav, walk.semantics, walk.escaped);
+        // A modal dialog is all there is to point at, focus and read.
+        if let Some(n) = walk.inert {
+            list.hits.drain(..n);
+            let left: HashSet<HitId> = list.hits.iter().map(|h| h.id).collect();
+            nav.retain(|s| left.contains(&s.hit));
+            for (.., hits) in &mut escaped {
+                *hits = hits.start.saturating_sub(n)..hits.end.saturating_sub(n);
+            }
+        }
+        self.nav = nav;
+        if semantics != self.semantics {
+            self.semantics = semantics;
             self.semantics_sent = false;
         }
+        self.window_list = self.cut_popups(&list, &escaped);
         self.damage = list.damage(&self.list);
         self.list = list;
         self.paints += 1;
@@ -547,16 +688,29 @@ impl<S> Runtime<S> {
     /// Feeds one input event. Hover, press and focus changes repaint at the next frame
     /// without running the view; activations queue their handlers.
     pub fn handle(&mut self, event: &Event) {
+        self.input(event);
+        self.follow_tip();
+    }
+
+    fn input(&mut self, event: &Event) {
         match *event {
             Event::Key(0x09) => return self.tab(false),
             Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
             Event::Wheel(p, delta) => {
                 self.pointer = Some(p);
+                // Scrolling closes a tooltip; its trigger shows none until the pointer leaves.
+                self.hide_tip();
                 return self.wheel(p.at, delta);
             }
             Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) => self.pointer = Some(p),
             Event::Leave => self.pointer = None,
             _ => {}
+        }
+        if (!self.layers.is_empty() || !self.tips.is_empty()) && self.overlay_input(event) {
+            return;
+        }
+        if let Event::Release(p, Button::Right) = *event {
+            self.context_at(p.at);
         }
         let before = self.ix.clone();
         if let Response::Activate(hit) = self.ix.handle(&self.list, event) {
@@ -621,6 +775,10 @@ impl<S> Runtime<S> {
     /// `on_key`, then their range, focus group or scroll view), then the defaults. Whether it
     /// was used here (Enter, Space and Escape otherwise go on to the interaction state).
     fn key_down(&mut self, key: KeyCode) -> bool {
+        if key == KeyCode::ESCAPE && self.tip.shown {
+            self.hide_tip();
+            return true;
+        }
         let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
         let mut chain = Vec::new();
         let mut at = Some(focused.unwrap_or(0));
@@ -629,7 +787,7 @@ impl<S> Runtime<S> {
             at = self.laid[i].parent;
         }
         let flat = flatten(&self.root);
-        for i in chain {
+        for &i in &chain {
             let Some(el) = flat.get(i).copied() else { continue };
             if let Some(handler) = &el.on_key {
                 // Queued presses come first, as they arrived first.
@@ -655,6 +813,8 @@ impl<S> Runtime<S> {
         let step = match key {
             KeyCode::LEFT | KeyCode::UP => -1,
             KeyCode::RIGHT | KeyCode::DOWN => 1,
+            KeyCode::ESCAPE => return self.escape(&chain),
+            MENU => return self.context_key(&chain, focused),
             _ => return false,
         };
         self.step(step < 0);
@@ -760,11 +920,14 @@ impl<S> Runtime<S> {
     /// going back). A stop hidden in a scroll view scrolls into view.
     pub fn tab(&mut self, back: bool) {
         self.step(back);
+        self.follow_tip();
     }
 
     fn step(&mut self, back: bool) {
         let mut stops: Vec<Stop> = Vec::with_capacity(self.nav.len());
-        for stop in &self.nav {
+        // An open menu or dialog keeps focus inside.
+        let trap = self.trap().map(Layer::range);
+        for stop in self.nav.iter().filter(|s| trap.as_ref().is_none_or(|r| r.contains(&s.index))) {
             match stop.group {
                 None => stops.push(*stop),
                 Some(g) if stops.iter().any(|s| s.group == Some(g)) => {}
@@ -1069,6 +1232,12 @@ impl<S> Runtime<S> {
         self.handle(&Event::Release(pointer(x, y), Button::Left));
     }
 
+    /// The secondary button pressed and released at `(x, y)`: a context menu.
+    pub fn right_click(&mut self, x: f32, y: f32) {
+        self.handle(&Event::Press(pointer(x, y), Button::Right));
+        self.handle(&Event::Release(pointer(x, y), Button::Right));
+    }
+
     /// The wheel turned by `delta` (120 a notch, positive away from the user: up) at `(x, y)`.
     pub fn wheel_at(&mut self, x: f32, y: f32, delta: i16) {
         self.handle(&Event::Wheel(pointer(x, y), delta));
@@ -1130,7 +1299,7 @@ impl<S> Runtime<S> {
                 value: sem.value.clone(),
                 description: sem.description.clone(),
                 selected: sem.selected,
-                expanded: sem.expanded,
+                expanded: sem.expanded.or(self.relations.get(&laid.id).and_then(|r| r.expanded)),
                 scroll: self.scrolls.get(&laid.id).map(|v| v.offset(self.anim.t)),
             });
         });
@@ -1138,13 +1307,15 @@ impl<S> Runtime<S> {
     }
 
     /// Shows the latest frame on `surface` at `origin` (screen px; app windows ignore it),
-    /// with its accessibility values. The surface draws only what differs from what it shows.
+    /// with its accessibility values, less the overlays drawn outside the window
+    /// ([`popups`](Self::popups)). The surface draws only what differs from what it shows.
     pub fn present(&mut self, surface: &mut Surface, origin: (i32, i32)) -> Result<bool> {
         if !self.semantics_sent {
             surface.set_accessibility_semantics(self.semantics.clone());
             self.semantics_sent = true;
         }
-        surface.present(&mut self.ui, origin, self.size, self.list.clone())
+        let list = self.window_list.clone().unwrap_or_else(|| self.list.clone());
+        surface.present(&mut self.ui, origin, self.size, list)
     }
 
     /// The latest frame drawn headless, through the same software target as a surface.
@@ -1342,9 +1513,12 @@ fn label_of<S>(el: &El<S>) -> Arc<str> {
     el.sem.label.clone().or_else(first).unwrap_or_else(|| "".into())
 }
 
-/// What `el` tells assistive technology beyond its name and role.
-fn semantics_of<S>(el: &El<S>, id: HitId, out: &mut Vec<(HitId, Semantics)>) {
+/// What `el` tells assistive technology beyond its name and role; `rel` is what it opens
+/// (a trigger) or whether it is a modal panel.
+fn semantics_of<S>(el: &El<S>, id: HitId, rel: Option<&Relation>, out: &mut Vec<(HitId, Semantics)>) {
     let s = &el.sem;
+    let rel = rel.copied().unwrap_or_default();
+    let expanded = s.expanded.or(rel.expanded);
     if let Some(r) = s.range {
         out.push((
             id,
@@ -1356,16 +1530,17 @@ fn semantics_of<S>(el: &El<S>, id: HitId, out: &mut Vec<(HitId, Semantics)>) {
             },
         ));
     }
-    if s.description.is_some() || s.value.is_some() || s.selected.is_some() || s.expanded.is_some() {
-        out.push((
-            id,
-            Semantics::Detail(Detail {
-                description: s.description.clone(),
-                value: s.value.clone(),
-                selected: s.selected,
-                expanded: s.expanded,
-            }),
-        ));
+    let detail = Detail {
+        description: s.description.clone(),
+        value: s.value.clone(),
+        selected: s.selected,
+        expanded,
+        popup: rel.popup,
+        controls: rel.controls,
+        modal: rel.modal,
+    };
+    if detail != Detail::default() {
+        out.push((id, Semantics::Detail(detail)));
     }
 }
 
@@ -1385,7 +1560,19 @@ struct Walk<'a, S> {
     focus: Option<HitId>,
     /// Scroll views by their place in the live `laid`.
     bars: &'a HashMap<usize, Bar>,
+    /// Overlay entries by their place in the live `laid`.
+    entries: &'a HashMap<usize, Entry>,
+    relations: &'a HashMap<u64, Relation>,
+    /// Hits before this one are under a modal dialog.
+    inert: Option<usize>,
+    /// Overlays (live or leaving) drawn outside the window, by identity.
+    lifted: &'a HashMap<u64, Rect>,
+    /// Escaped entries: their identity, ops and hits.
+    escaped: Vec<Escaped>,
 }
+
+/// An entry painted for a popup surface: its identity, ops and hits in the list.
+type Escaped = (u64, std::ops::Range<usize>, std::ops::Range<usize>);
 
 impl<S> Scene<'_, S> {
     /// Paints the ghosts that left `parent` from place `index` (and, `rest`, any after it).
@@ -1393,9 +1580,13 @@ impl<S> Scene<'_, S> {
         for (g, poses) in self.ghosts.iter().zip(self.poses) {
             if g.parent == parent && (g.index == index || rest && g.index > index) {
                 // Out of hit testing: whatever hits its kit painting pushed go again.
-                let hits = f.list.hits.len();
+                let (ops, hits) = (f.list.ops.len(), f.list.hits.len());
                 paint_el(f, w, &g.laid, poses, &g.el, &mut 0, false, None);
                 f.list.hits.truncate(hits);
+                // An overlay that left from a popup surface fades out there.
+                if w.lifted.contains_key(&g.id) {
+                    w.escaped.push((g.id, ops..f.list.ops.len(), hits..hits));
+                }
             }
         }
     }
@@ -1421,6 +1612,8 @@ fn paint_el<S>(
     let (theme, s, rect) = (f.theme, f.s, pose.rect);
     let start = f.list.ops.len();
     let hits = f.list.hits.len();
+    let stops = w.nav.len();
+    let entry = if live { w.entries.get(&index).copied() } else { None };
     let enabled = el.interactive() && !el.sem.disabled;
     let radius = pose.radius();
     let ink = pose.ink;
@@ -1499,7 +1692,7 @@ fn paint_el<S>(
             });
         }
         if el.hit() {
-            semantics_of(el, me.hit, &mut w.semantics);
+            semantics_of(el, me.hit, w.relations.get(&me.id), &mut w.semantics);
         }
     }
     let inner = if el.group.is_some() { Some(index) } else { group };
@@ -1547,6 +1740,20 @@ fn paint_el<S>(
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
+    }
+    if let Some(entry) = entry {
+        match entry.kind {
+            // A tooltip takes no pointer and no focus: its trigger describes it.
+            Kind::Tooltip => {
+                f.list.hits.truncate(hits);
+                w.nav.truncate(stops);
+            }
+            Kind::Dialog => w.inert = Some(hits),
+            _ => {}
+        }
+        if entry.escaped {
+            w.escaped.push((me.id, start..f.list.ops.len(), hits..f.list.hits.len()));
+        }
     }
 }
 
