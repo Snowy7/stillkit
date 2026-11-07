@@ -1,14 +1,15 @@
-//! CPU-only Vello renderer. The glyph bitmap atlas is deliberately disabled.
+//! CPU Vello renderer and headless mode selection. Glyph bitmap atlases stay disabled.
 use super::Text;
 pub use crate::bitmap::{Image, TextMode, TextQuality};
-use crate::{DisplayList, Op, PixelRect, Rect, Rgba};
+use crate::{DisplayList, PixelRect};
 use anyhow::{Result, ensure};
-use skrifa::MetadataProvider;
-use std::{cell::RefCell, sync::Arc};
-use vello_cpu::{
-    Pixmap, RenderContext, Resources,
-    kurbo::{self, Affine, BezPath, Cap, Join, Shape, Stroke},
-};
+use std::cell::RefCell;
+use vello_cpu::{Pixmap, RenderContext, Resources, kurbo::Affine};
+mod scene {
+    type Scene = vello_cpu::RenderContext;
+    type Resources = vello_cpu::Resources;
+    include!("scene.rs");
+}
 /// Per-thread text and image services, usable without a Wayland connection.
 pub struct Ui {
     pub text: Text,
@@ -51,6 +52,12 @@ impl Image {
 }
 /// Rasterizes a display list headlessly to premultiplied BGRA pixels.
 pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
+    #[cfg(feature = "gpu")]
+    if crate::platform::render().resolve(crate::glass::wanted(), crate::glass::backdrop().is_some())
+        == crate::platform::Render::Gpu
+    {
+        return super::gpu::render(ui, list, width, height);
+    }
     let canvas = Canvas::new(ui, width, height)?;
     canvas.draw(&mut ui.text, list, PixelRect::full(width, height))?;
     Ok(canvas.image())
@@ -99,7 +106,13 @@ impl Canvas {
         // Rasterize a damage-sized target, rather than a full bitmap under a scissor.
         let mut ctx = RenderContext::new(area.width as u16, area.height as u16);
         ctx.set_transform(Affine::translate((-(area.x as f64), -(area.y as f64))));
-        draw_ops(&mut ctx, &mut s.resources, text, &list.ops)?;
+        scene::draw_ops(
+            &mut ctx,
+            &mut s.resources,
+            text,
+            &list.ops,
+            &mut |_, pix| vello_cpu::ImageSource::Pixmap(pix),
+        )?;
         ctx.flush();
         let mut target = Pixmap::new(area.width as u16, area.height as u16);
         ctx.render(&mut target, &mut s.resources);
@@ -147,339 +160,10 @@ impl crate::platform::Renderer for Canvas {
         self.read(a, s)
     }
 }
-fn rect(r: Rect) -> kurbo::Rect {
-    kurbo::Rect::new(r.left as f64, r.top as f64, r.right as f64, r.bottom as f64)
-}
-fn rounded(r: Rect, radius: f32) -> BezPath {
-    kurbo::RoundedRect::from_rect(rect(r), radius as f64).to_path(0.05)
-}
-fn paint(ctx: &mut RenderContext, c: Rgba) {
-    ctx.set_paint(vello_cpu::color::AlphaColor::<vello_cpu::color::Srgb>::new(
-        [c.r, c.g, c.b, c.a],
-    ));
-}
-fn path(ctx: &mut RenderContext, p: &BezPath, width: f32, c: Rgba) {
-    paint(ctx, c);
-    if width > 0. {
-        ctx.set_stroke(
-            Stroke::new(width as f64)
-                .with_caps(Cap::Round)
-                .with_join(Join::Round),
-        );
-        ctx.stroke_path(p);
-    } else {
-        ctx.fill_path(p);
-    }
-}
-fn draw_ops(
-    ctx: &mut RenderContext,
-    res: &mut Resources,
-    text: &mut Text,
-    ops: &[Op],
-) -> Result<()> {
-    let mut clips = 0;
-    for op in ops {
-        match op {
-            Op::Clip { rect: r } => {
-                ctx.push_clip_layer(&rounded(*r, 0.));
-                clips += 1;
-            }
-            Op::Unclip => {
-                if clips > 0 {
-                    ctx.pop_layer();
-                    clips -= 1;
-                }
-            }
-            Op::Clipped { rect: r, ops } => {
-                ctx.push_clip_layer(&rounded(*r, 0.));
-                draw_ops(ctx, res, text, ops)?;
-                ctx.pop_layer();
-            }
-            Op::RoundedClipped {
-                rect: r,
-                radius,
-                ops,
-            } => {
-                ctx.push_clip_layer(&rounded(*r, *radius));
-                draw_ops(ctx, res, text, ops)?;
-                ctx.pop_layer();
-            }
-            Op::Fill {
-                rect: r,
-                radius,
-                color,
-            } => path(ctx, &rounded(*r, *radius), 0., *color),
-            Op::Stroke {
-                rect: r,
-                radius,
-                width,
-                color,
-            } => path(ctx, &rounded(*r, *radius), *width, *color),
-            Op::Continuous {
-                rect: r,
-                radius,
-                smoothing,
-                width,
-                color,
-            } => {
-                let points = crate::geom::continuous::outline(*r, *radius, *smoothing);
-                let mut p = BezPath::new();
-                for (i, v) in points.iter().enumerate() {
-                    if i == 0 {
-                        p.move_to((v.x as f64, v.y as f64));
-                    } else {
-                        p.line_to((v.x as f64, v.y as f64));
-                    }
-                }
-                p.close_path();
-                path(ctx, &p, *width, *color);
-            }
-            Op::Line {
-                from,
-                to,
-                width,
-                color,
-            } => {
-                let mut p = BezPath::new();
-                p.move_to((from.x as f64, from.y as f64));
-                p.line_to((to.x as f64, to.y as f64));
-                path(ctx, &p, *width, *color);
-            }
-            Op::Arc {
-                center,
-                radius,
-                sweep,
-                width,
-                color,
-            } => {
-                let arc = kurbo::Arc::new(
-                    (center.x as f64, center.y as f64),
-                    (*radius as f64, *radius as f64),
-                    -std::f64::consts::FRAC_PI_2,
-                    *sweep as f64,
-                    0.,
-                );
-                path(ctx, &arc.to_path(0.05), *width, *color);
-            }
-            Op::Icon {
-                rect: r,
-                icon,
-                weight,
-                color,
-            } => {
-                let p = icon_path(*icon);
-                let p = Affine::translate((r.left as f64, r.top as f64))
-                    * Affine::scale_non_uniform(r.width() as f64 / 24., r.height() as f64 / 24.)
-                    * p;
-                if icon.filled() {
-                    path(ctx, &p, 0., *color);
-                }
-                path(ctx, &p, *weight, *color);
-            }
-            Op::Text {
-                rect: r,
-                text: label,
-                style,
-                color,
-            }
-            | Op::Emphasis {
-                rect: r,
-                text: label,
-                style,
-                color,
-                ..
-            } => {
-                if label.chars().count() == 1
-                    && let Some(icon) = label
-                        .chars()
-                        .next()
-                        .and_then(crate::icons::from_system_glyph)
-                {
-                    draw_ops(
-                        ctx,
-                        res,
-                        text,
-                        &[Op::Icon {
-                            rect: Rect::new(r.left, r.top, style.size, style.size),
-                            icon,
-                            weight: (style.size / 12.).max(1.),
-                            color: *color,
-                        }],
-                    )?;
-                    continue;
-                }
-                let italic = matches!(op, Op::Emphasis { italic: true, .. });
-                let glyphs: Vec<_> = text
-                    .shape_emphasis(label, style, italic)
-                    .layout_runs()
-                    .flat_map(|run| run.glyphs.iter().map(move |g| (g.clone(), run.line_y)))
-                    .collect();
-                paint(ctx, *color);
-                for (g, y) in glyphs {
-                    if let Some(font) = text.fonts.get_font(g.font_id, g.font_weight) {
-                        let face = font.as_peniko();
-                        let location = skrifa::FontRef::from_index(font.data(), face.index)?
-                            .axes()
-                            .location([("wght", g.font_weight.0 as f32)]);
-                        let coords: Vec<_> =
-                            location.coords().iter().map(|c| c.to_bits()).collect();
-                        ctx.glyph_run(res, &face)
-                            .font_size(g.font_size)
-                            .normalized_coords(&coords)
-                            .atlas_cache(false)
-                            .fill_glyphs(
-                                [vello_cpu::Glyph {
-                                    id: g.glyph_id as u32,
-                                    x: r.left + g.x + g.x_offset,
-                                    y: r.top + y - g.y_offset,
-                                }]
-                                .into_iter(),
-                            )?;
-                    }
-                }
-                if matches!(op, Op::Emphasis { strike: true, .. }) {
-                    let y = r.top + style.size * 0.65;
-                    let mut p = BezPath::new();
-                    p.move_to((r.left as f64, y as f64));
-                    p.line_to((r.right as f64, y as f64));
-                    path(ctx, &p, 1., *color);
-                }
-            }
-            Op::Image {
-                rect: r,
-                image,
-                opacity,
-                source,
-            }
-            | Op::RoundedImage {
-                rect: r,
-                image,
-                opacity,
-                source,
-                ..
-            } => {
-                ensure!(
-                    image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32,
-                    "image too large"
-                );
-                let mut pix = Pixmap::new(image.width as u16, image.height as u16);
-                // data_mut exposes premultiplied RGBA components.
-                for (d, p) in pix
-                    .data_mut()
-                    .iter_mut()
-                    .zip(image.pixels.as_chunks::<4>().0.iter())
-                {
-                    *d = vello_cpu::color::PremulRgba8::from_u8_array([p[2], p[1], p[0], p[3]]);
-                }
-                let src =
-                    source.unwrap_or(Rect::new(0., 0., image.width as f32, image.height as f32));
-                let transform = *ctx.transform();
-                ctx.set_paint(vello_cpu::Image {
-                    image: vello_cpu::ImageSource::Pixmap(Arc::new(pix)),
-                    sampler: Default::default(),
-                });
-                ctx.set_paint_transform(
-                    Affine::translate((r.left as f64, r.top as f64))
-                        * Affine::scale_non_uniform(
-                            (r.width() / src.width()) as f64,
-                            (r.height() / src.height()) as f64,
-                        )
-                        * Affine::translate((-src.left as f64, -src.top as f64)),
-                );
-                ctx.push_opacity_layer(*opacity);
-                ctx.fill_path(&rounded(
-                    *r,
-                    if let Op::RoundedImage { radius, .. } = op {
-                        *radius
-                    } else {
-                        0.
-                    },
-                ));
-                ctx.pop_layer();
-                ctx.reset_paint_transform();
-                ctx.set_transform(transform);
-            }
-            Op::Shadow {
-                rect: r,
-                radius,
-                spread,
-                drop,
-                color,
-            } => {
-                let steps = (*spread / 2.).floor() as i32;
-                for i in 0..steps {
-                    let grow = (i * 2) as f32;
-                    path(
-                        ctx,
-                        &rounded(r.inflate(grow).offset(0., *drop), radius + grow),
-                        0.,
-                        color.with_alpha(color.a * (1. - i as f32 / steps as f32)),
-                    );
-                }
-            }
-            Op::TextField { rect, field, .. } => {
-                draw_ops(ctx, res, text, &[field.op(*rect)])?;
-            }
-        }
-    }
-    for _ in 0..clips {
-        ctx.pop_layer();
-    }
-    Ok(())
-}
-
-fn icon_path(icon: crate::icons::Icon) -> BezPath {
-    use crate::icons::Seg;
-    let mut path = BezPath::new();
-    let mut at = kurbo::Point::ZERO;
-    let point = |p: crate::Point| kurbo::Point::new(p.x as f64, p.y as f64);
-    for seg in icon.segments() {
-        match seg {
-            Seg::Move(p) => {
-                at = point(p);
-                path.move_to(at);
-            }
-            Seg::Line(p) => {
-                at = point(p);
-                path.line_to(at);
-            }
-            Seg::Quad(a, p) => {
-                at = point(p);
-                path.quad_to(point(a), at);
-            }
-            Seg::Cubic(a, b, p) => {
-                at = point(p);
-                path.curve_to(point(a), point(b), at);
-            }
-            Seg::Close => path.close_path(),
-            Seg::Arc {
-                to,
-                rx,
-                ry,
-                rotation,
-                large,
-                sweep,
-            } => {
-                let to = point(to);
-                let svg = kurbo::SvgArc {
-                    from: at,
-                    to,
-                    radii: kurbo::Vec2::new(rx as f64, ry as f64),
-                    x_rotation: (rotation as f64).to_radians(),
-                    large_arc: large,
-                    sweep,
-                };
-                if let Some(arc) = kurbo::Arc::from_svg_arc(&svg) {
-                    path.extend(arc.append_iter(0.05));
-                } else {
-                    path.line_to(to);
-                }
-                at = to;
-            }
-        }
-    }
-    path
-}
+#[cfg(test)]
+use crate::{Op, Rect, Rgba};
+#[cfg(test)]
+use std::sync::Arc;
 #[cfg(test)]
 #[test]
 fn rounded_groups_clip_composed_pictures_and_translate_without_losing_the_mask() {

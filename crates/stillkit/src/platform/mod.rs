@@ -60,7 +60,8 @@ pub enum Render {
     #[default]
     Cpu,
     /// Hardware Direct2D on a DirectComposition surface, with in-process Liquid Glass on the
-    /// same adapter. Needs the `gpu` feature on Windows; elsewhere it falls back to `Cpu`.
+    /// same adapter on Windows; Vello Hybrid and Vulkan on Linux. Needs the `gpu` feature;
+    /// unsupported platforms fall back to `Cpu`.
     Gpu,
     /// `Cpu` unless the surface wants glass ([`crate::glass::set_style`] holds a material) and no
     /// external backdrop is installed; then `Gpu` (if the `gpu` feature is on).
@@ -70,7 +71,7 @@ pub enum Render {
 impl Render {
     /// The mode a new surface uses: `Cpu` or `Gpu`, never `Auto`.
     pub fn resolve(self, wants_glass: bool, external_backdrop: bool) -> Render {
-        let gpu = cfg!(all(windows, feature = "gpu"));
+        let gpu = cfg!(all(any(windows, target_os = "linux"), feature = "gpu"));
         match self {
             Render::Gpu if gpu => Render::Gpu,
             Render::Auto if gpu && wants_glass && !external_backdrop => Render::Gpu,
