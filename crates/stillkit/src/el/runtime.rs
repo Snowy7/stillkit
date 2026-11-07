@@ -1563,7 +1563,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32) -> Vec<Target>
                 .map_or(0.0, |r| (r.resolve(theme) * s).round())
                 .min(r.width().min(r.height()) / 2.0)
                 .max(0.0),
-            shadow: if el.look.shadow { 1.0 } else { 0.0 },
+            shadow: if el.look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
             motion,
             open: motion.unwrap_or(theme.motion.open),
@@ -1720,15 +1720,20 @@ fn paint_el<S>(
     if live && el.hit() && !paints {
         f.list.hits.push(hit(el, me.hit, rect));
     }
-    if pose.shadow > 0.0 {
-        let e = theme.elevation;
-        f.push(Op::Shadow {
-            rect,
-            radius,
-            spread: (e.spread * s).round(),
-            drop: (e.drop * s).round(),
-            color: e.color.with_alpha(e.color.a * pose.shadow),
-        });
+    // A shadowed box keeps its ops while they fade in (popups size themselves by them).
+    if pose.shadow > 0.0 || el.look.shadow.is_some() {
+        // A shadow fading out after its box dropped it fades the default level.
+        let cast = el.look.shadow.unwrap_or(super::element::Cast::Level(Default::default()));
+        for layer in cast.layers(theme).iter().filter(|l| l.color.a > 0.0) {
+            f.push(Op::SoftShadow {
+                rect,
+                radius,
+                blur: layer.blur * s,
+                offset: (layer.offset.0 * s, layer.offset.1 * s),
+                spread: layer.spread * s,
+                color: layer.color.with_alpha(layer.color.a * pose.shadow),
+            });
+        }
     }
     if let Some(fill) = pose.fill {
         f.fill(rect, radius, fill);

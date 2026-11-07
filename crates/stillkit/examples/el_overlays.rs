@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use stillkit::el::{
-    self, Align, App, El, Justify, Transition, col, dialog, menu, popover, row, text, toasts, token,
+    self, Align, App, El, Justify, ShadowLevel, Transition, col, dialog, menu, popover, row, text, toasts, token,
 };
 use stillkit::{Kind, Role, Scheme, Style, TextRole, Theme};
 
@@ -66,18 +66,18 @@ fn item(key: &'static str, label: &'static str, on: impl Fn(&mut Demo) + 'static
         })
 }
 
-fn card() -> El<Demo> {
+fn card(level: ShadowLevel) -> El<Demo> {
     col()
         .pad(token::PAD)
         .gap(8.0)
         .fill(token::ELEVATED)
         .radius(token::RADIUS_CARD)
-        .shadow()
+        .shadow_level(level)
 }
 
 pub fn view(s: &Demo) -> El<Demo> {
     let share = popover(
-        card()
+        card(ShadowLevel::Popover)
             .key("share-panel")
             .w(220.0)
             .child(text("Share link").font(TextRole::Headline))
@@ -91,7 +91,7 @@ pub fn view(s: &Demo) -> El<Demo> {
     .on_dismiss(|s: &mut Demo| s.share = false);
 
     let confirm = dialog(
-        card()
+        card(ShadowLevel::Dialog)
             .key("confirm-panel")
             .w(300.0)
             .gap(token::GAP)
@@ -114,7 +114,7 @@ pub fn view(s: &Demo) -> El<Demo> {
     .open(s.confirm)
     .on_dismiss(|s: &mut Demo| s.confirm = false);
 
-    let sizes = menu(col().key("sizes").pad(4.0).fill(token::ELEVATED).radius(token::RADIUS_CARD).shadow().children(
+    let sizes = menu(col().key("sizes").pad(4.0).fill(token::ELEVATED).radius(token::RADIUS_CARD).shadow_level(ShadowLevel::Menu).children(
         SIZES.iter().enumerate().map(|(i, name)| {
             row()
                 .key(*name)
@@ -140,7 +140,7 @@ pub fn view(s: &Demo) -> El<Demo> {
                 .pad(4.0)
                 .fill(token::ELEVATED)
                 .radius(token::RADIUS_CARD)
-                .shadow()
+                .shadow_level(ShadowLevel::Menu)
                 .child(item("cut", "Cut", |s| s.toast("Cut")))
                 .child(item("copy-item", "Copy", |s| s.toast("Copied")))
                 .child(item("paste", "Paste", |s| s.toast("Pasted"))),
@@ -160,7 +160,7 @@ pub fn view(s: &Demo) -> El<Demo> {
                 .radius(token::RADIUS_CARD)
                 .align(Align::Center)
                 .fill(token::ELEVATED)
-                .shadow()
+                .shadow_level(ShadowLevel::Toast)
                 .transition(Transition::slide(0.0, 16.0))
                 .child(text(message))
                 .on_timeout(TOAST, move |s: &mut Demo| s.toasts.retain(|t| t.0 != id))

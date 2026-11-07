@@ -36,7 +36,10 @@ Surface::present(ui, origin, size, list)
 ```
 
 - **Ops** (`Op`): `Fill`, `Stroke` (rounded or not), `Line`, `Text` (a string or an icon glyph,
-  placed by its measured size), `Icon` (a vector icon), `Shadow` (stepped rings), `Arc`, `Image`,
+  placed by its measured size), `Icon` (a vector icon), `Shadow` (stepped rings, the old kit's),
+  `SoftShadow` (a Gaussian-blurred rounded rect with CSS `box-shadow` semantics: on Windows an
+  analytic mask, cached per thread as a 9-slice, so a moving or resizing menu redraws it at fill
+  cost; Vello's blurred rect on Linux), `Arc`, `Image`,
   `TextField`, `Clip`/`Unclip` and `Clipped` (a retained clipped group: scroll views).
 - **Hits** (`Hit`): rectangle, id, AccessKit role, label, enabled, checked. Input hit-tests them,
   keyboard focus steps over them (`focus::step`), and assistive technology sees them.
@@ -91,6 +94,7 @@ there is none). Values are design px; `Frame` scales them.
 | `metrics` | `pad` (panel inset), `gap` (between blocks), `item`, `row` (two lines), `row_single`, `control`, `control_small`, `icon`, `icon_small`, `icon_large`, `hit`, `scrollbar`, `scrollbar_inset` |
 | `radius` | `surface`; `card` = surface − pad (concentric, `Radii::concentric(outer, inset, min)`); `control: Option<f32>` (`None`: capsules); `small` |
 | `motion` | Apple springs (`Spring::apple(duration, bounce)`): `interactive` (0.15, 0.14), `open` (0.3, 0.12), `layout` (`.snappy`), `scroll` (0.22, 0); `scrollbar_idle` 0.9 s, `scrollbar_fade` 0.35 s |
+| `elevation`, `shadows` | `shadow(ShadowLevel) -> [SoftShadow; 2]`: per level (`Card`, `Raised`, `Menu`, `Popover`, `Dialog`, `Toast`) a key and an ambient shadow from the look's `Shadows` part (Fluent: Fluent 2's shadow4–64), in `elevation.color` at each layer's strength (a transparent colour turns them all off) |
 | `icons`, `icon_weight` | `IconSet::Vector` (Fluent: `IconSet::Font`), stroke per 24 units |
 | `glass`, `border` | engine glass material (`None` for Solid and Mono); Solid's one hairline |
 

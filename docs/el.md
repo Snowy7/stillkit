@@ -46,7 +46,9 @@ notes area).
 - **Layout:** `w`, `h`, `size`, `w_full`, `h_full`, `grow`, `min_*`, `max_*`, `gap`, `pad`,
   `pad_x`, `pad_y`, `align` (cross axis), `justify` (main axis), `absolute(x, y)`.
 - **Style:** `fill`, `color` (text and icon ink), `radius` (clamped to a capsule), `shadow`
-  (the theme's elevation), `opacity` (the element and everything in it).
+  (the theme's soft shadow at `ShadowLevel::Raised`), `shadow_level(ShadowLevel::Menu)` (a
+  menu's, a dialog's...), `box_shadow(SoftShadow)` (a custom one), `opacity` (the element and
+  everything in it). A popup's window grows by its shadows' reach.
 - **Semantics:** `key`, `role`, `label`, `checked`, `disabled`, `focusable`, `description`,
   `value` (the value as text, "40%"), `selected`, `expanded`, `range(min, max, step, value)`.
   See [Accessibility values](#accessibility-values).

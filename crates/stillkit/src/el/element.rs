@@ -398,8 +398,25 @@ pub(crate) struct Look {
     /// Text and icon ink.
     pub color: Option<Paint>,
     pub radius: Option<Len>,
-    pub shadow: bool,
+    pub shadow: Option<Cast>,
     pub opacity: f32,
+}
+
+/// The shadow a box casts: one of the theme's levels, or a custom one.
+#[derive(Clone, Copy)]
+pub(crate) enum Cast {
+    Level(crate::ShadowLevel),
+    Custom(crate::SoftShadow),
+}
+
+impl Cast {
+    /// Its layers in design px under `theme` (a custom shadow's second is transparent).
+    pub fn layers(self, theme: &Theme) -> [crate::SoftShadow; 2] {
+        match self {
+            Self::Level(level) => theme.shadow(level),
+            Self::Custom(one) => [one, crate::SoftShadow { color: Rgba::TRANSPARENT, ..one }],
+        }
+    }
 }
 
 /// How an element animates (`motion` and `instant` reach its whole subtree).
@@ -473,7 +490,7 @@ fn new<S>(what: What) -> El<S> {
             fill: None,
             color: None,
             radius: None,
-            shadow: false,
+            shadow: None,
             opacity: 1.0,
         },
         sem: Sem::default(),
@@ -730,9 +747,21 @@ impl<S> El<S> {
         self
     }
 
-    /// The theme's soft elevation shadow under the box.
-    pub fn shadow(mut self) -> Self {
-        self.look.shadow = true;
+    /// The theme's soft shadow under the box, at the default level
+    /// ([`crate::ShadowLevel::Raised`]).
+    pub fn shadow(self) -> Self {
+        self.shadow_level(crate::ShadowLevel::default())
+    }
+
+    /// The theme's soft shadow of `level` (a menu's, a dialog's...) under the box.
+    pub fn shadow_level(mut self, level: crate::ShadowLevel) -> Self {
+        self.look.shadow = Some(Cast::Level(level));
+        self
+    }
+
+    /// A custom soft shadow under the box, design px.
+    pub fn box_shadow(mut self, shadow: crate::SoftShadow) -> Self {
+        self.look.shadow = Some(Cast::Custom(shadow));
         self
     }
 

@@ -235,8 +235,10 @@ fn damage_during_an_animation_covers_only_what_moves() {
     let before = rt.find("card").unwrap();
     assert!(rt.click("resize"));
     rt.frame(FRAME);
-    let e = rt.theme().elevation;
-    let reach = before.union(rt.find("card").unwrap()).inflate(e.spread + e.drop + 1.0);
+    // 3σ past the shadow's grown, offset shape (plus the pixel it snaps by).
+    let layers = rt.theme().shadow(stillkit::ShadowLevel::default());
+    let far = layers.iter().map(|l| 1.5 * l.blur + l.spread + l.offset.1.abs() + 2.0).fold(0.0, f32::max);
+    let reach = before.union(rt.find("card").unwrap()).inflate(far);
     while rt.animating() {
         rt.frame(FRAME);
         let damage = rt.damage();
