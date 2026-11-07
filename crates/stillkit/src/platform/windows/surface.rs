@@ -312,7 +312,7 @@ impl Surface {
     /// A hidden, empty window. `name` and `role` describe it to assistive technology. It draws
     /// in this thread's default mode ([`crate::platform::set_render`], `Cpu` unless set).
     pub fn new(kind: Kind, name: &str, role: Role) -> Result<Self> {
-        Self::create(kind, name, role, false, crate::platform::render())
+        Self::create(kind, name, role, false, default_render())
     }
 
     /// [`Surface::new`] with its own render mode, whatever the thread's default.
@@ -323,7 +323,7 @@ impl Surface {
     /// A startup surface whose UI Automation adapter is created on its first WM_GETOBJECT.
     /// Its latest hit snapshot is retained from the first present, including before activation.
     pub fn new_deferred_accessibility(kind: Kind, name: &str, role: Role) -> Result<Self> {
-        Self::create(kind, name, role, true, crate::platform::render())
+        Self::create(kind, name, role, true, default_render())
     }
 
     #[cfg_attr(not(feature = "gpu"), allow(unused_variables))]
@@ -1578,4 +1578,12 @@ impl crate::platform::Window for Surface {
         self.update(origin, bitmap.map(|(dc, dirty, resized)| (*dc, dirty, resized)))
     }
     fn next_event() -> Option<(SurfaceId, Event)> { next_event() }
+}
+
+/// The thread's default render mode; always `Cpu` without the `gpu` feature (nothing is read).
+fn default_render() -> crate::platform::Render {
+    #[cfg(feature = "gpu")]
+    return crate::platform::render();
+    #[cfg(not(feature = "gpu"))]
+    crate::platform::Render::Cpu
 }

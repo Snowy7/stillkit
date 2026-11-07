@@ -128,6 +128,19 @@ impl Surface {
     pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {
         unimplemented!("glass")
     }
+    /// GPU mode is Windows-only: every mode draws on the CPU here.
+    pub fn with_render(kind: Kind, name: &str, role: accesskit::Role, _: crate::platform::Render) -> Result<Self> {
+        Self::new(kind, name, role)
+    }
+    pub fn render(&self) -> crate::platform::Render {
+        crate::platform::Render::Cpu
+    }
+    pub fn glass_available(&self) -> bool {
+        crate::glass::available()
+    }
+    pub fn set_glass_group(&self, glasses: &[crate::Glass], _spacing: f32) {
+        self.set_glass(glasses.first().copied())
+    }
     pub fn show(&self) {
         unimplemented!("native window")
     }

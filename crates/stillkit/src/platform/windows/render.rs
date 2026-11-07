@@ -473,8 +473,15 @@ impl Image {
 
 }
 
-/// Draws `list` into a new `width`×`height` image exactly as a surface shows it.
+/// Draws `list` into a new `width`×`height` image exactly as a surface shows it: on the GPU
+/// when this thread's render mode is `Gpu` (`gpu` feature), else on the CPU.
 pub fn render(ui: &mut Ui, list: &DisplayList, width: u32, height: u32) -> Result<Image> {
+    #[cfg(feature = "gpu")]
+    if crate::platform::render() == crate::platform::Render::Gpu
+        && let Some(image) = super::gpu::render(ui, list, width, height)?
+    {
+        return Ok(image);
+    }
     let canvas = <Canvas as crate::platform::Renderer>::new(ui, width, height)?;
     let full = PixelRect::full(width, height);
     crate::platform::Renderer::draw(&canvas, &mut ui.text, list, full)?;

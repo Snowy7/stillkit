@@ -107,8 +107,9 @@ mod native {
         fn NtQuerySystemInformation(class: u32, info: *mut u8, len: u32, ret: *mut u32) -> i32;
     }
 
-    /// Context switches of every thread of `pid` so far: each one is a wake.
-    fn switches(pid: u32) -> u64 {
+    /// Context switches of each live thread of `pid` so far (by thread id): each one is a wake.
+    /// Per thread, because a thread that exits takes its count with it.
+    fn switches(pid: u32) -> std::collections::HashMap<u64, u64> {
         let mut buf = vec![0u8; 4 << 20];
         let mut ret = 0;
         loop {
@@ -118,7 +119,7 @@ mod native {
                 break;
             }
             if buf.len() > 64 << 20 {
-                return 0;
+                return Default::default();
             }
             buf.resize(buf.len() * 2, 0);
         }
@@ -130,13 +131,16 @@ mod native {
         let mut at = 0;
         loop {
             // SYSTEM_PROCESS_INFORMATION (x64): next 0, threads 4, pid 0x50; threads from 0x100,
-            // 0x50 bytes each, their ContextSwitches at 0x40.
+            // 0x50 bytes each: thread id at 0x30, ContextSwitches at 0x40.
             let (next, threads, id) = (read(at, 4) as usize, read(at + 4, 4) as usize, read(at + 0x50, 8));
             if id == u64::from(pid) {
-                return (0..threads).map(|i| read(at + 0x100 + i * 0x50 + 0x40, 4)).sum();
+                return (0..threads)
+                    .map(|i| at + 0x100 + i * 0x50)
+                    .map(|t| (read(t + 0x30, 8), read(t + 0x40, 4)))
+                    .collect();
             }
             if next == 0 {
-                return 0;
+                return Default::default();
             }
             at += next;
         }
@@ -188,7 +192,7 @@ mod native {
 
     struct Sample {
         cpu: Duration,
-        switches: u64,
+        switches: std::collections::HashMap<u64, u64>,
     }
 
     fn sample(handles: &[(u32, HANDLE)]) -> Vec<Sample> {
@@ -238,7 +242,7 @@ mod native {
             let gpu = gpu_mb(&pids);
             let frames = next()?;
             let c = sample(&handles);
-            let wakes: Vec<u64> = a.iter().zip(&b).map(|(a, b)| b.switches - a.switches).collect();
+            let wakes: Vec<u64> = a.iter().zip(&b).map(|(a, b)| b.switches.iter().map(|(t, n)| n.saturating_sub(a.switches.get(t).copied().unwrap_or(0))).sum()).collect();
             let idle: Vec<f64> = a.iter().zip(&b).map(|(a, b)| (b.cpu - a.cpu).as_secs_f64() / IDLE as f64 * 100.0).collect();
             let dragged: Vec<f64> = b.iter().zip(&c).map(|(b, c)| (c.cpu - b.cpu).as_secs_f64() / DRAG as f64 * 100.0).collect();
             for (_, h) in handles {
@@ -468,6 +472,7 @@ mod native {
         for _ in 0..30 {
             pump(Duration::from_millis(16));
         }
+        // SAFETY: the pseudo handle of this process.
         let me = unsafe { GetCurrentProcess() };
         let widget = |ui: &mut Ui, n: u32| {
             let style = TextStyle::new("Segoe UI Variable Text", 13.0);

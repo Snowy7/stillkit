@@ -79,16 +79,26 @@ impl Render {
     }
 }
 
-thread_local! { static RENDER: std::cell::Cell<Render> = const { std::cell::Cell::new(Render::Cpu) }; }
+thread_local! { static RENDER: std::cell::Cell<Option<Render>> = const { std::cell::Cell::new(None) }; }
 
-/// Sets this UI thread's default render mode for surfaces made from now on (`Cpu` unless set).
+/// Sets this UI thread's default render mode for surfaces made from now on.
 pub fn set_render(render: Render) {
-    RENDER.set(render);
+    RENDER.set(Some(render));
 }
 
-/// This UI thread's default render mode ([`set_render`]).
+/// This UI thread's default render mode: what [`set_render`] set, else `STILLKIT_RENDER`
+/// (`cpu`, `gpu` or `auto`, read once per thread), else `Cpu`. Headless renders
+/// (`render::render`) follow it too, so a GPU app's snapshots match its screen.
 pub fn render() -> Render {
-    RENDER.get()
+    RENDER.get().unwrap_or_else(|| {
+        let render = match std::env::var("STILLKIT_RENDER").as_deref() {
+            Ok("gpu") => Render::Gpu,
+            Ok("auto") => Render::Auto,
+            _ => Render::Cpu,
+        };
+        RENDER.set(Some(render));
+        render
+    })
 }
 
 /// Associated concrete services of a backend; no virtual dispatch is involved.
