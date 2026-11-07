@@ -742,10 +742,17 @@ mod mix_goldens {
         let mut ui = Ui::new()?;
         for scheme in [Scheme::Light, Scheme::Dark] {
             let image = mix_page(&mut ui, scheme)?;
+            // Native text rasterization differs; retain each backend's own reference pixels.
+            let directory = if cfg!(target_os = "linux") {
+                "../../docs/media/native/linux"
+            } else {
+                "tests/golden"
+            };
             stillkit::golden::check(
                 &image,
                 &Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(format!("tests/golden/kit-mix-{}.png", scheme_name(scheme))),
+                    .join(directory)
+                    .join(format!("kit-mix-{}.png", scheme_name(scheme))),
             )?;
         }
         Ok(())
