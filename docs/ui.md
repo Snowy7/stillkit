@@ -777,7 +777,52 @@ splitting on the way (`examples/glass_merge.rs`). The material maps to liquid-ru
 
 ### Measured
 
-<!-- render-modes-measured -->
+`examples/glass_measure.rs`, 2026-11-07, this PC (Ryzen 7 7800X3D with its Radeon iGPU, RTX 4070
+SUPER, 2560×1440 at 100 %), release builds. One 360×220 popup panel (a title, a slider; glass under
+a 328×188 body), 10 s settle, 30 s idle, then 10 s of the app moving its own slider every display
+frame. Sampled from outside: private bytes, CPU time, every thread's context switches (drivers'
+included), and the `GPU Process Memory` counters. "Glass process" is a second process with its own
+window under the panel, a wgpu device and the same glass code; its numbers are added in.
+
+| Configuration | Adapter | Private MB (app + host) | GPU dedicated / shared MB | Wakes / 30 s idle | Idle CPU | Drag CPU | Drag frame median / p95 ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| CPU only (fill) | none (WARP) | **6.4** | 0 / 0 | **22** | 0.000 % | 4.5 % | 0.282 / 0.662 |
+| CPU + glass process | Radeon iGPU | **228.4** (6.5 + 221.9) | 97.6 / 20.7 | **2034** (4 + 2030) | 0.052 % | 7.2 % | 0.222 / 0.301 |
+| CPU + glass process | RTX 4070 SUPER | **168.5** (6.4 + 162.1) | 74.6 / 35.9 | **2848** (11 + 2837) | 0.104 % | 5.3 % | 0.252 / 0.661 |
+| GPU, no glass | Radeon iGPU | **29.8** | 8.8 / 3.2 | **61** | 0.000 % | 5.2 % | 0.248 / 0.351 |
+| GPU, no glass | RTX 4070 SUPER | **58.1** | 13.9 / 1.7 | **2424** | 0.104 % | 7.8 % | 0.201 / 0.359 |
+| GPU + in-process glass | Radeon iGPU | **251.8** | 106.4 / 26.0 | **2050** | 0.000 % | 5.3 % | 0.237 / 0.318 |
+| GPU + in-process glass | RTX 4070 SUPER | **178.3** | 88.5 / 35.0 | **5621** | 0.312 % | 6.7 % | 0.162 / 0.214 |
+
+- **Glass costs the same in or out of process.** The wgpu DX12 device is the cost: about
+  160–220 MB private, 75–106 MB dedicated GPU memory, and 70–190 driver wakes a second while idle,
+  wherever it lives. In-process GPU + glass is within 10 % of CPU + a glass process (iGPU 252 vs
+  228 MB; NVIDIA 178 vs 169 MB). By the rule "if a separate glass process costs about as much as
+  going GPU, go GPU", an app that must bring its own glass goes GPU.
+- **GPU without glass never pays.** Hardware Direct2D costs 30 MB (iGPU) to 58 MB (NVIDIA, with
+  ~80 driver wakes a second) against 6.4 MB on the CPU, for the same drag CPU and frame time.
+- **The iGPU is the better default** for wakes and CPU (61 vs 2424 idle wakes without glass); the
+  discrete GPU's D3D12 stack is smaller in private memory (178 vs 252 MB with glass).
+- Drag CPU and frame time are this process's own (the draw and the present call); the GPU's and
+  DWM's work is not in them. CPU times are at the 15.6 ms granularity of process times.
+
+**A CPU surface beside a GPU device** (`glass_measure mixed`: a 200×40 widget, 300 redraws, in a
+process that already holds the GPU panel and its glass): the first CPU surface adds 1.8–2.5 MB
+(WARP and the software target), later ones 0.1 MB; a GPU surface adds 0.15–0.22 MB. Redraw median
+0.124–0.129 ms on the CPU against 0.139–0.160 ms on the GPU, the same CPU time. So small surfaces
+stay on the CPU even in a GPU process: about free, a little faster, and their redraws never wait on
+the GPU (one NVIDIA run had GPU p95 spikes of 12.7 ms; the CPU's stayed under 0.3 ms).
+
+**The CPU path is unchanged** (`stillkit-bar-spike --seconds 60`, `main` against this branch
+without the `gpu` feature, alternating runs on a busy PC): whole-bar redraw median 0.28–0.37 ms
+both, clock-only 0.14–0.19 ms both, 1 idle wakeup in 60 s both, private after redraws a median of
+8.5 MB before and 8.6 MB after (each run within 7.97–8.96 MB), first paint 6.6–6.9 MB both, no GPU
+driver. The gallery is byte-identical with and without the feature.
+
+**`Auto`, from these numbers:** CPU when no glass is wanted; when glass is wanted, the external
+backdrop if one is installed (mypaper's engine: its device is already paid for, and one serves
+every app); otherwise GPU, with small glass-less surfaces made `Render::Cpu` beside it. A glass
+process would win only if it could exit while no glass shows, or serve several apps.
 
 ## Linux backend
 
