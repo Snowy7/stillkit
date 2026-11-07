@@ -680,3 +680,42 @@ adapter, HWND backdrop hook, screen queries, icon font placement and native text
 resources. Golden PNG comparison/IO already uses portable `Image` data; its raster target
 is supplied by the selected renderer. Spring/tween math stays core, while the waitable
 frame timer and DWM refresh query live in the Windows backend.
+
+
+## Linux backend
+
+Linux selects `platform::linux`: Vello CPU 0.3 with the bitmap glyph atlas disabled,
+cosmic-text shaping, fontconfig's sans fallback, and bundled OFL Inter variable fonts.
+Weight 600 is a real variable-font instance, including the coordinates passed to Vello.
+All display-list primitives, images, nested rounded clips and headless `render()` work.
+The gallery's twelve Linux pages are in `docs/media/native/linux/`; that directory also
+records visual differences and measurement evidence.
+
+Native windows use raw Wayland + xdg-shell and two released-buffer-tracked ARGB8888
+`wl_shm` buffers. Damage is physical pixels; callers draw at `Surface::scale()`.
+Unchanged lists do not draw or commit. `next_event()` blocks instead of polling;
+`animation_frames()` requests compositor callbacks only for its guard's lifetime/duration.
+Use `Surface::popup(parent, name, at)` for parent-relative popups; parentless `Kind::Popup`
+falls back to a toplevel. `set_chrome`, `start_move` and `start_resize` use real input
+serials for client-side chrome. Basic XKB keyboard entry and windowless field rendering
+work; the process creates no graphics device.
+
+On m6u (Ubuntu 26.04 / GNOME 50.1, Ryzen 5 7640HS), the release 400×220 hello window
+used **6,016 KiB private** at steady idle. Over 30 seconds: **0 user/system CPU ticks,
+0 voluntary/involuntary context-switch deltas**, and **0 GPU libraries** in `/proc/PID/maps`.
+This excludes startup protocol traffic; compositor pings and reconfiguration may wake it.
+The measurement temporarily used GNOME's strict new-window focus policy, restored it,
+and sent no activation request or synthetic input. The protocol's configure states
+contained no activation. The saved hello PNG is the client's rendered frame; GNOME denied
+a desktop screenshot, so it is not a capture of compositor output.
+
+Not yet supported: Wayland text-input-v3/IBus IME, field selection/caret interaction,
+AT-SPI accessibility, X11, fractional scaling, complete mixed-monitor placement, cursor
+shapes, and compositor blur. Fontconfig discovery currently loads the primary sans
+fallback; complete script-specific fallback discovery is pending. Integer preferred-buffer-scale changes are forwarded as
+DPI events; physical mixed-DPI hardware remains untested. Global position and work-area
+coordinates are unavailable on Wayland; `screen_at` reports an output extent, without
+panel reservations. Bars/background surfaces use layer-shell when advertised and return
+an error on GNOME, which has no layer-shell. Layer-shell and parented popup paths compile
+but have not been exercised on another compositor. DirectWrite text-quality controls are
+Windows-only; Linux uses Vello's grayscale outline rasterization for all presets.

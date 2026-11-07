@@ -1,0 +1,37 @@
+{
+  "start": {
+    "memory_kib": {
+      "Rss": 9016,
+      "Pss": 6382,
+      "Private_Clean": 4692,
+      "Private_Dirty": 1324,
+      "Private": 6016
+    },
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 9,
+    "involuntary": 0,
+    "gpu": []
+  },
+  "end": {
+    "memory_kib": {
+      "Rss": 9016,
+      "Pss": 6382,
+      "Private_Clean": 4692,
+      "Private_Dirty": 1324,
+      "Private": 6016
+    },
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 9,
+    "involuntary": 0,
+    "gpu": []
+  },
+  "delta": {
+    "utime": 0,
+    "stime": 0,
+    "voluntary": 0,
+    "involuntary": 0
+  },
+  "seconds": 30
+}

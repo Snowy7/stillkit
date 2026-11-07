@@ -1,0 +1,45 @@
+5ff87c664000-5ff87c8f1000 r--p 00000000 103:02 36588266                  /home/islam/projects/stillkit/target/release/examples/linux_hello
+5ff87c8f1000-5ff87cbee000 r-xp 0028c000 103:02 36588266                  /home/islam/projects/stillkit/target/release/examples/linux_hello
+5ff87cbee000-5ff87cc21000 r--p 00588000 103:02 36588266                  /home/islam/projects/stillkit/target/release/examples/linux_hello
+5ff87cc21000-5ff87cc22000 rw-p 005ba000 103:02 36588266                  /home/islam/projects/stillkit/target/release/examples/linux_hello
+5ff8baf11000-5ff8bafce000 rw-p 00000000 00:00 0                          [heap]
+7cea92a00000-7cea92a28000 r--p 00000000 103:02 16125015                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7cea92a28000-7cea92bc0000 r-xp 00028000 103:02 16125015                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7cea92bc0000-7cea92c0e000 r--p 001c0000 103:02 16125015                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7cea92c0e000-7cea92c12000 r--p 0020e000 103:02 16125015                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7cea92c12000-7cea92c14000 rw-p 00212000 103:02 16125015                  /usr/lib/x86_64-linux-gnu/libc.so.6
+7cea92c14000-7cea92c21000 rw-p 00000000 00:00 0 
+7cea92c3c000-7cea92ce8000 rw-s 00000000 00:01 44319147                   /memfd:stillkit-shm (deleted)
+7cea92ce8000-7cea92d3e000 rw-p 00000000 00:00 0 
+7cea92d3e000-7cea92d44000 r--p 00000000 103:02 16153390                  /usr/lib/x86_64-linux-gnu/libxkbcommon.so.0.13.1
+7cea92d44000-7cea92d72000 r-xp 00006000 103:02 16153390                  /usr/lib/x86_64-linux-gnu/libxkbcommon.so.0.13.1
+7cea92d72000-7cea92d9a000 r--p 00034000 103:02 16153390                  /usr/lib/x86_64-linux-gnu/libxkbcommon.so.0.13.1
+7cea92d9a000-7cea92d9c000 r--p 0005b000 103:02 16153390                  /usr/lib/x86_64-linux-gnu/libxkbcommon.so.0.13.1
+7cea92d9c000-7cea92d9d000 rw-p 0005d000 103:02 16153390                  /usr/lib/x86_64-linux-gnu/libxkbcommon.so.0.13.1
+7cea92dad000-7cea92daf000 rw-p 00000000 00:00 0 
+7cea92daf000-7cea92dc1000 r--p 00000000 103:02 16125018                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7cea92dc1000-7cea92e61000 r-xp 00012000 103:02 16125018                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7cea92e61000-7cea92ed3000 r--p 000b2000 103:02 16125018                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7cea92ed3000-7cea92ed4000 r--p 00123000 103:02 16125018                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7cea92ed4000-7cea92ed5000 rw-p 00124000 103:02 16125018                  /usr/lib/x86_64-linux-gnu/libm.so.6
+7cea92ed5000-7cea92ed9000 r--p 00000000 103:02 16152850                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7cea92ed9000-7cea92efd000 r-xp 00004000 103:02 16152850                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7cea92efd000-7cea92f01000 r--p 00028000 103:02 16152850                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7cea92f01000-7cea92f02000 r--p 0002c000 103:02 16152850                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7cea92f02000-7cea92f03000 rw-p 0002d000 103:02 16152850                  /usr/lib/x86_64-linux-gnu/libgcc_s.so.1
+7cea92f0e000-7cea92f0f000 rw-p 00000000 00:00 0 
+7cea92f0f000-7cea92f10000 rw-p 00000000 00:00 0 
+7cea92f10000-7cea92f11000 ---p 00000000 00:00 0 
+7cea92f11000-7cea92f13000 rw-p 00000000 00:00 0 
+7cea92f13000-7cea92f15000 rw-p 00000000 00:00 0 
+7cea92f15000-7cea92f19000 r--p 00000000 00:00 0                          [vvar]
+7cea92f19000-7cea92f1b000 r--p 00000000 00:00 0                          [vvar_vclock]
+7cea92f1b000-7cea92f1d000 r-xp 00000000 00:00 0                          [vdso]
+7cea92f1d000-7cea92f1e000 r--p 00000000 103:02 16125012                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7cea92f1e000-7cea92f4d000 r-xp 00001000 103:02 16125012                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7cea92f4d000-7cea92f58000 r--p 00030000 103:02 16125012                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7cea92f58000-7cea92f5a000 r--p 0003b000 103:02 16125012                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7cea92f5a000-7cea92f5b000 rw-p 0003d000 103:02 16125012                  /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7cea92f5b000-7cea92f5c000 rw-p 00000000 00:00 0 
+7ffe6bc4e000-7ffe6bc6f000 rw-p 00000000 00:00 0                          [stack]
+ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]
