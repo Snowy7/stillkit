@@ -573,8 +573,8 @@ impl<'a> Frame<'a> {
                 // Control Center's white fill on dark glass; on light surfaces white would
                 // vanish into the card, so the accent fills there. The glyph always sits on
                 // the fill (it starts a full capsule wide).
-                let (fill, glyph_ink) = match (self.theme.style, self.theme.dark()) {
-                    (crate::theme::Style::Mono, _) => (c.label, c.surface.with_alpha(1.0)),
+                let (fill, glyph_ink) = match (self.theme.monochrome, self.theme.dark()) {
+                    (true, _) => (c.label, c.surface.with_alpha(1.0)),
                     (_, true) => (c.knob, Rgba::new(0.0, 0.0, 0.0, 0.62)),
                     (_, false) => (c.accent, c.on_accent),
                 };

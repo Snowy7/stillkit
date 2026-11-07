@@ -307,7 +307,6 @@ A `Surface` is one per-pixel-alpha layered window (`WS_EX_LAYERED`, updated only
   showing the old pixels: every hover and press redraw was lost that way (bisected to e338153,
   fixed in c2ad184).
 
-
 ### Desktop windows (N4)
 
 `DesktopChild` uses `WS_POPUP | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`.
@@ -646,7 +645,6 @@ marker), above the 73 ms reference. Shell kill/repaint took 370-572 ms, above 30
 the native clock click, panic restoration and six style PNGs pass. See [bars.md](bars.md#live-n2-measurements-2026-11-05)
 for raw samples, the interrupted Explorer sample and the missing engine/glass/N4 fixture checks.
 
-
 ### N4: top-level desktop widget fixture (2026-11-05)
 
 Six production widgets and a warmed closed menu, both 1440p monitors visible at 96 DPI. Three
@@ -719,3 +717,85 @@ panel reservations. Bars/background surfaces use layer-shell when advertised and
 an error on GNOME, which has no layer-shell. Layer-shell and parented popup paths compile
 but have not been exercised on another compositor. DirectWrite text-quality controls are
 Windows-only; Linux uses Vello's grayscale outline rasterization for all presets.
+
+## Looks
+
+A look bundles independent values in `stillkit::theme`: `Material`, `Shape`,
+`TypeRamp`, `Spacing` (also called `Metrics`), `Palette`, `Motion`, `Icons`,
+border ink and `FocusRing`. The five presets expose the same constructors on
+each part: `liquid`, `one_ui`, `solid`, `fluent`, `mono`. Palette and whole-theme
+constructors take `(Scheme, Rgba)`; other part constructors take no arguments.
+The old root `stillkit::Material` remains the menu tint type for compatibility.
+
+```rust,ignore
+use stillkit::theme::{Material, Radius, Shape, Theme, TypeRamp};
+let look = Theme::one_ui(scheme, accent)
+    .material(Material::liquid().refraction(0.3).blur(20.0))
+    .shape(Shape::one_ui())
+    .type_ramp(TypeRamp::one_ui())
+    .radius(Radius::Control, 10.0);
+assert!(look.check().is_empty());
+```
+
+Builder setters resolve the material, concentric card radius (`surface - pad`,
+floored at the shape's `card_min`), label steps and accent again. Palette setters
+retain the requested values separately so later changes solve from the original
+ink rather than repeatedly degrading it. Use `.palettes(light, dark)` to replace
+both scheme palettes. Adaptive scheme changes retain mixed shapes, optics and type.
+The legacy public token fields remain writable; use builders for changes that
+need derived values recomputed. `Radius::Card` changes the concentric minimum.
+
+`Material::Glass` carries its own `lensed` flag. `Material::overrides(&MaterialOverrides)`
+applies sliders without consulting a look name. Non-lensed materials keep lens
+controls at zero. Fill materials ignore optics. `tint` sets an explicit RGBA;
+otherwise tint follows the palette. A clarity override also sets tint alpha to
+`1 - clarity`. `Theme::check()` reports unsatisfied contrast constraints: label
+7:1, secondary 4.5:1, tertiary and accent 3:1. Checks include cards, and very clear
+glass (tint alpha below 0.5) is checked against both backdrop extremes. Presets
+retain their existing scheme-relative contrast contract and exact token values.
+Hosts remain responsible for adaptive schemes over arbitrary wallpapers.
+
+`FocusRing` exposes width, gap and opacity for hosts. The existing kit focus-ring
+renderer still uses its historical fixed values; this change's kit ownership is
+limited to replacing the Mono slider check with a theme value.
+
+Enable Cargo feature `serde` for `Theme::from_toml` and `Theme::from_json`.
+Both return `anyhow::Result<Theme>` and use the same strict schema (unknown keys
+are errors). See `crates/stillkit/looks/sunset.toml`:
+
+```toml
+base = "one_ui"
+scheme = "dark"
+[material]
+base = "liquid"
+refraction = 0.3
+[shape]
+control = 10.0
+```
+
+The document's optional `base` defaults to `liquid`; `scheme` is `light` or `dark`
+(default `dark`); `accent` is `[r,g,b,a]`, channels in 0..=1. Each optional part
+object has an optional `base` preset (`liquid`, `one_ui`, `solid`, `fluent`, `mono`)
+and property overrides:
+
+| Part | Properties |
+| --- | --- |
+| `material` | `clarity`, `blur`, `refraction`, `highlight`, `tint` (RGBA), `lensed` |
+| `shape` | `surface`, `card_min`, `control`, `capsule` (true selects capsules), `small` |
+| `type_ramp` | `family`, `roles` (ten entries in `TextRole::ALL` order, each with `size`, `weight`, `tracking`, `line`) |
+| `spacing` | All `Metrics` field names, design pixels |
+| `palette` | All `Palette` color fields (RGBA), plus `monochrome` |
+| `motion` | `interactive`, `open`, `layout`, `scroll` (each `mass`, `stiffness`, `damping`); `scrollbar_idle`, `scrollbar_fade` |
+| `icons` | `family`, `vector` (true selects vectors), `weight` |
+| `focus_ring` | `width`, `gap`, `opacity` (no base) |
+
+Top-level `border` is an RGBA hairline, `false` to remove it, or `true` to use the separator. Omitted values inherit the base. Files set
+the selected scheme palette; use the Rust `.palettes` builder for paired custom
+palettes. Files may describe an unsatisfiable mix; call `check()` to inspect it.
+`Style`, `Theme::new`, `material`, `Knobs`, `GlassMaterial::tuned`, `lensed`, and
+the process-global active style remain compatibility APIs. In particular the old
+`tuned(style, knobs)` still suppresses lens controls outside Liquid.
+
+`gallery` writes `kit-mix-light.png` and `kit-mix-dark.png`: each row contains two
+source presets followed by their mix. Material previews use a deterministic CPU
+backdrop stand-in. `golden` enables their comparisons through `golden::check`.

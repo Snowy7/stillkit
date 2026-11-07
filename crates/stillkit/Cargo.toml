@@ -12,8 +12,14 @@ anyhow.workspace = true
 log.workspace = true
 # Golden-image comparison (`golden` feature), for tests in this crate and the shell.
 png = { workspace = true, optional = true }
+taffy = { version = "0.15.1", default-features = false, features = ["std", "flexbox", "grid", "taffy_tree"] }
+
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+toml = { version = "0.8", optional = true }
 
 [features]
+serde = ["dep:serde", "dep:serde_json", "dep:toml"]
 golden = ["dep:png"]
 
 [target.'cfg(windows)'.dependencies]
@@ -77,3 +83,7 @@ libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 xkbcommon-dl = "0.4"
 skrifa = "0.44"
+
+[[example]]
+name = "gallery"
+test = true

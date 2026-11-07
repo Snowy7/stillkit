@@ -19,6 +19,7 @@ pub mod color_row;
 pub use platform::current::compose;
 pub mod controls;
 pub mod damage;
+pub mod el;
 pub mod focus;
 pub mod geom;
 pub mod glass;

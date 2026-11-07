@@ -3,6 +3,7 @@ pub mod a11y;
 pub mod app_window;
 pub mod compose;
 pub mod glass;
+pub mod host;
 pub mod identity;
 pub mod layered_app;
 pub mod modules;

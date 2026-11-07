@@ -65,6 +65,9 @@ fn main() -> anyhow::Result<()> {
             );
         }
     }
+    for scheme in [Scheme::Dark, Scheme::Light] {
+        save(&out.join(format!("kit-mix-{}.png", scheme_name(scheme))), &mix_page(&mut ui, scheme)?, 2)?;
+    }
     text_lab(&mut ui, &out, &backdrop, &blurred)?;
     icon_sheet(&mut ui, &out, &backdrop, &blurred)?;
     Ok(())
@@ -630,4 +633,121 @@ fn save(path: &Path, image: &Image, zoom: u32) -> anyhow::Result<()> {
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header()?.write_image_data(&rgb)?;
     Ok(())
+}
+
+/// Source presets in the first two columns, their mix in the third.
+fn mix_page(ui: &mut Ui, scheme: Scheme) -> anyhow::Result<Image> {
+    use stillkit::theme::{Material, Palette, SYSTEM_BLUE, Shape, TypeRamp};
+    let liquid = Theme::liquid(scheme, SYSTEM_BLUE);
+    let one = Theme::one_ui(scheme, SYSTEM_BLUE);
+    let fluent = Theme::fluent(scheme, SYSTEM_BLUE);
+    let mono = Theme::mono(scheme, SYSTEM_BLUE);
+    let rows = [
+        [
+            ("One UI", one.clone()),
+            ("Liquid", liquid.clone()),
+            (
+                "One UI + Liquid glass",
+                one.clone().material(Material::liquid()),
+            ),
+        ],
+        [
+            ("Liquid", liquid.clone()),
+            ("One UI", one),
+            (
+                "Liquid + One UI shape/type",
+                liquid.shape(Shape::one_ui()).type_ramp(TypeRamp::one_ui()),
+            ),
+        ],
+        [
+            ("Fluent", fluent.clone()),
+            ("Mono", mono),
+            (
+                "Fluent + Mono colours",
+                fluent.palettes(
+                    Palette::mono(Scheme::Light, SYSTEM_BLUE),
+                    Palette::mono(Scheme::Dark, SYSTEM_BLUE),
+                ),
+            ),
+        ],
+    ];
+    let input = Interaction::default();
+    let mut bg = Image {
+        width: W,
+        height: H,
+        pixels: (0..W * H)
+            .flat_map(|i| {
+                let x = (i % W) as f32 / W as f32;
+                let y = (i / W) as f32 / H as f32;
+                [
+                    (70.0 + y * 110.0) as u8,
+                    (30.0 + x * 100.0) as u8,
+                    (90.0 + (x * 12.0).sin() * 60.0) as u8,
+                    255,
+                ]
+            })
+            .collect(),
+    };
+    let blurred = blur(&bg, 18);
+    let mut list = DisplayList::default();
+    for (row, panels) in rows.into_iter().enumerate() {
+        for (column, (name, t)) in panels.into_iter().enumerate() {
+            let mut f = Frame::new(&mut ui.text, &t, 1.0, &input);
+            let r = Rect::new(
+                24.0 + column as f32 * 384.0,
+                24.0 + row as f32 * 252.0,
+                360.0,
+                228.0,
+            );
+            if let Some(g) = f.surface(r, true) {
+                glass_stand_in(&mut bg, &blurred, g.body, g.radius, &t);
+            }
+            let body = r.inset(Insets::all(t.metrics.pad));
+            let (title, rest) = body.take_top(32.0, 8.0);
+            f.text_in(title, name, TextRole::Title3, t.color.label, Align::Start);
+            let (label, rest) = rest.take_top(24.0, 8.0);
+            f.text_in(
+                label,
+                "Independent parts, readable text",
+                TextRole::Body,
+                t.color.secondary,
+                Align::Start,
+            );
+            let (button, rest) = rest.take_top(32.0, 12.0);
+            f.button(1, button, "Continue", None, ButtonKind::Tinted, true);
+            let (slider, rest) = rest.take_top(28.0, 8.0);
+            f.slider(2, slider, 0.65, "Volume", Some(Icon::Volume(2)));
+            f.text_in(
+                rest,
+                &format!(
+                    "radius {:.0} | blur {:.0} | lens {}",
+                    t.radius.surface,
+                    t.glass.map_or(0.0, |g| g.blur),
+                    t.glass.is_some_and(|g| g.refraction > 0.0)
+                ),
+                TextRole::Caption,
+                t.color.tertiary,
+                Align::Start,
+            );
+            list.ops.extend(f.list.ops);
+        }
+    }
+    Ok(over(&render(ui, &list, W, H)?, &bg))
+}
+#[cfg(all(test, feature = "golden"))]
+mod mix_goldens {
+    use super::*;
+    #[test]
+    fn source_presets_and_mixes() -> anyhow::Result<()> {
+        let mut ui = Ui::new()?;
+        for scheme in [Scheme::Light, Scheme::Dark] {
+            let image = mix_page(&mut ui, scheme)?;
+            stillkit::golden::check(
+                &image,
+                &Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join(format!("tests/golden/kit-mix-{}.png", scheme_name(scheme))),
+            )?;
+        }
+        Ok(())
+    }
 }
