@@ -11,14 +11,6 @@ use std::sync::Arc;
 
 use accesskit::Role;
 use anyhow::Result;
-use windows::Win32::Foundation::POINT;
-use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
-};
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT, VK_UP,
-};
 
 use crate::focus;
 use crate::geom::{Point, Rect, Rgba};
@@ -178,33 +170,7 @@ impl<C> Entry<C> {
 /// A rectangle on screen: left, top, right, bottom.
 pub type Edges = (i32, i32, i32, i32);
 
-/// A monitor as a popup sees it: where it may go, and how large its pixels are.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Screen {
-    pub work: Edges,
-    pub dpi: u32,
-}
-
-/// The monitor at (or nearest to) a screen point.
-pub fn screen_at(x: i32, y: i32) -> Screen {
-    // SAFETY: plain queries with valid out pointers.
-    unsafe {
-        let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
-        let mut info = MONITORINFO {
-            cbSize: size_of::<MONITORINFO>() as u32,
-            ..Default::default()
-        };
-        let work = if GetMonitorInfoW(monitor, &mut info).as_bool() {
-            let w = info.rcWork;
-            (w.left, w.top, w.right, w.bottom)
-        } else {
-            (i32::MIN / 2, i32::MIN / 2, i32::MAX / 2, i32::MAX / 2)
-        };
-        let (mut dpi, mut unused) = (96, 96);
-        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused);
-        Screen { work, dpi }
-    }
-}
+pub use crate::platform::current::screen::{Screen, screen_at};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Row {
@@ -915,8 +881,8 @@ impl<C: Clone> Menu<C> {
             )
         });
         match key {
-            k if k == VK_DOWN.0 || k == VK_UP.0 => {
-                let delta = if k == VK_DOWN.0 { 1 } else { -1 };
+            k if k == 40 || k == 38 => {
+                let delta = if k == 40 { 1 } else { -1 };
                 let hits: Vec<_> = self.panels[current]
                     .items
                     .iter()
@@ -934,11 +900,11 @@ impl<C: Clone> Menu<C> {
                 self.select(ui, current, next.map(|id| id as usize), false);
                 None
             }
-            k if k == VK_RIGHT.0 && on_submenu => {
+            k if k == 39 && on_submenu => {
                 self.select(ui, current, hover, true);
                 None
             }
-            k if k == VK_LEFT.0 || k == VK_ESCAPE.0 => {
+            37 | 27 => {
                 if current > 0 {
                     self.close_innermost();
                     None
@@ -947,7 +913,7 @@ impl<C: Clone> Menu<C> {
                     Some(Outcome::Closed)
                 }
             }
-            k if k == VK_RETURN.0 => {
+            13 => {
                 if on_submenu {
                     self.select(ui, current, hover, true);
                     None
@@ -1103,17 +1069,7 @@ impl<C: Clone> Menu<C> {
             }
             return Ok(());
         }
-        let mut animations = windows::core::BOOL(1);
-        // SAFETY: this system query writes one BOOL to our local.
-        let _ = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::SystemParametersInfoW(
-                windows::Win32::UI::WindowsAndMessaging::SPI_GETCLIENTAREAANIMATION,
-                0,
-                Some((&raw mut animations).cast()),
-                Default::default(),
-            )
-        };
-        if !animations.as_bool() {
+        if !crate::platform::current::screen::animations_enabled() {
             return Ok(());
         }
         let spring = crate::Spring::new(1.0, 420.0, 36.0);
@@ -1228,7 +1184,7 @@ mod tests {
         let screen = screen_at(100, 100);
         assert!(menu.panels[0].layout.height <= (screen.work.3 - screen.work.1) as f32);
         for _ in 0..150 {
-            menu.key(&mut ui, VK_DOWN.0);
+            menu.key(&mut ui, 40);
         }
         let p = &menu.panels[0];
         assert_eq!(p.hover, Some(149));

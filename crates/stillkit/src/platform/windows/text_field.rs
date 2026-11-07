@@ -686,6 +686,14 @@ impl ITextHost2_Impl for Host_Impl {
     }
 }
 
+impl crate::platform::TextInput for TextField {
+    fn text(&self) -> Result<String> { self.text() }
+    fn set_text(&self, text: &str) -> Result<()> { self.set_text(text) }
+    fn focus(&self) { self.focus() }
+    fn blur(&self) { self.blur() }
+    fn caret(&self) -> Option<Rect> { self.caret() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,3 +794,4 @@ mod tests {
         field.blur();
     }
 }
+

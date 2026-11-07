@@ -14,25 +14,15 @@
 
 use std::sync::Arc;
 
-use crate::geom::{Point, Rect, Rgba};
-use crate::scene::Op;
-use crate::text::{Text, TextStyle};
+use crate::geom::Point;
 
 pub const SYSTEM_FAMILY: &str = "Segoe Fluent Icons";
-const SYSTEM_FALLBACK: &str = "Segoe MDL2 Assets";
 
 /// Segoe Fluent Icons / MDL2 code points (kept for the menu component).
 pub const CHECK: char = '\u{E73E}';
 pub const CHEVRON_RIGHT: char = '\u{E76C}';
 
-/// The system icon font that is installed here.
-pub fn system_family(text: &Text) -> Arc<str> {
-    if text.has_family(SYSTEM_FAMILY) {
-        SYSTEM_FAMILY.into()
-    } else {
-        SYSTEM_FALLBACK.into()
-    }
-}
+pub use crate::platform::current::icons::{system_family, centered};
 
 /// How a theme draws icons.
 #[derive(Debug, Clone, PartialEq)]
@@ -473,31 +463,6 @@ impl Icon {
     }
 }
 
-/// `icon` at `size` device pixels, centred in `rect` by its measured box (a font glyph).
-pub fn centered(
-    text: &mut Text,
-    family: &str,
-    icon: Icon,
-    size: f32,
-    rect: Rect,
-    color: Rgba,
-) -> Op {
-    let style = TextStyle::new(family, size);
-    let glyph: Arc<str> = icon.glyph_in(family).to_string().into();
-    let (w, h) = text.measure(&glyph, &style);
-    Op::Text {
-        rect: Rect::new(
-            (rect.left + (rect.width() - w) / 2.0).round(),
-            (rect.top + (rect.height() - h) / 2.0).round(),
-            w,
-            h,
-        ),
-        text: glyph,
-        style,
-        color,
-    }
-}
-
 /// One absolute path segment.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Seg {
@@ -696,6 +661,7 @@ impl Lexer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const SYSTEM_FALLBACK: &str = "Segoe MDL2 Assets";
 
     #[test]
     fn levels_clamp_and_mdl2_gets_outlined_media() {
