@@ -1,6 +1,8 @@
 //! Theme-driven components built only from public elements. Model values are supplied by views.
 use std::sync::Arc;
-use stillkit::el::{Align, El, Justify, Len, Paint, col, el, grid, icon, row, text, token};
+use stillkit::el::{
+    Align, El, Justify, Len, Paint, Transition, col, el, grid, icon, row, text, token,
+};
 pub use stillkit::icons::Icon;
 use stillkit::{Rgba, Role, TextRole, Theme};
 
@@ -87,7 +89,8 @@ fn action<S: 'static>(
     if let Some(f) = press {
         node = node.on_press(f);
     }
-    node.disabled(disabled)
+    node.motion(token::MOTION_INTERACTIVE)
+        .disabled(disabled)
         .opacity(if disabled { 0.45 } else { 1. })
 }
 /// Button emphasis; unrelated to look selection.
@@ -299,14 +302,16 @@ impl<S: 'static> Checkbox<S> {
     }
     pub fn build(self) -> El<S> {
         let s = self.inner;
-        let mut mark = el().size(20.).radius(token::RADIUS_SMALL).fill(if s.on {
-            token::ACCENT
-        } else {
-            token::FILL
-        });
+        let mut mark = el()
+            .motion(token::MOTION_INTERACTIVE)
+            .size(20.)
+            .radius(token::RADIUS_SMALL)
+            .fill(if s.on { token::ACCENT } else { token::FILL });
         if s.on {
             mark = mark.child(
                 icon(Icon::Check)
+                    .key(part(&s.key, "check"))
+                    .transition(Transition::scale(0.6))
                     .size(16.)
                     .absolute(2., 2.)
                     .color(token::ON_ACCENT),
@@ -337,6 +342,8 @@ fn track<S>(
 ) -> El<S> {
     let mut fill = row()
         .h_full()
+        .motion(token::MOTION_INTERACTIVE)
+        .w(0.)
         .grow(value)
         .radius(999.)
         .fill(token::ACCENT)
@@ -346,23 +353,24 @@ fn track<S>(
             .min_w(height)
             .child(icon(g).size(14.).color(token::ON_ACCENT).absolute(7., 7.));
     }
-    // Flex shares preserve fractional widths without a fixed pixel width or theme capture.
-    if thumb {
-        fill = fill.child(el().size(18.).radius(9.).fill(token::KNOB));
-        fill = fill.align(Align::Center).justify(Justify::End);
-    }
+    // Zero bases keep the fill proportional instead of counting the label/thumb width.
     let mut n = row()
         .key(part(key, "track"))
         .h(height)
         .w_full()
         .radius(999.)
         .fill(token::FILL);
-    if value > 0. || glyph.is_some() || thumb {
-        n = n.child(fill);
+    n = n.child(fill);
+    if thumb {
+        n = n.align(Align::Center).child(
+            el().key(part(key, "thumb"))
+                .motion(token::MOTION_INTERACTIVE)
+                .size(18.)
+                .radius(9.)
+                .fill(token::KNOB),
+        );
     }
-    if value < 1. {
-        n = n.child(el().grow(1. - value));
-    }
+    n = n.child(el().w(0.).grow(1. - value));
     n
 }
 /// Slider in 0..=1. `icon` selects the thick Control Center bar.
@@ -475,15 +483,42 @@ impl<S: 'static> RadioGroup<S> {
         self
     }
     pub fn build(self) -> El<S> {
+        let count = self.options.len();
+        let selected = self.selected.min(count.saturating_sub(1));
         let mut root = if self.segmented {
-            row()
-                .pad(3.)
+            col()
+                .pad(2.)
                 .radius(token::RADIUS_CONTROL)
                 .fill(token::WELL)
         } else {
             col().gap(4.)
         };
         root = root.role(Role::RadioGroup).label(self.label);
+        if self.segmented && count > 0 {
+            // A zero-height rail shares the options' width and draws the plate behind them.
+            // Keep the plate under this stable parent so selection retargets its position.
+            root = root.child(
+                row()
+                    .w_full()
+                    .h(0.)
+                    .align(Align::Start)
+                    .child(el().w(0.).grow(selected as f32))
+                    .child(
+                        el().key(part(&self.key, "selection"))
+                            .w(0.)
+                            .grow(1.)
+                            .h(token::CONTROL_SMALL)
+                            .radius(token::RADIUS_CONTROL)
+                            .motion(token::MOTION_INTERACTIVE)
+                            .opacity(if self.disabled { 0.45 } else { 1. })
+                            .fill(Paint::Theme(|t| {
+                                if t.dark() { t.color.fill } else { t.color.knob }
+                            })),
+                    )
+                    .child(el().w(0.).grow((count - selected - 1) as f32)),
+            );
+        }
+        let mut options = if self.segmented { row() } else { col().gap(4.) };
         for (i, label) in self.options.into_iter().enumerate() {
             let key = Some(part(&self.key, &format!("option-{i}")));
             let mut n = row()
@@ -491,22 +526,24 @@ impl<S: 'static> RadioGroup<S> {
                 .gap(8.)
                 .pad_x(10.)
                 .align(Align::Center)
-                .justify(Justify::Center)
+                .justify(if self.segmented {
+                    Justify::Center
+                } else {
+                    Justify::Start
+                })
                 .radius(token::RADIUS_CONTROL)
                 .role(Role::RadioButton)
                 .label(label.clone())
                 .checked(i == self.selected);
             if self.segmented {
-                n = n.grow(1.).fill(if i == self.selected {
-                    token::CARD
-                } else {
-                    token::WELL
-                });
+                n = n.w(0.).min_w(0.).grow(1.);
             } else {
                 let mut dot = el().size(18.).radius(9.).fill(token::FILL);
                 if i == self.selected {
                     dot = dot.child(
-                        el().size(10.)
+                        el().key(part(&key, "dot"))
+                            .size(10.)
+                            .transition(Transition::scale(0.5))
                             .radius(5.)
                             .fill(token::ACCENT)
                             .absolute(4., 4.),
@@ -516,7 +553,11 @@ impl<S: 'static> RadioGroup<S> {
             }
             n = n.child(
                 text(label)
-                    .color(LABEL)
+                    .color(if !self.segmented || i == selected {
+                        LABEL
+                    } else {
+                        SECONDARY
+                    })
                     .key(part(&key, "label"))
                     .font(TextRole::Headline),
             );
@@ -524,8 +565,9 @@ impl<S: 'static> RadioGroup<S> {
                 .change
                 .clone()
                 .map(|f| Box::new(move |s: &mut S| f(s, i)) as Press<S>);
-            root = root.child(action(n, key, self.disabled, f));
+            options = options.child(action(n, key, self.disabled, f));
         }
+        root = root.child(options);
         if let Some(k) = self.key {
             root = root.key(k);
         }
@@ -585,20 +627,28 @@ impl Badge {
         Self(label.into())
     }
     pub fn build<S>(self) -> El<S> {
-        row()
-            .pad_x(7.)
-            .pad_y(3.)
-            .radius(token::RADIUS_SMALL)
-            .fill(token::FILL)
-            .role(Role::Label)
-            .label(self.0.clone())
-            .child(
-                text(self.0)
-                    .font(TextRole::Caption)
-                    .color(Paint::Theme(|t| {
-                        readable(t.color.label, surface(t, t.color.fill), 7.)
-                    })),
-            )
+        col().align(Align::Start).child(
+            row()
+                .motion(token::MOTION_INTERACTIVE)
+                .pad_x(6.)
+                .h(18.)
+                .min_w(18.)
+                .align(Align::Center)
+                .justify(Justify::Center)
+                .radius(9.)
+                .fill(token::FILL)
+                .role(Role::Label)
+                .label(self.0.clone())
+                .child(
+                    text(self.0.clone())
+                        .key(self.0)
+                        .transition(Transition::slide(0., 4.))
+                        .font(TextRole::Caption)
+                        .color(Paint::Theme(|t| {
+                            readable(t.color.label, surface(t, t.color.fill), 7.)
+                        })),
+                ),
+        )
     }
 }
 /// List content with independently composable leading and accessory elements.
@@ -708,6 +758,7 @@ impl<S: 'static> Tile<S> {
     }
     pub fn build(self) -> El<S> {
         let disc = row()
+            .motion(token::MOTION_INTERACTIVE)
             .size(36.)
             .radius(18.)
             .fill(if self.on { token::ACCENT } else { token::FILL })
@@ -868,6 +919,8 @@ pub struct CalendarMonth<S> {
     year: u16,
     month: u8,
     selected: Option<u8>,
+    today: Option<u8>,
+    navigate: Option<Change<S, (u16, u8)>>,
     key: Option<Arc<str>>,
     disabled: bool,
     change: Option<Change<S, u8>>,
@@ -878,10 +931,22 @@ impl<S: 'static> CalendarMonth<S> {
             year: year.clamp(1, 9999),
             month: month.clamp(1, 12),
             selected: None,
+            today: None,
+            navigate: None,
             key: None,
             disabled: false,
             change: None,
         }
+    }
+    /// Mark today's date when this is the current month; the host owns the clock.
+    pub fn today(mut self, day: u8) -> Self {
+        self.today = Some(day);
+        self
+    }
+    /// Navigate by rebuilding from the returned (year, month); stops at years 1 and 9999.
+    pub fn on_month_change(mut self, f: impl Fn(&mut S, (u16, u8)) + 'static) -> Self {
+        self.navigate = Some(Arc::new(f));
+        self
     }
     pub fn selected(mut self, d: u8) -> Self {
         self.selected = Some(d);
@@ -925,39 +990,116 @@ impl<S: 'static> CalendarMonth<S> {
                     .font(TextRole::Caption),
             );
         }
+        let previous_days = match self.month {
+            3 => {
+                if leap {
+                    29
+                } else {
+                    28
+                }
+            }
+            5 | 7 | 10 | 12 => 30,
+            _ => 31,
+        };
+        let outside = |day: i32, key: String| {
+            row()
+                .key(key)
+                .h(28.)
+                .align(Align::Center)
+                .justify(Justify::Center)
+                .child(
+                    text(day.to_string())
+                        .color(SECONDARY)
+                        .font(TextRole::Callout),
+                )
+        };
         for i in 0..start {
-            cells = cells.child(el().key(format!("blank-{i}")).h(28.));
+            cells = cells.child(outside(
+                previous_days - start + i + 1,
+                format!("previous-{i}"),
+            ));
         }
         for day in 1..=days {
-            let mut b = Button::new(day.to_string())
-                .key(part(&self.key, &format!("day-{day}")))
-                .kind(if self.selected == Some(day) {
-                    ButtonKind::Filled
+            let selected = self.selected == Some(day);
+            let ink = if selected {
+                Paint::Theme(|t| readable(t.color.on_accent, surface(t, button_surface(t)), 7.))
+            } else if self.today == Some(day) {
+                Paint::Theme(|t| readable(t.color.accent, surface(t, Rgba::TRANSPARENT), 7.))
+            } else {
+                LABEL
+            };
+            let n = row()
+                .h(28.)
+                .justify(Justify::Center)
+                .align(Align::Center)
+                .radius(14.)
+                .role(Role::RadioButton)
+                .label(day.to_string())
+                .checked(selected)
+                .fill(if selected {
+                    Paint::Theme(button_surface)
                 } else {
-                    ButtonKind::Plain
+                    Rgba::TRANSPARENT.into()
                 })
-                .disabled(self.disabled);
-            if let Some(f) = self.change.clone() {
-                b = b.on_press(move |s| f(s, day));
+                .child(text(day.to_string()).color(ink).font(TextRole::Callout));
+            let f = self
+                .change
+                .clone()
+                .map(|f| Box::new(move |s: &mut S| f(s, day)) as Press<S>);
+            cells = cells.child(action(
+                n,
+                Some(part(&self.key, &format!("day-{day}"))),
+                self.disabled,
+                f,
+            ));
+        }
+        for day in 1..=(7 - (start + i32::from(days)) % 7) % 7 {
+            cells = cells.child(outside(day, format!("following-{day}")));
+        }
+        let months = [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ];
+        let heading = format!("{} {}", months[self.month as usize - 1], self.year);
+        let mut header = row().align(Align::Center).child(
+            text(heading.clone())
+                .color(LABEL)
+                .grow(1.)
+                .key("heading")
+                .font(TextRole::Headline),
+        );
+        for (forward, glyph, label) in [
+            (false, Icon::ChevronLeft, "Previous month"),
+            (true, Icon::ChevronRight, "Next month"),
+        ] {
+            let index = i32::from(self.year - 1) * 12
+                + i32::from(self.month - 1)
+                + if forward { 1 } else { -1 };
+            let valid = (0..9999 * 12).contains(&index);
+            let mut button = IconButton::new(glyph, label)
+                .key(part(&self.key, if forward { "next" } else { "previous" }))
+                .disabled(self.disabled || !valid);
+            if valid && let Some(f) = self.navigate.clone() {
+                button = button
+                    .on_press(move |s| f(s, ((index / 12 + 1) as u16, (index % 12 + 1) as u8)));
             }
-            cells = cells.child(
-                b.build()
-                    .h(28.)
-                    .pad_x(0.)
-                    .role(Role::RadioButton)
-                    .checked(self.selected == Some(day)),
-            );
+            header = header.child(button.build().size(24.).fill(Rgba::TRANSPARENT));
         }
         let mut n = col()
             .gap(10.)
             .role(Role::Group)
-            .label(format!("{}-{:02}", self.year, self.month))
-            .child(
-                text(format!("{} / {:02}", self.year, self.month))
-                    .color(LABEL)
-                    .key("heading")
-                    .font(TextRole::Headline),
-            )
+            .label(heading)
+            .child(header)
             .child(cells.key("days"));
         if let Some(k) = self.key {
             n = n.key(k);
