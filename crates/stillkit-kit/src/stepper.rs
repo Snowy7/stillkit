@@ -41,7 +41,10 @@ impl<S: 'static> Stepper<S> {
     }
     pub fn build(self) -> El<S> {
         let mut n = row()
-            .gap(8.)
+            .gap(token::ITEM)
+            .h(token::CONTROL)
+            .radius(token::RADIUS_CONTROL)
+            .fill(token::WELL)
             .align(Align::Center)
             .role(Role::SpinButton)
             .label(self.label.clone())
@@ -59,12 +62,26 @@ impl<S: 'static> Stepper<S> {
         }
         for (delta, label) in [(-self.step, "Decrease"), (self.step, "Increase")] {
             if delta > 0. {
-                n = n.child(text(self.value.to_string()).color(LABEL).min_w(40.));
+                n = n.child(
+                    row()
+                        .min_w(token::CONTROL)
+                        .grow(1.)
+                        .justify(Justify::Center)
+                        .align(Align::Center)
+                        .child(
+                            text(self.value.to_string())
+                                .font(TextRole::Body)
+                                .color(LABEL)
+                                .opacity(if self.disabled { 0.45 } else { 1. }),
+                        ),
+                );
             }
             let next = (self.value + delta).clamp(self.min, self.max);
-            let mut b = Button::new(if delta < 0. { "-" } else { "+" })
-                .kind(ButtonKind::Gray)
-                .disabled(self.disabled || next == self.value);
+            let mut b = IconButton::new(
+                if delta < 0. { Icon::Remove } else { Icon::Add },
+                format!("{label} {}", self.label),
+            )
+            .disabled(self.disabled || next == self.value);
             if let Some(f) = self.change.clone() {
                 b = b.on_press(move |s| f(s, next));
             }

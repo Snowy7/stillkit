@@ -98,7 +98,12 @@ impl QuotaBar {
         let value = format!("{}% left", (self.left * 100.).round());
         let left = self.left;
         let pace = self.pace;
-        let mut content = row().w_full().pad_x(8.).gap(6.).align(Align::Center).h(32.);
+        let mut content = row()
+            .w_full()
+            .pad_x(8.)
+            .gap(token::ITEM)
+            .align(Align::Center)
+            .h(32.);
         if let Some(badge) = self.badge {
             content = content.child(Avatar::new("Account", badge).size(20.).build());
         }

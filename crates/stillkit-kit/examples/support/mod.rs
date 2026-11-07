@@ -150,7 +150,7 @@ pub fn component(i: usize, s: &State, disabled: bool) -> El<State> {
                 .build()
                 .key("target");
             legacy
-        },
+        }
         17 => CalendarMonth::new(2026, 11)
             .today(7)
             .selected(s.day)
@@ -220,13 +220,18 @@ fn gallery_component(i: usize, s: &State, disabled: bool) -> El<State> {
     }
 }
 pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
-    let width = 6 * 280;
-    let height = 40
+    sheet_at_scale(theme, 1)
+}
+/// Render at an integer device scale for the visual audit.
+pub fn sheet_at_scale(theme: Theme, scale: u32) -> anyhow::Result<Image> {
+    let width = 6 * 280 * scale;
+    let height = (40
         + NAMES
             .iter()
             .enumerate()
             .map(|(i, _)| cell_height(i))
-            .sum::<u32>();
+            .sum::<u32>())
+        * scale;
     let mut sheet = Image {
         width,
         height,
@@ -241,13 +246,13 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
                     .child(text(name).font(stillkit::TextRole::Headline))
             },
             theme.clone(),
-            (280, 40),
-            1.,
+            (280 * scale, 40 * scale),
+            scale as f32,
         )?;
         title.set_background(Some(theme.color.surface.with_alpha(1.)));
         title.frame(Duration::ZERO);
-        paste(&mut sheet, &title.snap()?, state as u32 * 280, 0);
-        let mut y = 40;
+        paste(&mut sheet, &title.snap()?, state as u32 * 280 * scale, 0);
+        let mut y = 40 * scale;
         for (i, name) in NAMES.into_iter().enumerate() {
             let s = State {
                 on: state == 5,
@@ -270,8 +275,8 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
                         .child(gallery_component(i, s, state == 4))
                 },
                 theme.clone(),
-                (280, cell_height(i)),
-                1.,
+                (280 * scale, cell_height(i) * scale),
+                scale as f32,
             )?;
             rt.set_background(Some(theme.color.surface.with_alpha(1.)));
             rt.frame(Duration::ZERO);
@@ -293,8 +298,8 @@ pub fn sheet(theme: Theme) -> anyhow::Result<Image> {
                 rt.frame(Duration::ZERO);
             }
             rt.frame(Duration::from_secs(2));
-            paste(&mut sheet, &rt.snap()?, state as u32 * 280, y);
-            y += cell_height(i);
+            paste(&mut sheet, &rt.snap()?, state as u32 * 280 * scale, y);
+            y += cell_height(i) * scale;
         }
     }
     Ok(sheet)

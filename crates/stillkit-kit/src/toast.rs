@@ -31,9 +31,9 @@ impl<S: 'static> Toast<S> {
     }
     pub fn build(self) -> El<S> {
         let mut content = row()
-            .gap(10.)
+            .gap(token::ITEM)
             .align(Align::Center)
-            .child(icon(self.glyph).size(18.).color(INK))
+            .child(icon(self.glyph).size(token::ICON).color(INK))
             .child(text(self.message.clone()).color(INK).wrap(3).grow(1.));
         if let Some(action) = self.action {
             content = content.child(action.build());
@@ -44,7 +44,7 @@ impl<S: 'static> Toast<S> {
             .label(self.message)
             .max_w(400.)
             .pad_x(14.)
-            .pad_y(8.)
+            .pad_y(token::ITEM)
             .transition(Transition::slide(0., 12.))
             .child(content)
     }

@@ -318,3 +318,92 @@ all-target clippy is clean. The Linux target check passes with the existing core
 a11y dead-code warnings. All twelve text PNGs were opened and inspected, with
 native Liquid's search well as a reference. Commands used `D:\stillkit-targets\N`
 and the LLVM dev override. No files under `crates/stillkit` were edited.
+
+
+## Polish audit (2026-11-08)
+
+Stepper now uses theme-height Remove/Add icon actions around a centred value on
+one well. Endpoint actions disable at min/max; keyboard and assistive stepping
+retain their existing range semantics. Disclosure reserves one stable themed icon
+column plus ITEM spacing in both states; its body starts at the title. Sidebar
+items and group triggers share the same leading inset, icon column and ITEM gap,
+with selection fills inset by the sidebar's themed item padding. Group content
+starts on the next grid column; caller-composed rows retain their own padding.
+The chevron no longer changes occupied width while opening.
+
+TextArea uses RADIUS_CARD on both the well and editor, including focus geometry;
+single-line editors retain RADIUS_CONTROL. Search icons occupy the well's leading
+padding, followed by ITEM spacing so the editor ring cannot touch the icon.
+Button/list/toolbar/table/dialog/select gaps and toast padding/glyphs now read
+existing semantic metrics. Menu check size and shortcut spacing read MenuMetrics.
+Badge retains the native kit's 18px height, 6px horizontal inset and Caption type.
+Menu retains its 32px rows, 6px panel inset and 30px leading column. Toast uses
+Body type, card corners and the theme's Toast shadow.
+
+### Remaining token gaps
+
+These values remain local until the theme owns the relevant component geometry;
+no new kit-only theme tokens or look-name branches were introduced:
+
+- Button horizontal inset (14), list/field leading inset (10), inline field label
+  inset (8), compact editor actions (28), disabled opacity (.45).
+- Switch track/thumb sizes and travel; checkbox/radio mark, dot and inset sizes;
+  slider track/bar/thumb sizes; segmented plate inset; calendar cell/gutter sizes.
+- Badge minimum width/height (18), horizontal inset (6) and capsule radius (9).
+- Menu row highlight radius (currently derived from surface radius), header and
+  separator insets, and radio-dot geometry. MenuMetrics already supplies row,
+  panel inset, gutter, check glyph and shortcut gap.
+- Toast horizontal inset (14), maximum width (400) and entrance distance (12);
+  table cell insets, tree indentation, tab indicator thickness/radius, avatar
+  status geometry and skeleton sizing have no dedicated metrics.
+- Field-specific multiline radius could eventually differ from card radius;
+  RADIUS_CARD is the existing finite shape token used today.
+- Tooltip is entirely el-owned. Compared with the old native tooltip, el uses
+  8x4 padding and radius.small rather than 10x6 and radius.small + 2. Matching that
+  needs shared tooltip geometry/style tokens in el. No wrapper or duplicate
+  tooltip lifecycle was added here; the Needed from el list above is preserved.
+
+### Repeating the visual audit
+
+The existing 52 golden sheets remain the normal 1x gate. `sheet_at_scale` in each
+of the four gallery helpers renders at a real integer Runtime device scale,
+including device-sized cell compositing (no bitmap enlargement). The explicit
+`polish::export_scale_audit` test exports all four families across the same eight
+preset/composition themes in light and dark at both 1x and 2x (128 PNGs):
+
+```powershell
+$env:CARGO_TARGET_DIR = 'D:\stillkit-targets\S'
+$env:CARGO_PROFILE_DEV_CODEGEN_BACKEND = 'llvm'
+$env:STILLKIT_AUDIT_DIR = 'D:\stillkit-targets\S\audit-final'
+cargo test -p stillkit-kit --test polish export_scale_audit -- --ignored
+```
+
+The audit export is explicitly invoked because it writes inspection artifacts;
+the two normal polish tests verify range limits, control height, value centring
+and stable disclosure alignment across all 16 theme compositions at both scales.
+
+
+Visual verification: opened the baseline sheets and old native kit references,
+then every final sheet through labelled contact sheets (128 exports), with native
+pixel crops of Stepper/Disclosure, Sidebar, TextArea, palette search and Toast.
+Full-resolution Studio layout and Solid overlay sheets were also opened to check
+the overview reductions. Compared before/after: numeric buttons now use aligned
+vector marks; group/content text follows its title grid; multiline wells retain
+finite card corners; palette search glyphs clear the editor focus ring. Badge,
+menu row geometry and ink hierarchy retain the reference treatment. No additional
+obvious snapping drift was found at the inspected integer device scales.
+
+Inspection artifacts remain under `D:\stillkit-targets\S\audit-before`,
+`audit-step1`, `audit-final` and `audit-contact`. The tracked changes are all 16
+`kit-*`, 12 `layout-*`, 12 `text-*`, 12 `overlays-*` goldens, the checkbox motion
+strip (themed label gap), and refreshed `overview.png`/`overlays-overview.png`.
+
+
+Validation used `CARGO_TARGET_DIR=D:\stillkit-targets\S` and the LLVM dev
+backend throughout. The final full test run passed 47 tests (plus the explicitly
+invoked audit exporter); Linux and aarch64 macOS cargo checks passed. Linux emits
+8 pre-existing dead-code warnings in stillkit's compile-only accessibility path.
+No changes were made under `crates/stillkit`, and no branch was pushed or merged.
+
+Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
+reuses the text gallery's overlay module to avoid duplicate module loading.

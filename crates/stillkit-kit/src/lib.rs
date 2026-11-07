@@ -173,7 +173,7 @@ impl<S: 'static> Button<S> {
         let mut n = row()
             .h(token::CONTROL)
             .pad_x(14.)
-            .gap(6.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .justify(Justify::Center)
             .radius(token::RADIUS_CONTROL)
@@ -232,7 +232,8 @@ impl<S: 'static> IconButton<S> {
             .child(
                 icon(b.glyph.unwrap())
                     .key(part(&b.key, "icon"))
-                    .size(token::ICON),
+                    .size(token::ICON)
+                    .color(LABEL),
             );
         action(n, b.key, b.disabled, b.press)
     }
@@ -319,7 +320,7 @@ impl<S: 'static> Checkbox<S> {
         }
         let n = row()
             .min_h(token::HIT)
-            .gap(8.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .radius(token::RADIUS_SMALL)
             .role(Role::CheckBox)
@@ -500,7 +501,7 @@ impl<S: 'static> RadioGroup<S> {
                 .radius(token::RADIUS_CONTROL)
                 .fill(token::WELL)
         } else {
-            col().gap(4.)
+            col().gap(token::ITEM)
         };
         root = root
             .role(Role::RadioGroup)
@@ -535,12 +536,16 @@ impl<S: 'static> RadioGroup<S> {
                     .child(el().w(0.).grow((count - selected - 1) as f32)),
             );
         }
-        let mut options = if self.segmented { row() } else { col().gap(4.) };
+        let mut options = if self.segmented {
+            row()
+        } else {
+            col().gap(token::ITEM)
+        };
         for (i, label) in self.options.into_iter().enumerate() {
             let key = Some(part(&self.key, &format!("option-{i}")));
             let mut n = row()
                 .h(token::CONTROL_SMALL)
-                .gap(8.)
+                .gap(token::ITEM)
                 .pad_x(10.)
                 .align(Align::Center)
                 .justify(if self.segmented {
@@ -710,10 +715,10 @@ impl<S: 'static> ListRow<S> {
             .min_h(if self.subtitle.is_some() {
                 token::ROW
             } else {
-                Len::Theme(|t| t.metrics.row_single)
+                token::ROW_SINGLE
             })
             .pad_x(10.)
-            .gap(10.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .radius(token::RADIUS_CARD)
             .role(Role::ListItem)
@@ -863,7 +868,7 @@ impl EmptyState {
     pub fn build<S>(self) -> El<S> {
         col()
             .pad(token::PAD)
-            .gap(8.)
+            .gap(token::ITEM)
             .align(Align::Center)
             .role(Role::Group)
             .label(self.title.clone())
@@ -1117,7 +1122,7 @@ impl<S: 'static> CalendarMonth<S> {
             header = header.child(button.build().size(24.).fill(Rgba::TRANSPARENT));
         }
         let mut n = col()
-            .gap(10.)
+            .gap(token::ITEM)
             .role(Role::Group)
             .label(heading)
             .child(header)
@@ -1130,17 +1135,17 @@ impl<S: 'static> CalendarMonth<S> {
 }
 
 // Overlays
-mod overlay_surface;
-mod menu;
-mod select;
-mod popover;
 mod dialog;
+mod menu;
+mod overlay_surface;
+mod popover;
+mod select;
 mod toast;
 mod tooltip;
-pub use menu::{Menu, MenuItem, ContextMenu};
-pub use select::Select;
+pub use dialog::{AlertDialog, Dialog};
+pub use menu::{ContextMenu, Menu, MenuItem};
 pub use popover::Popover;
-pub use dialog::{Dialog, AlertDialog};
+pub use select::Select;
 pub use toast::{Toast, Toaster};
 pub use tooltip::Tooltip;
 
@@ -1157,9 +1162,9 @@ pub use navigation::{Accordion, Disclosure, Sidebar, Tabs, Toolbar};
 pub use stepper::Stepper;
 
 // Text
-mod text;
 mod combobox;
 mod palette;
-pub use text::{TextField, SecureField, SearchField, TextArea};
+mod text;
 pub use combobox::{Combobox, QueryState};
 pub use palette::{Command, CommandPalette};
+pub use text::{SearchField, SecureField, TextArea, TextField};

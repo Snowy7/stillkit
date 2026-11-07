@@ -80,7 +80,7 @@ impl<S: 'static> Tabs<S> {
         n
     }
 }
-/// Controlled expandable section. The chevron springs inward as content opens.
+/// Controlled expandable section with a stable title and content grid.
 pub struct Disclosure<S> {
     label: Arc<str>,
     open: bool,
@@ -103,9 +103,14 @@ impl<S: 'static> Disclosure<S> {
         self
     }
     pub fn build(self) -> El<S> {
+        self.build_inset(0.)
+    }
+    fn build_inset(self, inset: f32) -> El<S> {
         let mut trigger = row()
             .h(token::CONTROL)
-            .gap(8.)
+            .gap(token::ITEM)
+            .pad_x(inset)
+            .radius(token::RADIUS_CARD)
             .align(Align::Center)
             .role(Role::Button)
             .label(self.label.clone())
@@ -116,11 +121,10 @@ impl<S: 'static> Disclosure<S> {
                 } else {
                     Icon::ChevronRight
                 })
-                .size(16.)
+                .size(token::ICON)
                 .color(SECONDARY)
                 .motion(token::MOTION_OPEN)
-                .key("chevron")
-                .w(if self.open { 20. } else { 16. }),
+                .key("chevron"),
             )
             .child(text(self.label).color(LABEL));
         if let Some(f) = self.toggle {
@@ -131,10 +135,12 @@ impl<S: 'static> Disclosure<S> {
             .child(trigger.key("trigger"));
         if self.open {
             n = n.child(
-                self.content
+                row()
                     .key("content")
                     .transition(Transition::fade())
-                    .pad_x(12.),
+                    .pad_x(inset)
+                    .child(el().w(Len::Theme(|t| t.metrics.icon + t.metrics.item)))
+                    .child(self.content.w(0.).grow(1.)),
             );
         }
         n
@@ -148,8 +154,8 @@ impl<S: 'static> Sidebar<S> {
     pub fn new(label: impl Into<Arc<str>>) -> Self {
         Self {
             root: col()
-                .gap(4.)
-                .pad(8.)
+                .gap(token::ITEM)
+                .pad(token::ITEM)
                 .fill(token::WELL)
                 .role(Role::List)
                 .label(label)
@@ -171,7 +177,7 @@ impl<S: 'static> Sidebar<S> {
     ) -> Self {
         self.root = self.root.child(
             ListRow::new(label)
-                .lead(icon(glyph).size(18.).color(SECONDARY))
+                .lead(icon(glyph).size(token::ICON).color(SECONDARY))
                 .key(key)
                 .on_press(f)
                 .build()
@@ -187,7 +193,7 @@ impl<S: 'static> Sidebar<S> {
     pub fn group(mut self, group: Disclosure<S>) -> Self {
         self.root = self
             .root
-            .child(group.build().focus_group(Orientation::Vertical));
+            .child(group.build_inset(10.).focus_group(Orientation::Vertical));
         self
     }
     pub fn build(self) -> El<S> {
@@ -202,8 +208,8 @@ impl<S: 'static> Toolbar<S> {
     pub fn new(label: impl Into<Arc<str>>) -> Self {
         Self {
             root: row()
-                .gap(4.)
-                .pad(4.)
+                .gap(token::ITEM)
+                .pad(token::ITEM)
                 .align(Align::Center)
                 .fill(token::CARD)
                 .radius(token::RADIUS_CONTROL)
