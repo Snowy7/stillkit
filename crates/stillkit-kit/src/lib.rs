@@ -878,12 +878,14 @@ impl EmptyState {
     }
 }
 /// Non-editing text field frame; focus comes from the runtime.
+#[deprecated(note = "Use TextField for editable text")]
 pub struct TextFieldFrame {
     label: Arc<str>,
     value: Arc<str>,
     placeholder: Arc<str>,
     disabled: bool,
 }
+#[allow(deprecated)]
 impl TextFieldFrame {
     pub fn new(label: impl Into<Arc<str>>) -> Self {
         Self {
@@ -1153,3 +1155,11 @@ pub use data::{ScrollView, SortDirection, Table, Tree, TreeNode};
 pub use feedback::{Avatar, Ring, Skeleton, Spinner};
 pub use navigation::{Accordion, Disclosure, Sidebar, Tabs, Toolbar};
 pub use stepper::Stepper;
+
+// Text
+mod text;
+mod combobox;
+mod palette;
+pub use text::{TextField, SecureField, SearchField, TextArea};
+pub use combobox::{Combobox, QueryState};
+pub use palette::{Command, CommandPalette};
