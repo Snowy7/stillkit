@@ -67,6 +67,11 @@ pub struct Detail {
     pub controls: Option<HitId>,
     /// A modal dialog: everything outside it is inert.
     pub modal: bool,
+    /// Its value fails validation (a field with an error).
+    pub invalid: bool,
+    /// The hit item it shows as active while it keeps focus itself (a combobox's highlighted
+    /// row), read as if it had focus.
+    pub active_descendant: Option<HitId>,
 }
 
 /// Rich actions remain owned data until the surface's UI thread consumes them.
@@ -238,6 +243,12 @@ impl Snapshot {
                         }
                         if detail.modal {
                             node.set_modal();
+                        }
+                        if detail.invalid {
+                            node.set_invalid(accesskit::Invalid::True);
+                        }
+                        if let Some(active) = detail.active_descendant.filter(|a| seen.contains(a)) {
+                            node.set_active_descendant(node_id(active));
                         }
                     }
                     _ => {}

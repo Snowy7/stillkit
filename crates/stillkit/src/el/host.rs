@@ -186,7 +186,8 @@ impl<S> Runtime<S> {
 
     /// The `--tree` dump: every element as shown now, in design pixels, with what assistive
     /// technology reads (`range` is `[min, max, value]`; `scroll` a scroll view's offset;
-    /// `selection` a text field's anchor and caret, bytes into its `text`).
+    /// `selection` a text field's anchor and caret, bytes into its `text`; `invalid`; and
+    /// `active_descendant`, the key of the row it shows as active).
     pub fn tree_json(&self) -> String {
         let s = self.scale();
         let (w, h) = self.size();
@@ -198,7 +199,7 @@ impl<S> Runtime<S> {
             .map(|n| {
                 let r = n.rect;
                 format!(
-                    "{{\"key\":{},\"path\":{},\"role\":{},\"label\":{},\"rect\":[{},{},{},{}],\"fill\":{},\"text\":{},\"checked\":{},\"state\":\"{:?}\",\"focused\":{},\"range\":{},\"value\":{},\"description\":{},\"selected\":{},\"expanded\":{},\"scroll\":{},\"selection\":{}}}",
+                    "{{\"key\":{},\"path\":{},\"role\":{},\"label\":{},\"rect\":[{},{},{},{}],\"fill\":{},\"text\":{},\"checked\":{},\"state\":\"{:?}\",\"focused\":{},\"range\":{},\"value\":{},\"description\":{},\"selected\":{},\"expanded\":{},\"scroll\":{},\"selection\":{},\"invalid\":{},\"active_descendant\":{}}}",
                     opt(n.key.map(|k| quote(&k))),
                     quote(if n.path.is_empty() { "/" } else { &n.path }),
                     opt(n.role.map(|r| quote(&format!("{r:?}")))),
@@ -219,6 +220,8 @@ impl<S> Runtime<S> {
                     opt(n.expanded.map(|v| v.to_string())),
                     opt(n.scroll.map(|v| (v / s).to_string())),
                     opt(n.selection.map(|(a, c)| format!("[{a},{c}]"))),
+                    n.invalid,
+                    text(n.active_descendant),
                 )
             })
             .collect();

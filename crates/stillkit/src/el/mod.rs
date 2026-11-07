@@ -43,6 +43,7 @@ mod animate;
 mod clipboard;
 pub(crate) mod edit;
 mod element;
+mod feedback;
 mod field;
 mod host;
 mod json;

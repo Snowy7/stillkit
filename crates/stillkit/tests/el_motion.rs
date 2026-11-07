@@ -230,7 +230,7 @@ fn damage_during_an_animation_covers_only_what_moves() {
     assert!(frames > 5, "the knob moved over several frames: {frames}");
 
     // A card changing size redraws the card and its shadow, not the list beside it (beyond
-    // where the shadow falls).
+    // where the shadow falls), and the button's wash easing back from its press.
     let mut rt = runtime();
     let before = rt.find("card").unwrap();
     assert!(rt.click("resize"));
@@ -238,7 +238,8 @@ fn damage_during_an_animation_covers_only_what_moves() {
     // 3σ past the shadow's grown, offset shape (plus the pixel it snaps by).
     let layers = rt.theme().shadow(stillkit::ShadowLevel::default());
     let far = layers.iter().map(|l| 1.5 * l.blur + l.spread + l.offset.1.abs() + 2.0).fold(0.0, f32::max);
-    let reach = before.union(rt.find("card").unwrap()).inflate(far);
+    let button = rt.find("resize").unwrap().inflate(1.0);
+    let reach = before.union(rt.find("card").unwrap()).inflate(far).union(button);
     while rt.animating() {
         rt.frame(FRAME);
         let damage = rt.damage();

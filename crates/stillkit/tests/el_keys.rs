@@ -218,7 +218,9 @@ fn ring(rt: &Runtime<Form>) -> (f32, Rgba) {
 fn focus_rings_follow_the_theme_and_the_default_matches_the_kit() {
     let mut rt = runtime();
     rt.tab(false);
+    // It eases in from this frame on; at rest it is the kit's.
     rt.frame(FRAME);
+    rt.frame(Duration::from_secs(1));
     let accent = rt.theme().color.accent;
     // The default ring is the kit's `Frame::focus_ring`: 2 px, 2 px out, 0.9 of the accent.
     let rect = rt.find("first").unwrap();

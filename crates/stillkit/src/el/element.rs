@@ -129,6 +129,8 @@ pub struct Tx {
     pub(crate) mods: Modifiers,
     pub(crate) theme: Option<Theme>,
     pub(crate) reveal: Vec<Key>,
+    /// Where focus goes once the view has run: an element by key, or nowhere (`None`).
+    pub(crate) focus: Option<Option<Key>>,
 }
 
 impl Tx {
@@ -152,6 +154,20 @@ impl Tx {
     /// enough to show it (a row just added, a search hit).
     pub fn scroll_into_view(&mut self, key: impl Into<Key>) {
         self.reveal.push(key.into());
+    }
+
+    /// Once the view has run, moves keyboard focus to the first element keyed `key` (the
+    /// field a shortcut opens, the parent a tree's Left goes to) and scrolls it into view. Its
+    /// ring shows when a key brought focus there (an [`El::on_key`] handler), or the ring was
+    /// already showing. A key no focusable element has leaves focus where it is.
+    pub fn focus(&mut self, key: impl Into<Key>) {
+        self.focus = Some(Some(key.into()));
+    }
+
+    /// Once the view has run, takes keyboard focus away (a search field's Escape): nothing
+    /// has it, and its ring goes.
+    pub fn blur(&mut self) {
+        self.focus = Some(None);
     }
 }
 
@@ -402,6 +418,19 @@ pub(crate) struct Look {
     pub opacity: f32,
 }
 
+impl Look {
+    /// This look with what `patch` sets (a [`El::focus_within`] style) laid over it.
+    pub fn with(self, patch: Self) -> Self {
+        Self {
+            fill: patch.fill.or(self.fill),
+            color: patch.color.or(self.color),
+            radius: patch.radius.or(self.radius),
+            shadow: patch.shadow.or(self.shadow),
+            opacity: if patch.opacity < 1.0 { patch.opacity } else { self.opacity },
+        }
+    }
+}
+
 /// The shadow a box casts: one of the theme's levels, or a custom one.
 #[derive(Clone, Copy)]
 pub(crate) enum Cast {
@@ -440,6 +469,10 @@ pub(crate) struct Sem {
     pub value: Option<Arc<str>>,
     pub selected: Option<bool>,
     pub expanded: Option<bool>,
+    /// Its value fails validation ([`El::invalid`]).
+    pub invalid: bool,
+    /// The key of the descendant it shows as active ([`El::active_descendant`]).
+    pub active: Option<Key>,
 }
 
 /// A roving focus group ([`El::focus_group`]).
@@ -478,6 +511,8 @@ pub struct El<S> {
     pub(crate) popup: Option<HasPopup>,
     /// Its tooltip's text ([`El::tooltip`]).
     pub(crate) tip: Option<Arc<str>>,
+    /// The look it takes while focus is on it or inside it ([`El::focus_within`]).
+    pub(crate) within: Option<Look>,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -509,6 +544,7 @@ fn new<S>(what: What) -> El<S> {
         overlays: Vec::new(),
         popup: None,
         tip: None,
+        within: None,
         children: Vec::new(),
     }
 }
@@ -917,6 +953,23 @@ impl<S> El<S> {
         self
     }
 
+    /// Whether its value fails validation (a field with an error): assistive technology says
+    /// it is invalid. Pair it with a [`description`](Self::description) saying why.
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.sem.invalid = invalid;
+        self
+    }
+
+    /// The element keyed `key` that this one shows as active while it keeps focus itself: the
+    /// highlighted row of a combobox's or search field's list, or of a list moved through by
+    /// its own keys. Assistive technology reads that row as if it had focus. The first element
+    /// keyed `key` anywhere in the view counts (a list in an overlay too); one with no
+    /// semantics of its own gets none from this.
+    pub fn active_descendant(mut self, key: impl Into<Key>) -> Self {
+        self.sem.active = Some(key.into());
+        self
+    }
+
     /// A value from `min` to `max` in steps of `step` (sliders, steppers): announced as a
     /// range, and stepped from the keyboard and assistive technology through
     /// [`on_step`](Self::on_step). The role defaults to a slider.
@@ -1021,6 +1074,16 @@ impl<S> El<S> {
     /// [`motion`](Self::motion) with the theme's layout spring.
     pub fn animate(self) -> Self {
         self.motion(super::token::MOTION_LAYOUT)
+    }
+
+    /// A look it takes while keyboard focus is on it or anywhere inside it (CSS's
+    /// `:focus-within`): `.focus_within(|el| el.fill(token::FILL).radius(8.0))`. The fill,
+    /// colour, radius, shadow and opacity (below 1) set in `style` replace its own; the rest
+    /// stays. Focus moving in and out repaints without running the view, and the change
+    /// springs along the element's [`motion`](Self::motion) like any other.
+    pub fn focus_within(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
+        self.within = Some(style(el()).look);
+        self
     }
 
     /// Changes in this subtree land at once, whatever motion an ancestor gives it.
