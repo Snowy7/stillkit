@@ -1,0 +1,676 @@
+use super::*;
+
+/// A surface's optics. `None` tint inherits the palette's surface in either scheme.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Material {
+    Glass {
+        clarity: f32,
+        blur: f32,
+        refraction: f32,
+        highlight: f32,
+        tint: Option<Rgba>,
+        tint_alpha: Option<f32>,
+        lensed: bool,
+    },
+    Fill {
+        tint: Option<Rgba>,
+    },
+}
+
+/// Generic material sliders. Lens controls are honored only by a lensed material.
+pub type MaterialOverrides = Knobs;
+
+impl Material {
+    pub fn liquid() -> Self {
+        Self::Glass {
+            clarity: 0.55,
+            blur: 12.0,
+            refraction: 0.6,
+            highlight: 0.75,
+            tint: None,
+            tint_alpha: None,
+            lensed: true,
+        }
+    }
+    pub fn one_ui() -> Self {
+        Self::Glass {
+            clarity: 0.35,
+            blur: 24.0,
+            refraction: 0.0,
+            highlight: 0.0,
+            tint: None,
+            tint_alpha: None,
+            lensed: false,
+        }
+    }
+    pub fn fluent() -> Self {
+        Self::Glass {
+            clarity: 0.12,
+            blur: 30.0,
+            refraction: 0.0,
+            highlight: 0.0,
+            tint: None,
+            tint_alpha: None,
+            lensed: false,
+        }
+    }
+    pub fn solid() -> Self {
+        Self::Fill { tint: None }
+    }
+    pub fn mono() -> Self {
+        Self::Fill { tint: None }
+    }
+    pub fn tint(mut self, value: Rgba) -> Self {
+        match &mut self {
+            Self::Glass {
+                tint, tint_alpha, ..
+            } => {
+                *tint = Some(value);
+                *tint_alpha = None;
+            }
+            Self::Fill { tint } => *tint = Some(value),
+        }
+        self
+    }
+    pub fn clarity(self, value: f32) -> Self {
+        self.overrides(&MaterialOverrides {
+            clarity: Some(value),
+            ..Default::default()
+        })
+    }
+    pub fn blur(self, value: f32) -> Self {
+        self.overrides(&MaterialOverrides {
+            blur: Some(value),
+            ..Default::default()
+        })
+    }
+    pub fn refraction(self, value: f32) -> Self {
+        self.overrides(&MaterialOverrides {
+            refraction: Some(value),
+            ..Default::default()
+        })
+    }
+    pub fn highlight(self, value: f32) -> Self {
+        self.overrides(&MaterialOverrides {
+            highlight: Some(value),
+            ..Default::default()
+        })
+    }
+    pub fn overrides(self, knobs: &MaterialOverrides) -> Self {
+        match self {
+            Self::Fill { .. } => self,
+            Self::Glass {
+                clarity,
+                blur,
+                refraction,
+                highlight,
+                tint,
+                tint_alpha,
+                lensed,
+            } => {
+                let unit = |v: f32| {
+                    if v.is_finite() {
+                        v.clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    }
+                };
+                let clarity = knobs.clarity.map_or(clarity, unit);
+                Self::Glass {
+                    clarity,
+                    blur: knobs
+                        .blur
+                        .map_or(blur, |v| if v.is_finite() { v.max(0.0) } else { 0.0 }),
+                    refraction: if lensed {
+                        knobs.refraction.map_or(refraction, unit)
+                    } else {
+                        0.0
+                    },
+                    highlight: if lensed {
+                        knobs.highlight.map_or(highlight, unit)
+                    } else {
+                        0.0
+                    },
+                    tint,
+                    tint_alpha: knobs.clarity.map(|_| 1.0 - clarity).or(tint_alpha),
+                    lensed,
+                }
+            }
+        }
+    }
+    pub(super) fn resolve(self, surface: Rgba) -> (Rgba, Option<GlassMaterial>) {
+        match self {
+            Self::Fill { tint } => (tint.unwrap_or(surface), None),
+            Self::Glass {
+                clarity,
+                blur,
+                refraction,
+                highlight,
+                tint,
+                tint_alpha,
+                lensed,
+            } => {
+                let tint = tint.unwrap_or(surface);
+                let tint = tint_alpha.map_or(tint, |a| tint.with_alpha(a));
+                (
+                    tint,
+                    Some(GlassMaterial {
+                        clarity,
+                        blur,
+                        refraction: if lensed { refraction } else { 0.0 },
+                        highlight: if lensed { highlight } else { 0.0 },
+                        tint,
+                    }),
+                )
+            }
+        }
+    }
+}
+
+/// Shape values; cards are derived from surface minus padding, floored at `card_min`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shape {
+    pub surface: f32,
+    pub card_min: f32,
+    pub control: Option<f32>,
+    pub small: f32,
+}
+impl Shape {
+    pub fn liquid() -> Self {
+        Self {
+            surface: 24.0,
+            card_min: 10.0,
+            control: None,
+            small: 6.0,
+        }
+    }
+    pub fn one_ui() -> Self {
+        Self {
+            surface: 28.0,
+            card_min: 16.0,
+            control: None,
+            small: 6.0,
+        }
+    }
+    pub fn solid() -> Self {
+        Self {
+            surface: 14.0,
+            card_min: 6.0,
+            control: Some(8.0),
+            small: 6.0,
+        }
+    }
+    pub fn fluent() -> Self {
+        Self {
+            surface: 8.0,
+            card_min: 4.0,
+            control: Some(4.0),
+            small: 4.0,
+        }
+    }
+    pub fn mono() -> Self {
+        Self {
+            surface: 16.0,
+            card_min: 8.0,
+            control: Some(10.0),
+            small: 6.0,
+        }
+    }
+}
+/// Which radius to override. Card sets its minimum; its concentric radius is still derived.
+#[derive(Debug, Clone, Copy)]
+pub enum Radius {
+    Surface,
+    Card,
+    Control,
+    Small,
+}
+pub type Spacing = Metrics;
+pub type Motion = MotionTokens;
+/// Icon drawing source and stroke weight.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Icons {
+    pub set: IconSet,
+    pub weight: f32,
+}
+impl Icons {
+    pub fn liquid() -> Self {
+        Self {
+            set: IconSet::Vector,
+            weight: 1.75,
+        }
+    }
+    pub fn one_ui() -> Self {
+        Self {
+            weight: 2.0,
+            ..Self::liquid()
+        }
+    }
+    pub fn solid() -> Self {
+        Self::liquid()
+    }
+    pub fn fluent() -> Self {
+        Self {
+            set: IconSet::Font(crate::icons::SYSTEM_FAMILY.into()),
+            weight: 2.0,
+        }
+    }
+    pub fn mono() -> Self {
+        Self::liquid()
+    }
+}
+impl Metrics {
+    pub fn liquid() -> Self {
+        Self {
+            pad: 12.0,
+            gap: 12.0,
+            item: 6.0,
+            row: 46.0,
+            row_single: 36.0,
+            control: 30.0,
+            control_small: 24.0,
+            icon: 16.0,
+            icon_small: 13.0,
+            icon_large: 20.0,
+            hit: 28.0,
+            scrollbar: 5.0,
+            scrollbar_inset: 3.0,
+        }
+    }
+    pub fn one_ui() -> Self {
+        Self {
+            row: 52.0,
+            row_single: 40.0,
+            ..Self::liquid()
+        }
+    }
+    pub fn solid() -> Self {
+        Self {
+            pad: 10.0,
+            ..Self::liquid()
+        }
+    }
+    pub fn fluent() -> Self {
+        Self {
+            pad: 8.0,
+            gap: 8.0,
+            control: 32.0,
+            ..Self::liquid()
+        }
+    }
+    pub fn mono() -> Self {
+        Self::solid()
+    }
+}
+impl MotionTokens {
+    pub fn liquid() -> Self {
+        Self {
+            interactive: Spring::INTERACTIVE,
+            open: Spring::apple(0.3, 0.12),
+            layout: Spring::SNAPPY,
+            scroll: Spring::apple(0.22, 0.0),
+            scrollbar_idle: 0.9,
+            scrollbar_fade: 0.35,
+        }
+    }
+    pub fn one_ui() -> Self {
+        Self::liquid()
+    }
+    pub fn solid() -> Self {
+        Self::liquid()
+    }
+    pub fn fluent() -> Self {
+        Self::liquid()
+    }
+    pub fn mono() -> Self {
+        Self::liquid()
+    }
+}
+pub(super) struct PalettePreset {
+    pub(super) surface: [(u32, f32); 2],
+    pub(super) card: [(u32, f32); 2],
+    pub(super) steps: [(f32, f32, f32); 2],
+    pub(super) monochrome: bool,
+}
+const STEPS: [(f32, f32, f32); 2] = [(0.78, 0.60, 0.34), (0.72, 0.50, 0.30)];
+const LIQUID: PalettePreset = PalettePreset {
+    surface: [(0xF5F5F7, 0.80), (0x1C1C1E, 0.82)],
+    card: [(0xFFFFFF, 0.55), (0xFFFFFF, 0.10)],
+    steps: STEPS,
+    monochrome: false,
+};
+const ONE_UI: PalettePreset = PalettePreset {
+    surface: [(0xF4F4F6, 0.92), (0x17171A, 0.92)],
+    card: [(0xFFFFFF, 0.90), (0xFFFFFF, 0.09)],
+    steps: STEPS,
+    monochrome: false,
+};
+const SOLID: PalettePreset = PalettePreset {
+    surface: [(0xF2F2F7, 1.0), (0x1C1C1E, 1.0)],
+    card: [(0xFFFFFF, 1.0), (0x2C2C2E, 1.0)],
+    steps: STEPS,
+    monochrome: false,
+};
+const FLUENT: PalettePreset = PalettePreset {
+    surface: [(0xF3F3F3, 0.90), (0x202020, 0.90)],
+    card: [(0xFFFFFF, 0.70), (0xFFFFFF, 0.06)],
+    steps: [(0.80, 0.62, 0.42), (0.79, 0.55, 0.36)],
+    monochrome: false,
+};
+const MONO: PalettePreset = PalettePreset {
+    surface: [(0xF7F7F8, 0.78), (0x141416, 0.78)],
+    monochrome: true,
+    ..LIQUID
+};
+macro_rules! presets {
+    ($($name:ident => ($style:ident, $palette:ident, $ramp:ident, $border:expr)),*) => {
+        impl TypeRamp { $(pub fn $name() -> Self { $ramp() })* }
+        impl Palette { $(pub fn $name(scheme: Scheme, accent: Rgba) -> Self { palette(&$palette, scheme == Scheme::Dark, accent) })* }
+        impl Theme { $(pub fn $name(scheme: Scheme, accent: Rgba) -> Self {
+            let mut t = Self::compose(Style::$style, scheme, [Palette::$name(Scheme::Light, accent), Palette::$name(Scheme::Dark, accent)],
+                Material::$name(), Shape::$name(), TypeRamp::$name(), Spacing::$name(), Motion::$name(), Icons::$name());
+            t.border = if $border { Some(t.color.separator) } else { None };
+            t
+        })* }
+    }
+}
+presets!(liquid => (Liquid, LIQUID, ramp_liquid, false), one_ui => (OneUi, ONE_UI, ramp_one_ui, false), solid => (Solid, SOLID, ramp_liquid, true), fluent => (Fluent, FLUENT, ramp_fluent, false), mono => (Mono, MONO, ramp_liquid, false));
+
+/// A contrast requirement which cannot be satisfied by the chosen surface and ink.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Problem {
+    pub role: &'static str,
+    pub ratio: f32,
+    pub required: f32,
+}
+
+impl Theme {
+    #[allow(clippy::too_many_arguments)]
+    fn compose(
+        style: Style,
+        scheme: Scheme,
+        palettes: [Palette; 2],
+        material: Material,
+        shape: Shape,
+        font: TypeRamp,
+        metrics: Metrics,
+        motion: Motion,
+        icons: Icons,
+    ) -> Self {
+        let color = palettes[usize::from(scheme == Scheme::Dark)];
+        Self {
+            style,
+            scheme,
+            color,
+            font,
+            metrics,
+            radius: Radii {
+                surface: shape.surface,
+                card: Radii::concentric(shape.surface, metrics.pad, shape.card_min),
+                control: shape.control,
+                small: shape.small,
+            },
+            elevation: Elevation {
+                spread: 16.0,
+                drop: 4.0,
+                color: color.shadow,
+            },
+            motion,
+            icons: icons.set,
+            icon_weight: icons.weight,
+            glass: material.resolve(color.surface).1,
+            border: None,
+            material,
+            focus_ring: FocusRing::default(),
+            card_min: shape.card_min,
+            mixed: false,
+            palettes,
+            monochrome: color.monochrome,
+        }
+    }
+    pub fn material(mut self, material: Material) -> Self {
+        self.material = material;
+        self.recompute();
+        self
+    }
+    pub fn shape(mut self, shape: Shape) -> Self {
+        self.radius.surface = shape.surface;
+        self.radius.control = shape.control;
+        self.radius.small = shape.small;
+        self.card_min = shape.card_min;
+        self.recompute();
+        self
+    }
+    pub fn radius(mut self, radius: Radius, value: f32) -> Self {
+        match radius {
+            Radius::Surface => self.radius.surface = value,
+            Radius::Card => self.card_min = value,
+            Radius::Control => self.radius.control = Some(value),
+            Radius::Small => self.radius.small = value,
+        }
+        self.recompute();
+        self
+    }
+    pub fn type_ramp(mut self, ramp: TypeRamp) -> Self {
+        self.font = ramp;
+        self.recompute();
+        self
+    }
+    pub fn spacing(mut self, spacing: Spacing) -> Self {
+        self.metrics = spacing;
+        self.recompute();
+        self
+    }
+    pub fn motion(mut self, motion: Motion) -> Self {
+        self.motion = motion;
+        self.recompute();
+        self
+    }
+    pub fn icons(mut self, icons: Icons) -> Self {
+        self.icons = icons.set;
+        self.icon_weight = icons.weight;
+        self.recompute();
+        self
+    }
+    /// Set both scheme palettes so adaptive scheme changes retain the mix.
+    pub fn palettes(mut self, light: Palette, dark: Palette) -> Self {
+        self.palettes = [light, dark];
+        self.recompute();
+        self
+    }
+    pub fn palette(mut self, palette: Palette) -> Self {
+        self.palettes[usize::from(self.dark())] = palette;
+        self.recompute();
+        self
+    }
+    pub fn focus_ring(mut self, ring: FocusRing) -> Self {
+        self.focus_ring = ring;
+        self.recompute();
+        self
+    }
+    pub fn border(mut self, border: Option<Rgba>) -> Self {
+        self.border = border;
+        self.recompute();
+        self
+    }
+    fn backgrounds(&self) -> Vec<Rgba> {
+        let under = if self.dark() {
+            hex(0, 1.0)
+        } else {
+            hex(0xFFFFFF, 1.0)
+        };
+        let surface = over(self.color.surface, under);
+        let mut backgrounds = vec![surface, over(self.color.card, surface)];
+        // Very clear glass can expose either extreme of an unknown backdrop.
+        if self.glass.is_some_and(|g| g.tint.a < 0.5) {
+            let other = over(
+                self.color.surface,
+                if self.dark() {
+                    hex(0xFFFFFF, 1.0)
+                } else {
+                    hex(0, 1.0)
+                },
+            );
+            backgrounds.extend([other, over(self.color.card, other)]);
+        }
+        backgrounds
+    }
+    pub(super) fn recompute(&mut self) {
+        self.mixed = true;
+        self.radius.card = Radii::concentric(self.radius.surface, self.metrics.pad, self.card_min);
+        self.color = self.palettes[usize::from(self.dark())];
+        self.monochrome = self.color.monochrome;
+        (self.color.surface, self.glass) = self.material.resolve(self.color.surface);
+        let backgrounds = self.backgrounds();
+        let solve = |mut c: Rgba, floor: f32| {
+            for _ in 0..100 {
+                if backgrounds
+                    .iter()
+                    .all(|bg| contrast(over(c, *bg), *bg) >= floor)
+                {
+                    break;
+                }
+                if c.a < 1.0 {
+                    c.a = (c.a + 0.01).min(1.0);
+                } else {
+                    c = mix(
+                        c,
+                        if luminance(backgrounds[0]) < 0.18 {
+                            hex(0xFFFFFF, 1.0)
+                        } else {
+                            hex(0, 1.0)
+                        },
+                        0.1,
+                    );
+                }
+            }
+            c
+        };
+        self.color.label = solve(self.color.label, 7.0);
+        self.color.secondary = solve(self.color.secondary, 4.5);
+        self.color.tertiary = solve(self.color.tertiary, 3.0);
+        self.color.accent = solve(self.color.accent, 3.0);
+        self.color.on_accent = if contrast(hex(0xFFFFFF, 1.0), self.color.accent) >= 3.0 {
+            hex(0xFFFFFF, 1.0)
+        } else {
+            hex(0x111113, 1.0)
+        };
+        self.color.accent_wash =
+            self.color
+                .accent
+                .with_alpha(if self.dark() { 0.24 } else { 0.16 });
+        self.elevation.color = self.color.shadow;
+    }
+    pub fn check(&self) -> Vec<Problem> {
+        let mut problems = Vec::new();
+        for (role, ink, required) in [
+            ("label", self.color.label, 7.0),
+            ("secondary", self.color.secondary, 4.5),
+            ("tertiary", self.color.tertiary, 3.0),
+            ("accent", self.color.accent, 3.0),
+        ] {
+            for (index, bg) in self.backgrounds().into_iter().enumerate() {
+                if role == "accent" && index % 2 == 1 {
+                    continue;
+                }
+                let ratio = contrast(over(ink, bg), bg);
+                if ratio < required {
+                    problems.push(Problem {
+                        role,
+                        ratio,
+                        required,
+                    });
+                }
+            }
+        }
+        let ratio = contrast(self.color.on_accent, self.color.accent);
+        if ratio < 3.0 {
+            problems.push(Problem {
+                role: "on_accent",
+                ratio,
+                required: 3.0,
+            });
+        }
+        problems
+    }
+}
+
+/// Focus ring values for hosts and components (design pixels).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FocusRing {
+    pub width: f32,
+    pub gap: f32,
+    pub opacity: f32,
+}
+impl Default for FocusRing {
+    fn default() -> Self {
+        Self {
+            width: 2.0,
+            gap: 2.0,
+            opacity: 0.9,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn presets_pass_and_parts_survive_scheme_changes() {
+        for style in Style::ALL {
+            for scheme in [Scheme::Dark, Scheme::Light] {
+                let t = Theme::new(style, scheme, SYSTEM_BLUE);
+                assert!(
+                    t.check().is_empty(),
+                    "{style:?} {scheme:?}: {:?}",
+                    t.check()
+                );
+            }
+        }
+        let t = Theme::liquid(Scheme::Dark, SYSTEM_BLUE)
+            .shape(Shape::one_ui())
+            .type_ramp(TypeRamp::one_ui())
+            .spacing(Spacing {
+                pad: 8.0,
+                ..Spacing::liquid()
+            })
+            .radius(Radius::Control, 10.0);
+        assert_eq!(t.radius.card, 20.0);
+        let light = t.with_scheme(Scheme::Light);
+        assert_eq!(light.radius, t.radius);
+        assert_eq!(light.font, t.font);
+        assert!(light.check().is_empty(), "{:?}", light.check());
+    }
+    #[test]
+    fn lens_is_owned_by_material_and_contrast_is_resolved_after_tint_changes() {
+        let t =
+            Theme::one_ui(Scheme::Dark, SYSTEM_BLUE).material(Material::liquid().refraction(0.3));
+        assert_eq!(t.glass.unwrap().refraction, 0.3);
+        let clear = t.clone().material(Material::liquid().clarity(1.0));
+        assert!(
+            !clear.check().is_empty(),
+            "clear glass cannot guarantee contrast on every backdrop"
+        );
+        assert_eq!(
+            Material::one_ui()
+                .refraction(0.9)
+                .resolve(t.color.surface)
+                .1
+                .unwrap()
+                .refraction,
+            0.0
+        );
+        let t = t.material(Material::solid().tint(hex(0xFFFFFF, 1.0)));
+        assert!(t.check().is_empty(), "{:?}", t.check());
+    }
+    #[cfg(feature = "serde")]
+    #[test]
+    fn look_files_mix_and_reject_unknown_properties() {
+        let t = Theme::from_toml(include_str!("../../looks/sunset.toml")).unwrap();
+        assert_eq!(t.glass.unwrap().refraction, 0.3);
+        assert_eq!(t.radius.control, Some(10.0));
+        let json = Theme::from_json(r#"{"base":"one_ui","material":{"base":"liquid","refraction":0.3},"shape":{"control":10.0}}"#).unwrap();
+        assert_eq!(t, json);
+        assert!(Theme::from_json(r#"{"materail":{}}"#).is_err());
+    }
+}

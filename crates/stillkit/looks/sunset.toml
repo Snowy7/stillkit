@@ -1,0 +1,8 @@
+# One UI geometry and type with Liquid optics.
+base = "one_ui"
+scheme = "dark"
+[material]
+base = "liquid"
+refraction = 0.3
+[shape]
+control = 10.0
