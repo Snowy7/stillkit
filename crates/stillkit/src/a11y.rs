@@ -83,8 +83,11 @@ pub(crate) const ROOT: NodeId = NodeId(0);
 pub(crate) const REORDER_BASE: u64 = 1 << 40;
 const STATUS_BASE: u64 = 1 << 48;
 /// Text runs: a field's lines, 4096 a field at most.
+// Linux has no adapter yet: the tree is built on Windows only.
+#[cfg_attr(not(windows), allow(dead_code))]
 const RUN_BASE: u64 = 1 << 44;
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn run_node(hit: HitId, line: usize) -> NodeId {
     NodeId(RUN_BASE + u64::from(hit) * 4096 + line.min(4095) as u64)
 }
@@ -291,6 +294,7 @@ impl Snapshot {
 
 /// One line of a field as an AccessKit text run: its characters' UTF-8 lengths, places and
 /// widths, and where its words start (the first 256 characters).
+#[cfg_attr(not(windows), allow(dead_code))]
 fn text_run(l: &TextLine) -> Node {
     use unicode_segmentation::UnicodeSegmentation;
     let mut node = Node::new(Role::TextRun);
