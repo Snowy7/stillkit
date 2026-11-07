@@ -1,7 +1,9 @@
 //! The kit's gallery: every component in all five styles and both schemes, over a wallpaper,
 //! written as PNGs so they can be judged side by side (docs/ui.md, "The kit").
 //!
-//!   cargo run -p stillkit --example gallery [-- <out dir>]   (default docs/media/native)
+//!   cargo run -p stillkit --example gallery [-- <out dir> [<wallpaper image>]]
+//!
+//! The out dir defaults to docs/media/native; without a wallpaper a generated dusk is used.
 //!
 //! Writes `kit-<style>-<scheme>.png`, `kit-text.png` (the text lab) and `kit-icons.png` (vector
 //! icons against the icon font). Glass is a stand-in for the engine's: the wallpaper blurred,
@@ -29,19 +31,11 @@ fn main() -> anyhow::Result<()> {
         .map_or_else(|| PathBuf::from("docs/media/native"), PathBuf::from);
     std::fs::create_dir_all(&out)?;
     let mut ui = Ui::new()?;
-    let backdrop = match std::fs::read("themes/rain-city/preview.jpg") {
-        Ok(wallpaper) => cover(&ui.decode_image(&wallpaper, (W * 2, H * 2))?, W, H),
-        #[cfg(target_os = "linux")]
-        Err(_) => {
-            // The extracted library does not include mypaper's rain-city theme.
-            let pixels=(0..H).flat_map(|y|(0..W).flat_map(move |x| {
-                let t=(x+y) as f32/(W+H) as f32;
-                [(75.+65.*t) as u8,(48.+50.*t) as u8,(30.+35.*t) as u8,255]
-            })).collect();
-            Image { width:W,height:H,pixels }
-        }
-        #[cfg(not(target_os = "linux"))]
-        Err(error) => return Err(error.into()),
+    // A wallpaper to put the glass over: the second argument's image, or a generated dusk, so
+    // every platform renders the same scene without shipping a photo.
+    let backdrop = match std::env::args().nth(2) {
+        Some(path) => cover(&ui.decode_image(&std::fs::read(&path)?, (W * 2, H * 2))?, W, H),
+        None => dusk(W, H),
     };
     let blurred = blur(&backdrop, 18);
     for style in Style::ALL {
@@ -578,6 +572,33 @@ fn cover(image: &Image, w: u32, h: u32) -> Image {
             let s = ((sy * image.width + sx) * 4) as usize;
             let d = ((y * w + x) * 4) as usize;
             pixels[d..d + 4].copy_from_slice(&image.pixels[s..s + 4]);
+        }
+    }
+    Image { width: w, height: h, pixels }
+}
+
+/// A dusk sky: deep blue above, violet, a warm horizon, and two soft lights, so glass over it
+/// shows both light and dark backdrops.
+fn dusk(w: u32, h: u32) -> Image {
+    let stops = [(0.0, [18.0, 28.0, 68.0]), (0.55, [92.0, 52.0, 120.0]), (1.0, [236.0, 132.0, 84.0])];
+    let lights = [(0.22, 0.30, 0.20, [120.0, 170.0, 255.0]), (0.78, 0.72, 0.24, [255.0, 196.0, 120.0])];
+    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        let t = y as f32 / (h - 1) as f32;
+        let i = if t < stops[1].0 { 0 } else { 1 };
+        let k = (t - stops[i].0) / (stops[i + 1].0 - stops[i].0);
+        let sky: [f32; 3] = std::array::from_fn(|c| stops[i].1[c] + (stops[i + 1].1[c] - stops[i].1[c]) * k);
+        for x in 0..w {
+            let (u, v) = (x as f32 / w as f32, t);
+            let mut rgb = sky;
+            for (lx, ly, r, color) in lights {
+                let d = ((u - lx).powi(2) * 2.4 + (v - ly).powi(2)).sqrt() / r;
+                let glow = (1.0 - d).max(0.0).powi(2) * 0.55;
+                for c in 0..3 {
+                    rgb[c] += (color[c] - rgb[c]) * glow;
+                }
+            }
+            pixels.extend_from_slice(&[rgb[2] as u8, rgb[1] as u8, rgb[0] as u8, 255]);
         }
     }
     Image { width: w, height: h, pixels }
