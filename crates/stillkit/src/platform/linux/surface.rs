@@ -612,6 +612,12 @@ impl Surface {
     pub fn move_to(&mut self, _: (i32, i32)) -> Result<()> {
         bail!("Wayland does not permit absolute window positioning")
     }
+    /// No accessibility tree on Linux yet: values are kept nowhere.
+    pub fn set_accessibility_semantics(&self, _: Vec<(crate::HitId, crate::Semantics)>) {}
+    /// No accessibility tree on Linux yet: there are no rich requests.
+    pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
+        None
+    }
     pub fn set_glass(&self, _: Option<crate::Glass>) {}
     pub fn set_glass_style(&self, _: crate::glass::GlassStyle) {}
     /// Remaps a hidden surface with its retained CPU bitmap.

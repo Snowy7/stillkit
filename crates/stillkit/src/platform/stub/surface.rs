@@ -122,6 +122,10 @@ impl Surface {
     pub fn move_to(&mut self, _: (i32, i32)) -> Result<()> {
         bail!("no native window backend")
     }
+    pub fn set_accessibility_semantics(&self, _: Vec<(crate::HitId, crate::Semantics)>) {}
+    pub fn take_accessibility_action(&self, _: crate::HitId) -> Option<crate::AccessibilityAction> {
+        None
+    }
     pub fn set_glass(&self, _: Option<crate::Glass>) {
         unimplemented!("glass")
     }

@@ -23,6 +23,22 @@ pub enum Semantics {
     Text(Arc<str>),
     Reorder,
     Status(Arc<str>),
+    /// What a hit item says beyond its name, read-only; it can sit beside any other entry
+    /// for the same hit (a range with its value as text).
+    Detail(Detail),
+}
+
+/// Read-only state for [`Semantics::Detail`]; `None` leaves a property out.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Detail {
+    /// Help read after the name.
+    pub description: Option<Arc<str>>,
+    /// The value as text ("40%"), without offering to set it.
+    pub value: Option<Arc<str>>,
+    /// Chosen among its siblings (a tab, a list item, a segment).
+    pub selected: Option<bool>,
+    /// Open (a disclosure, a menu button).
+    pub expanded: Option<bool>,
 }
 
 /// Rich actions remain owned data until the surface's UI thread consumes them.
@@ -105,7 +121,7 @@ impl Snapshot {
             if let Some(on) = hit.checked {
                 node.set_toggled(if on { Toggled::True } else { Toggled::False });
             }
-            if let Some((_, semantic)) = self.semantics.iter().find(|(id, _)| *id == hit.id) {
+            for (_, semantic) in self.semantics.iter().filter(|(id, _)| *id == hit.id) {
                 match semantic {
                     Semantics::Range {
                         value,
@@ -144,6 +160,20 @@ impl Snapshot {
                         // UIA has no generic custom-action pattern. Named Invoke children give
                         // Windows clients the same operations without inventing keyboard input.
                         node.set_children(vec![reorder_node(hit.id, 1), reorder_node(hit.id, 2)]);
+                    }
+                    Semantics::Detail(detail) => {
+                        if let Some(description) = &detail.description {
+                            node.set_description(&**description);
+                        }
+                        if let Some(value) = &detail.value {
+                            node.set_value(&**value);
+                        }
+                        if let Some(selected) = detail.selected {
+                            node.set_selected(selected);
+                        }
+                        if let Some(expanded) = detail.expanded {
+                            node.set_expanded(expanded);
+                        }
                     }
                     _ => {}
                 }
