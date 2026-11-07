@@ -30,14 +30,22 @@ Radio and segmented options support Tab + Enter/Space; arrow selection and slide
 keyboard stepping are pending the capability below. Components without a callback
 are display-only, as specified by today's el semantics. Calendar clamps invalid
 month/year inputs; values clamp to 0..=1 (NaN becomes zero). Slider steps must be
-positive finite fractions of the range. Calendar has no built-in month navigation;
-rebuild with a new month from the host's navigation actions.
+positive finite fractions of the range. Calendar exposes `on_month_change` with
+a (year, month) pair; rebuild from that value. `today(day)` is supplied by the host only for the current month.
 
 Ring and Tooltip are deferred rather than implemented through the old Frame API.
 TextFieldFrame is intentionally a frame, not an editor.
 
 ## Needed from el
 
+- **Interaction wash motion:** connect el's retained hover/press painting to the
+  existing interaction animator and theme interactive token (including reduced
+  motion and idle disarming). `Frame::wash` supports it, but el does not supply it;
+  `.motion` cannot observe hover/press state from a component view.
+- **Absolute percentage sizing:** nested `.absolute(0., 0.).w_full()` currently
+  resolves against the headless root width instead of its padded parent. The
+  segmented pill uses a zero-height flex rail to avoid this; no el workaround was
+  added outside the kit.
 - **Key actions and groups:** public typed key handler or range/group builders.
   Slider needs Left/Down decrement and Right/Up increment, Home/End, an explicit
   step, and accessible min/max/current value. Radio/segmented need roving focus,
@@ -60,12 +68,18 @@ TextFieldFrame is intentionally a frame, not an editor.
   semantic value/description and non-actionable, enabled roles for progress, labels,
   separators and groups without adding them to keyboard focus order.
 
-## Motion later
+## Motion
 
-Add `.motion(..)` at button/icon fills, switch thumbs, checkbox/radio marks,
-slider fill/thumb, segmented selection plate, tile disc, progress fraction and
-calendar selection. Retain the part keys above for retargeting. No motion is opted
-into here, and no timers, native windows or background work are created by the kit.
+Interactive theme springs drive switch tracks/thumbs, checkbox checks, radio dots,
+slider fill/thumb, the single sliding segmented pill, tile discs, progress and
+calendar selection. Badge text enters/exits with a short slide/fade while the pill
+resizes. Stable part keys retain velocity when a value changes mid-flight. Runtime
+owns the clock: first frames are static, reduced motion follows the host setting,
+and drag updates land instantly while external slider updates spring. No timers,
+native windows or background work are created by the kit.
+
+Hover/press washes still snap: see Needed from el. Opting a button into `.motion`
+only animates its element styles, not the runtime-owned interaction wash.
 
 ## Gallery and checks
 
@@ -97,9 +111,12 @@ icons, 40x24 switch, 18px slider thumb, 28px icon bar, capsule buttons and conce
 cards read as the same family. Deliberate differences: neutral fallback backgrounds
 replace the native gallery's wallpaper/glass stand-in; all presets use an accent
 icon bar (the old kit chose white for dark schemes); AAA text shifts tinted/plain
-and destructive label ink and can darken primary fills. Rows and badges stretch to
-the parent unless the caller chooses cross-axis alignment or a width. The runtime
-currently washes/focuses the slider's whole target rather than only its thumb.
+and destructive label ink and can darken primary fills. Rows stretch to the parent;
+badges now keep an intrinsic compact pill.
+The gallery intentionally stretches buttons so state columns remain comparable.
+Segment labels use the kit's 7:1/4.5:1 ink floors; adjacent-month calendar dates
+are shown in secondary ink, and the calendar uses Monday-first Gregorian dates.
+The runtime currently washes/focuses the slider's whole target rather than only its thumb.
 Tooltip and rings are absent pending the public primitives above. Studio is a
 composition of existing parts, not a duplicate controls implementation.
 
@@ -108,8 +125,16 @@ snapshot path: optics are supplied by a host backdrop, not component code. The
 Fluent + Mono palette mix changes ink while keeping Fluent geometry and type.
 `docs/media/kit/overview.png` records the visual audit of all sixteen sheets.
 
-Validation on Windows: eight tests pass (including all sixteen golden sheets),
+Validation on Windows: twelve tests pass (including all sixteen golden sheets),
 clippy is clean for all targets, and `cargo check --target
 x86_64-unknown-linux-gnu` passes. The Linux core reports existing dead-code warnings
 in its compile-only platform path. All commands used the assigned target directory;
-tests used the documented LLVM override after the Cranelift panic exit.
+tests used the documented LLVM override.
+
+Motion goldens: `motion-{switch,segmented,checkbox}.png`, at 0.1, 0.15, 0.2,
+0.3, 0.45 and 1.5 seconds after a scripted click at 0.1. Tests call `Runtime::play`
+with an explicit `until`, the same path used by `--script` + `--at`. They also
+check first-frame/idle behavior, pill bounds, intermediate travel, reduced motion,
+instant updates and slider drag snapping. Static sheets settle interaction input
+before capture. Ring, Tooltip and keyboard stepping remain deferred for the el
+capability work; no files under `crates/stillkit` were changed.
