@@ -1420,6 +1420,7 @@ impl<S> Runtime<S> {
         }
     }
 
+    /// Whether the window shows, as [`Runtime::set_visible`] last said.
     pub fn visible(&self) -> bool {
         self.visible
     }
