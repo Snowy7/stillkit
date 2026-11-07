@@ -7,7 +7,9 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 /// A monitor as a popup sees it: where it may go, and how large its pixels are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Screen {
+    /// Work.
     pub work: Edges,
+    /// Native display density in dots per inch.
     pub dpi: u32,
 }
 

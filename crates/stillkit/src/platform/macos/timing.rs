@@ -4,16 +4,20 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
 
 #[derive(Default)]
+/// Ticker.
 pub struct Ticker {
     armed: bool,
 }
 impl Ticker {
+    /// Creates a new instance.
     pub fn new() -> anyhow::Result<Self> {
         Ok(Self::default())
     }
+    /// Schedule.
     pub fn schedule(&mut self, moving: bool) {
         self.armed = moving;
     }
+    /// Armed.
     pub fn armed(&self) -> bool {
         self.armed
     }

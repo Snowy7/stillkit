@@ -9,9 +9,11 @@ use objc2_app_kit::NSScreen;
 use objc2_foundation::{NSPoint, NSRect};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Screen.
 pub struct Screen {
     /// The work area (without the menu bar and Dock): left, top, right, bottom.
     pub work: crate::menu::Edges,
+    /// Native display density in dots per inch.
     pub dpi: u32,
 }
 

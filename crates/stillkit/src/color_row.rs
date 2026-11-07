@@ -4,10 +4,15 @@ use crate::{Rect, Rgba, Role};
 
 pub mod popover;
 
+/// Choice.
 pub struct Choice<A> {
+    /// Text announced to assistive technology.
     pub label: String,
+    /// Color.
     pub color: Option<Rgba>,
+    /// Selected.
     pub selected: bool,
+    /// Action.
     pub action: A,
 }
 

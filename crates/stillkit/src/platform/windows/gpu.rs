@@ -77,8 +77,11 @@ pub fn power() -> Power {
 /// another API, such as wgpu for glass).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Adapter {
+    /// Name.
     pub name: String,
+    /// Vendor.
     pub vendor: u32,
+    /// Device.
     pub device: u32,
 }
 
@@ -118,6 +121,7 @@ pub(crate) fn pick(power: Power) -> Result<(IDXGIAdapter1, Adapter)> {
 
 /// This thread's hardware Direct2D device and its composition device.
 pub struct Device {
+    /// Adapter.
     pub adapter: Adapter,
     factory: ID2D1Factory,
     dc: ID2D1DeviceContext,

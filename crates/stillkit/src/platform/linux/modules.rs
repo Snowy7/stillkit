@@ -1,4 +1,5 @@
 //! Process mapping audit for the CPU-only boundary.
+/// Loaded.
 pub fn loaded() -> Vec<String> {
     std::fs::read_to_string("/proc/self/maps")
         .unwrap_or_default()
@@ -11,6 +12,7 @@ pub fn loaded() -> Vec<String> {
         })
         .collect()
 }
+/// Whether gpu driver.
 pub fn is_gpu_driver(module: &str) -> bool {
     let m = module.to_ascii_lowercase();
     [

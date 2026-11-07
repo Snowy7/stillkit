@@ -16,10 +16,12 @@ use std::sync::Arc;
 
 use crate::geom::Point;
 
+/// System family.
 pub const SYSTEM_FAMILY: &str = "Segoe Fluent Icons";
 
 /// Segoe Fluent Icons / MDL2 code points (kept for the menu component).
 pub const CHECK: char = '\u{E73E}';
+/// Chevron right.
 pub const CHEVRON_RIGHT: char = '\u{E76C}';
 
 pub use crate::platform::current::icons::{system_family, centered};
@@ -78,130 +80,250 @@ pub fn from_system_glyph(glyph: char) -> Option<Icon> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
     // Media (filled, as media controls are everywhere else).
+    /// Play.
     Play,
+    /// Pause.
     Pause,
+    /// Previous.
     Previous,
+    /// Next.
     Next,
+    /// Music.
     Music,
+    /// Shuffle.
     Shuffle,
+    /// Repeat.
     Repeat,
     // Navigation and commands.
+    /// Chevron left.
     ChevronLeft,
+    /// Chevron right.
     ChevronRight,
+    /// Chevron up.
     ChevronUp,
+    /// Chevron down.
     ChevronDown,
+    /// Add.
     Add,
+    /// Remove.
     Remove,
+    /// Close.
     Close,
+    /// Check.
     Check,
+    /// More.
     More,
+    /// Settings.
     Settings,
+    /// Search.
     Search,
+    /// Edit.
     Edit,
+    /// Delete.
     Delete,
+    /// Copy.
     Copy,
+    /// Refresh.
     Refresh,
+    /// Pin.
     Pin,
+    /// Resize.
     Resize,
+    /// Grip.
     Grip,
+    /// Arrow up.
     ArrowUp,
+    /// Arrow down.
     ArrowDown,
+    /// External.
     External,
+    /// Download.
     Download,
+    /// Upload.
     Upload,
     // Shell.
+    /// Apps.
     Apps,
+    /// Window.
     Window,
+    /// Power.
     Power,
+    /// Restart.
     Restart,
+    /// Sign out.
     SignOut,
+    /// Lock.
     Lock,
+    /// Bell.
     Bell,
+    /// Bell off.
     BellOff,
+    /// Calendar.
     Calendar,
+    /// Clock.
     Clock,
+    /// Timer.
     Timer,
+    /// Globe.
     Globe,
+    /// Keyboard.
     Keyboard,
+    /// Desktop.
     Desktop,
+    /// Home.
     Home,
+    /// User.
     User,
+    /// Folder.
     Folder,
+    /// File.
     File,
+    /// Clipboard.
     Clipboard,
+    /// Terminal.
     Terminal,
+    /// Message.
     Message,
+    /// Controls.
     Controls,
+    /// Layers.
     Layers,
     // Status.
+    /// Volume.
     Volume(u8),
+    /// Mute.
     Mute,
+    /// Speaker.
     Speaker,
+    /// Headphones.
     Headphones,
+    /// Mic.
     Mic,
+    /// Wifi.
     Wifi(u8),
+    /// Ethernet.
     Ethernet,
+    /// Offline.
     Offline,
+    /// Hotspot.
     Hotspot,
+    /// Cast.
     Cast,
+    /// Airplane.
     Airplane,
+    /// Location.
     Location,
+    /// Bluetooth.
     Bluetooth,
+    /// Brightness.
     Brightness,
+    /// Moon.
     Moon,
+    /// Night light.
     NightLight,
+    /// Focus.
     Focus,
+    /// Saver.
     Saver,
+    /// Gauge.
     Gauge,
+    /// Thermometer.
     Thermometer,
+    /// Cpu.
     Cpu,
+    /// Battery.
     Battery(u8),
+    /// Charging.
     Charging,
+    /// Battery warning.
     BatteryWarning,
+    /// Plug.
     Plug,
+    /// Accessibility.
     Accessibility,
+    /// Eye.
     Eye,
+    /// Camera.
     Camera,
+    /// Info.
     Info,
+    /// Warning.
     Warning,
+    /// Star.
     Star,
+    /// Heart.
     Heart,
+    /// Notes.
     Notes,
+    /// Tasks.
     Tasks,
+    /// Photo.
     Photo,
+    /// Feed.
     Feed,
     // Weather.
+    /// Sun.
     Sun,
+    /// Cloud.
     Cloud,
+    /// Cloud sun.
     CloudSun,
+    /// Cloud moon.
     CloudMoon,
+    /// Rain.
     Rain,
+    /// Drizzle.
     Drizzle,
+    /// Snow.
     Snow,
+    /// Snowflake.
     Snowflake,
+    /// Thunder.
     Thunder,
+    /// Fog.
     Fog,
+    /// Wind.
     Wind,
+    /// Droplet.
     Droplet,
+    /// Umbrella.
     Umbrella,
+    /// Sunrise.
     Sunrise,
+    /// Sunset.
     Sunset,
     // Apps (Studio).
+    /// Palette.
     Palette,
+    /// Undo.
     Undo,
+    /// Redo.
     Redo,
+    /// Pointer.
     Pointer,
+    /// Move.
     Move,
+    /// Wrench.
     Wrench,
+    /// Video.
     Video,
+    /// Sparkles.
     Sparkles,
+    /// Package.
     Package,
+    /// Images.
     Images,
+    /// Activity.
     Activity,
+    /// Rocket.
     Rocket,
+    /// Quote.
     Quote,
+    /// Grid.
     Grid,
+    /// Toggle.
     Toggle,
+    /// Panel top.
     PanelTop,
 }
 

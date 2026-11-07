@@ -27,6 +27,7 @@ pub const NOTCH: f32 = 48.0;
 const FRAME: Duration = Duration::from_millis(8);
 
 #[derive(Debug, Clone)]
+/// Scroll.
 pub struct Scroll {
     /// Where the content rests (device px from its top); the glide heads here.
     target: f32,
@@ -53,6 +54,7 @@ impl Default for Scroll {
 }
 
 impl Scroll {
+    /// Creates a new instance.
     pub fn new(motion: &MotionTokens) -> Self {
         Self {
             target: 0.0,

@@ -34,25 +34,33 @@ use crate::{AnimationFrames, Chrome, Event, Kind, Rect, Rgba, Surface, Theme, ne
 
 /// An app to [`run`]: its window and its view.
 pub struct App<S, V> {
+    /// Title.
     pub title: &'static str,
     /// The client size in design pixels.
     pub size: (f32, f32),
+    /// Kind.
     pub kind: Kind,
+    /// Theme.
     pub theme: Theme,
+    /// State.
     pub state: S,
+    /// View.
     pub view: V,
 }
 
 /// One timed input of a [`Script`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
+    /// Move.
     Move(f32, f32),
+    /// Down.
     Down(f32, f32),
+    /// Up.
     Up(f32, f32),
     /// Down and up at the centre of the element with this key.
     Click(String),
     /// A virtual-key code; Tab steps the focus (backwards with `shift`).
-    Key { vk: u16, shift: bool },
+    Key { #[doc = "Vk."] vk: u16, #[doc = "Shift."] shift: bool },
     /// The wheel at a point: 120 a notch, positive up.
     Wheel(f32, f32, i16),
     /// The secondary button pressed and released at a point (a context menu).

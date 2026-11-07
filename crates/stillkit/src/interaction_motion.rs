@@ -32,14 +32,18 @@ impl Value {
     }
 }
 
+/// Hover and press transitions shared by a surface's immediate-mode controls.
 pub struct InteractionMotion {
+    /// Timing used when pointer hover enters or leaves a control.
     pub hover: Timing,
+    /// Timing used when a control is pressed or released.
     pub press: Timing,
     values: HashMap<HitId, (Value, Value)>,
     moving: bool,
 }
 
 impl InteractionMotion {
+    /// Starts with no active transitions and the supplied hover/press timings.
     pub fn new(hover: Timing, press: Timing) -> Self {
         Self {
             hover,
@@ -48,9 +52,11 @@ impl InteractionMotion {
             moving: false,
         }
     }
+    /// Whether another animation frame is needed.
     pub fn moving(&self) -> bool {
         self.moving
     }
+    /// Samples pointer state and advances transitions; returns whether a wash changed.
     pub fn step(&mut self, input: &Interaction, now: Instant) -> bool {
         for id in [input.hover, input.pressed].into_iter().flatten() {
             self.values.entry(id).or_default();
@@ -66,6 +72,7 @@ impl InteractionMotion {
         });
         changed
     }
+    /// Blends the hover and press washes for a hit, or returns its fallback color.
     pub fn wash(&self, id: HitId, hover: Rgba, press: Rgba, fallback: Rgba) -> Rgba {
         let Some((h, p)) = self.values.get(&id) else {
             return fallback;

@@ -79,8 +79,11 @@ enum Action<S> {
 /// A keyed element's layout and look, before or after a view run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Snapshot {
+    /// Bounds in device pixels.
     pub rect: Rect,
+    /// Fill.
     pub fill: Option<Rgba>,
+    /// Opacity.
     pub opacity: f32,
 }
 
@@ -89,27 +92,36 @@ pub struct Snapshot {
 /// animation tracks retarget from the same re-layout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Change {
+    /// Key.
     pub key: Key,
+    /// From.
     pub from: Option<Snapshot>,
+    /// To.
     pub to: Option<Snapshot>,
 }
 
 /// What an element shows now: the `--tree` dump and [`Runtime::presented`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Shown {
+    /// Key.
     pub key: Option<Key>,
     /// Keys (or places among unkeyed siblings) from the root, `/`-separated.
     pub path: String,
     /// Its hit item's role, when it has one.
     pub role: Option<Role>,
+    /// Text announced to assistive technology.
     pub label: Option<Arc<str>>,
     /// Device pixels, where it is drawn now (mid-animation, between its layouts; scrolled).
     pub rect: Rect,
+    /// Fill.
     pub fill: Option<Rgba>,
+    /// Text content.
     pub text: Option<Arc<str>>,
+    /// Checked.
     pub checked: Option<bool>,
     /// Hover and press, from the interaction state.
     pub state: State,
+    /// Focused.
     pub focused: bool,
     /// Its own opacity now, entrance included.
     pub opacity: f32,
@@ -119,8 +131,11 @@ pub struct Shown {
     pub value: Option<Arc<str>>,
     /// A text field's selection: where it started and the caret (byte offsets in `text`).
     pub selection: Option<(usize, usize)>,
+    /// Description.
     pub description: Option<Arc<str>>,
+    /// Selected.
     pub selected: Option<bool>,
+    /// Expanded.
     pub expanded: Option<bool>,
     /// A scroll view's offset now, device px along its axis.
     pub scroll: Option<f32>,
@@ -1173,6 +1188,7 @@ impl<S> Runtime<S> {
         self.land_next();
     }
 
+    /// State.
     pub fn state(&self) -> &S {
         &self.state
     }
@@ -1215,6 +1231,7 @@ impl<S> Runtime<S> {
         self.time_scale = scale.max(0.0);
     }
 
+    /// Time scale.
     pub fn time_scale(&self) -> f32 {
         self.time_scale
     }
@@ -1225,6 +1242,7 @@ impl<S> Runtime<S> {
         self.anim.reduced = reduced;
     }
 
+    /// Reduced motion.
     pub fn reduced_motion(&self) -> bool {
         self.anim.reduced
     }
@@ -1235,10 +1253,12 @@ impl<S> Runtime<S> {
         self.anim.moving() || !self.ghosts.is_empty() || self.scrolling
     }
 
+    /// Theme.
     pub fn theme(&self) -> &Theme {
         &self.theme
     }
 
+    /// Scale.
     pub fn scale(&self) -> f32 {
         self.scale
     }
@@ -1296,14 +1316,17 @@ impl<S> Runtime<S> {
 
     // ---- Headless input and queries (device px) --------------------------------------------
 
+    /// Pointer move.
     pub fn pointer_move(&mut self, x: f32, y: f32) {
         self.handle(&Event::Move(pointer(x, y)));
     }
 
+    /// Pointer down.
     pub fn pointer_down(&mut self, x: f32, y: f32) {
         self.handle(&Event::Press(pointer(x, y), Button::Left));
     }
 
+    /// Pointer up.
     pub fn pointer_up(&mut self, x: f32, y: f32) {
         self.handle(&Event::Release(pointer(x, y), Button::Left));
     }

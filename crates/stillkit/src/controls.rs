@@ -66,6 +66,7 @@ pub fn segment_fill(dark: bool) -> Rgba {
 /// ink-2 and ink-3 4.5:1, ink-4 3:1 on its surfaces).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
+    /// Dark.
     pub dark: bool,
     /// The main panel (content area).
     pub bg: Rgba,
@@ -87,13 +88,19 @@ pub struct Palette {
     pub fill: Rgba,
     /// A quieter well: text fields, a segmented control's track, keycaps.
     pub well: Rgba,
+    /// Ink1.
     pub ink1: Rgba,
+    /// Ink2.
     pub ink2: Rgba,
+    /// Ink3.
     pub ink3: Rgba,
+    /// Ink4.
     pub ink4: Rgba,
     /// Primary buttons, the switch's on track.
     pub solid: Rgba,
+    /// On solid.
     pub on_solid: Rgba,
+    /// Solid hover.
     pub solid_hover: Rgba,
     /// Behind the palette and sheets.
     pub scrim: Rgba,
@@ -114,6 +121,7 @@ const fn black(a: f32) -> Rgba {
 }
 
 impl Palette {
+    /// Dark.
     pub fn dark() -> Self {
         Self {
             dark: true,
@@ -139,6 +147,7 @@ impl Palette {
         }
     }
 
+    /// Light.
     pub fn light() -> Self {
         Self {
             dark: false,
@@ -263,15 +272,20 @@ pub enum Font {
 /// Font families and the icon font, resolved once per window.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Type {
+    /// Text content.
     pub text: Arc<str>,
+    /// Display.
     pub display: Arc<str>,
+    /// Mono.
     pub mono: Arc<str>,
+    /// Icons.
     pub icons: Arc<str>,
     /// Windows' text size (Accessibility), 1..=2.25: text and rows grow with it.
     pub text_scale: f32,
 }
 
 impl Type {
+    /// Creates a new instance.
     pub fn new(text: &Text) -> Self {
         let pick = |families: &[&str]| -> Arc<str> {
             families
@@ -331,7 +345,9 @@ impl Type {
 /// Icons) where the kit has none (the caption buttons).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Glyph {
+    /// A kit vector icon.
     Icon(Icon),
+    /// A character from the configured icon font.
     Font(char),
 }
 
@@ -350,11 +366,15 @@ impl From<char> for Glyph {
 /// What the app's input state says about controls, for the next frame's visuals.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Input {
+    /// The hit under the pointer.
     pub hover: Option<Key>,
+    /// Pressed.
     pub pressed: Option<Key>,
+    /// The hit with keyboard focus.
     pub focus: Option<Key>,
     /// The focus came from the keyboard: draw its ring.
     pub focus_visible: bool,
+    /// Pointer.
     pub pointer: Option<Point>,
 }
 
@@ -367,10 +387,15 @@ pub enum Behavior {
     Toggle,
     /// A slider: dragging along `track` (or arrows, Home, End) sets a value.
     Slider {
+        /// The slider or thumb track in device pixels.
         track: Rect,
+        /// Lower numeric bound.
         min: f64,
+        /// Upper numeric bound.
         max: f64,
+        /// Keyboard increment.
         step: f64,
+        /// Current slider value.
         value: f64,
     },
     /// A text field's frame: a click focuses the field.
@@ -379,8 +404,11 @@ pub enum Behavior {
     Drag,
     /// A scroll view's thumb: dragging scrolls `view`.
     Thumb {
+        /// Scroll view controlled by this thumb.
         view: Key,
+        /// The slider or thumb track in device pixels.
         track: Rect,
+        /// Scrollable content extent in device pixels.
         content: f32,
     },
 }
@@ -389,9 +417,13 @@ pub enum Behavior {
 /// together for arrow keys.
 #[derive(Debug, Clone)]
 pub struct Target<A> {
+    /// Key.
     pub key: Key,
+    /// Action.
     pub action: A,
+    /// Behavior.
     pub behavior: Behavior,
+    /// Group.
     pub group: Option<Key>,
     /// The whole control, wherever it is scrolled.
     pub rect: Rect,
@@ -404,12 +436,16 @@ pub struct Target<A> {
 /// A scroll view found while building: where it is and how tall its content was.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollArea {
+    /// Key.
     pub key: Key,
+    /// Viewport.
     pub viewport: Rect,
+    /// Content.
     pub content: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Button kind.
 pub enum ButtonKind {
     /// `solid` fill: the page's main action.
     Primary,
@@ -420,25 +456,37 @@ pub enum ButtonKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Align.
 pub enum Align {
+    /// Align to the leading edge.
     Start,
+    /// Center within the available space.
     Center,
+    /// Align to the trailing edge.
     End,
 }
 
 /// Builds one frame: ops, hits and their targets.
 pub struct Builder<'a, A> {
+    /// List.
     pub list: DisplayList,
+    /// Semantics.
     pub semantics: Vec<(crate::HitId, crate::Semantics)>,
+    /// Text content.
     pub text: &'a mut Text,
+    /// P.
     pub p: &'a Palette,
+    /// T.
     pub t: &'a Type,
     /// The kit theme over `p` ([`Palette::theme`]).
     pub kit: Theme,
     /// Device pixels per design pixel.
     pub s: f32,
+    /// Input.
     pub input: &'a Input,
+    /// Targets.
     pub targets: Vec<Target<A>>,
+    /// Scrolls.
     pub scrolls: Vec<ScrollArea>,
     clips: Vec<(Key, Rect)>,
     group: Option<Key>,
@@ -446,6 +494,7 @@ pub struct Builder<'a, A> {
 }
 
 impl<'a, A: Clone> Builder<'a, A> {
+    /// Creates a new instance.
     pub fn new(text: &'a mut Text, p: &'a Palette, t: &'a Type, s: f32, input: &'a Input) -> Self {
         Self {
             list: DisplayList::default(),
@@ -510,18 +559,22 @@ impl<'a, A: Clone> Builder<'a, A> {
         )
     }
 
+    /// Font.
     pub fn font(&self, font: Font) -> TextStyle {
         self.t.style(font, self.s)
     }
 
+    /// Hovered.
     pub fn hovered(&self, key: Key) -> bool {
         self.input.hover == Some(key)
     }
 
+    /// Pressed.
     pub fn pressed(&self, key: Key) -> bool {
         self.input.pressed == Some(key)
     }
 
+    /// Focused.
     pub fn focused(&self, key: Key) -> bool {
         self.input.focus == Some(key) && self.input.focus_visible
     }
@@ -570,6 +623,7 @@ impl<'a, A: Clone> Builder<'a, A> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Hit checked.
     pub fn hit_checked(
         &mut self,
         key: Key,
@@ -641,6 +695,7 @@ impl<'a, A: Clone> Builder<'a, A> {
 
     // --- Primitives ---------------------------------------------------------------------------
 
+    /// Fill.
     pub fn fill(&mut self, rect: Rect, radius: f32, color: Rgba) {
         if color.a > 0.0 && !rect.is_empty() {
             self.list.ops.push(Op::Fill {
@@ -651,6 +706,7 @@ impl<'a, A: Clone> Builder<'a, A> {
         }
     }
 
+    /// Stroke.
     pub fn stroke(&mut self, rect: Rect, radius: f32, width: f32, color: Rgba) {
         self.list.ops.push(Op::Stroke {
             rect: rect.inflate(-width / 2.0),
@@ -660,6 +716,7 @@ impl<'a, A: Clone> Builder<'a, A> {
         });
     }
 
+    /// Line.
     pub fn line(&mut self, from: Point, to: Point, width: f32, color: Rgba) {
         self.list.ops.push(Op::Line {
             from,
@@ -1314,6 +1371,7 @@ impl<'a, A: Clone> Builder<'a, A> {
         &mut self,
         key: Key,
         rect: Rect,
+        /// Current slider value.
         value: f64,
         (min, max, step): (f64, f64, f64),
         value_text: &str,

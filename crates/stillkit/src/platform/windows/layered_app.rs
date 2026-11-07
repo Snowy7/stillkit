@@ -74,6 +74,7 @@ pub struct LayeredApp {
     origin: (i32, i32),
 }
 impl LayeredApp {
+    /// Creates a new instance.
     pub fn new(surface: &Surface) -> Result<Self> {
         let hwnd = surface.hwnd();
         // SAFETY: a static subclass of our own HWND, removed on drop.
@@ -92,6 +93,7 @@ impl LayeredApp {
         })
     }
 
+    /// Sets enabled.
     pub fn set_enabled(&mut self, enabled: bool) {
         if self.enabled == enabled {
             return;
@@ -123,6 +125,7 @@ impl LayeredApp {
         self.pixels = None;
     }
 
+    /// Present.
     pub fn present(
         &mut self,
         surface: &mut Surface,

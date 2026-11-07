@@ -2,16 +2,22 @@
 use crate::{DisplayList, Hit, Op, Rect, Rgba, Role, TextStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+/// Date.
 pub struct Date {
+    /// Year.
     pub year: i32,
+    /// Month.
     pub month: u32,
+    /// Day.
     pub day: u32,
 }
 impl Date {
+    /// Creates a new instance.
     pub fn new(year: i32, month: u32, day: u32) -> Option<Self> {
         ((1..=12).contains(&month) && day >= 1 && day <= days_in_month(year, month))
             .then_some(Self { year, month, day })
     }
+    /// Parse.
     pub fn parse(value: &str) -> Option<Self> {
         let mut parts = value.split('-');
         let date = Self::new(
@@ -21,6 +27,7 @@ impl Date {
         )?;
         parts.next().is_none().then_some(date)
     }
+    /// Key.
     pub fn key(self) -> String {
         format!("{:04}-{:02}-{:02}", self.year, self.month, self.day)
     }
@@ -33,6 +40,7 @@ impl Date {
         let doy = (153 * m + 2) / 5 + i64::from(self.day) - 1;
         era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468
     }
+    /// From ordinal.
     pub fn from_ordinal(day: i64) -> Self {
         let z = day + 719468;
         let era = z.div_euclid(146097);
@@ -49,6 +57,7 @@ impl Date {
             day: d as u32,
         }
     }
+    /// Weekday.
     pub fn weekday(self) -> u32 {
         (self.ordinal() + 4).rem_euclid(7) as u32
     }
@@ -63,9 +72,11 @@ impl Date {
         let first = jan4.add_days(-i64::from((jan4.weekday() + 6) % 7));
         ((thursday.ordinal() - first.ordinal()) / 7 + 1) as u32
     }
+    /// Add days.
     pub fn add_days(self, days: i64) -> Self {
         Self::from_ordinal(self.ordinal() + days)
     }
+    /// Shift month.
     pub fn shift_month(self, delta: i32) -> Self {
         let month = self.year * 12 + self.month as i32 - 1 + delta;
         Self {
@@ -75,6 +86,7 @@ impl Date {
         }
     }
 }
+/// Days in month.
 pub fn days_in_month(year: i32, month: u32) -> u32 {
     match month {
         2 => {
@@ -88,6 +100,7 @@ pub fn days_in_month(year: i32, month: u32) -> u32 {
         _ => 31,
     }
 }
+/// Months.
 pub const MONTHS: [&str; 12] = [
     "January",
     "February",
@@ -102,15 +115,21 @@ pub const MONTHS: [&str; 12] = [
     "November",
     "December",
 ];
+/// Weekdays.
 pub const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 #[derive(Debug, Clone, PartialEq)]
+/// Month grid.
 pub struct MonthGrid {
+    /// Month.
     pub month: Date,
+    /// Week start.
     pub week_start: u32,
+    /// Cells.
     pub cells: Vec<Option<Date>>,
 }
 impl MonthGrid {
+    /// Creates a new instance.
     pub fn new(month: Date, week_start: u32) -> Self {
         let month = Date { day: 1, ..month };
         let week_start = week_start % 7;

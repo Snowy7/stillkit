@@ -19,23 +19,35 @@ pub use stub as current;
 pub use windows as current;
 /// CPU bitmap target: draw only the requested damage, then read its pixels.
 pub trait Renderer: Sized {
+    /// Native resources needed to create this renderer.
     type Context;
+    /// Creates a new instance.
     fn new(context: &Self::Context, width: u32, height: u32) -> Result<Self>;
+    /// Draws into the current display list.
     fn draw(&self, text: &mut current::Text, list: &DisplayList, damage: PixelRect) -> Result<()>;
+    /// Reads the requested pixels into the supplied sink.
     fn read(&self, damage: PixelRect, sink: impl FnMut(u32, &[u8])) -> Result<()>;
 }
 /// Native text shaping and per-thread format/layout caching.
 pub trait TextSystem {
+    /// Native text format type.
     type Format;
+    /// Native shaped text layout type.
     type Layout;
+    /// Creates a native text format for the supplied style.
     fn format(&mut self, style: &TextStyle) -> Option<Self::Format>;
+    /// Layout.
     fn layout(&mut self, text: &str, style: &TextStyle) -> Option<&Self::Layout>;
+    /// Measures the text in device pixels.
     fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32);
+    /// Releases cached native text layouts.
     fn clear_cache(&mut self);
 }
 /// Native window kinds, bitmap presentation and queued input.
 pub trait Window: Sized {
+    /// Native bitmap used for presentation.
     type Bitmap;
+    /// Creates a new instance.
     fn new(kind: current::Kind, name: &str, role: accesskit::Role) -> Result<Self>;
     /// Presents the native bitmap's dirty rect (and resize flag), or moves without repainting.
     fn present_bitmap(
@@ -43,14 +55,20 @@ pub trait Window: Sized {
         origin: (i32, i32),
         bitmap: Option<(&Self::Bitmap, PixelRect, bool)>,
     ) -> Result<()>;
+    /// Next event.
     fn next_event() -> Option<(current::SurfaceId, current::Event)>;
 }
 /// Windowless native text editing/IME; the backend owns focus and composition.
 pub trait TextInput {
+    /// Text content.
     fn text(&self) -> Result<String>;
+    /// Sets text.
     fn set_text(&self, text: &str) -> Result<()>;
+    /// The hit with keyboard focus.
     fn focus(&self);
+    /// Blur.
     fn blur(&self);
+    /// Caret.
     fn caret(&self) -> Option<crate::Rect>;
 }
 
@@ -112,9 +130,13 @@ pub fn render() -> Render {
 
 /// Associated concrete services of a backend; no virtual dispatch is involved.
 pub trait Backend {
+    /// Renderer.
     type Renderer: Renderer;
+    /// Text.
     type Text: TextSystem;
+    /// Window.
     type Window: Window;
+    /// Text input.
     type TextInput: TextInput;
 }
 

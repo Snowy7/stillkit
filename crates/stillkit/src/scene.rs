@@ -19,97 +19,150 @@ pub type HitId = u32;
 pub enum Op {
     /// A continuous corner surface; `width == 0` fills, otherwise strokes its contour.
     Continuous {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Radius.
         radius: f32,
+        /// Smoothing.
         smoothing: f32,
+        /// Width in device pixels.
         width: f32,
+        /// Color.
         color: Rgba,
     },
     /// A clipped group, used by windowless scroll views. Bounds never escape the viewport.
-    Clipped { rect: Rect, ops: Arc<[Op]> },
+    Clipped { #[doc = "Bounds in device pixels."] rect: Rect, #[doc = "Ops."] ops: Arc<[Op]> },
     /// An antialiased rounded clip for a composed card (picture, content and overlays).
-    RoundedClipped { rect: Rect, radius: f32, ops: Arc<[Op]> },
+    RoundedClipped { #[doc = "Bounds in device pixels."] rect: Rect, #[doc = "Radius."] radius: f32, #[doc = "Ops."] ops: Arc<[Op]> },
     /// Markdown emphasis without changing the shared text style contract.
     Emphasis {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Text content.
         text: Arc<str>,
+        /// Style.
         style: TextStyle,
+        /// Color.
         color: Rgba,
+        /// Italic.
         italic: bool,
+        /// Strike.
         strike: bool,
     },
     /// A clockwise circular arc from twelve o'clock, in radians. Full turns draw an ellipse.
     Arc {
+        /// Center.
         center: Point,
+        /// Radius.
         radius: f32,
+        /// Sweep.
         sweep: f32,
+        /// Width in device pixels.
         width: f32,
+        /// Color.
         color: Rgba,
     },
     /// An immutable premultiplied bitmap (photos, album artwork and app icons).
     Image {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Image.
         image: Arc<crate::Image>,
+        /// Opacity.
         opacity: f32,
+        /// Source.
         source: Option<Rect>,
     },
     /// [`Op::Image`] clipped to a rounded rectangle of `radius` (antialiased in one primitive:
     /// no specks at the corners), for pictures inside rounded cards and tiles.
     RoundedImage {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Image.
         image: Arc<crate::Image>,
+        /// Opacity.
         opacity: f32,
+        /// Source.
         source: Option<Rect>,
+        /// Radius.
         radius: f32,
     },
     /// A snapshot of a field's revision, so edits invalidate its bounds without an idle tick.
     TextField {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Field.
         field: crate::TextField,
+        /// Revision.
         revision: u64,
     },
     /// A filled rectangle, rounded when `radius > 0`.
     Fill {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Radius.
         radius: f32,
+        /// Color.
         color: Rgba,
     },
     /// A rectangle's outline, centred on its edge.
     Stroke {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Radius.
         radius: f32,
+        /// Width in device pixels.
         width: f32,
+        /// Color.
         color: Rgba,
     },
+    /// Line.
     Line {
+        /// From.
         from: Point,
+        /// To.
         to: Point,
+        /// Width in device pixels.
         width: f32,
+        /// Color.
         color: Rgba,
     },
     /// A string (or an icon glyph in an icon font) with its top-left at `rect`'s; `rect` is its
     /// measured size ([`crate::Text::measure`]).
     Text {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Text content.
         text: Arc<str>,
+        /// Style.
         style: TextStyle,
+        /// Color.
         color: Rgba,
     },
     /// A vector icon ([`crate::icons`]) filling the square `rect`, stroked `weight` device
     /// pixels wide with round caps and joins (and filled too for `Icon::filled` ones).
     Icon {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Icon.
         icon: crate::icons::Icon,
+        /// Weight.
         weight: f32,
+        /// Color.
         color: Rgba,
     },
     /// A stepped shadow under `rect`: fading rings `spread` pixels out, moved down by `drop`.
     /// The immediate-mode kit's; new code draws [`Op::SoftShadow`].
     Shadow {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Radius.
         radius: f32,
+        /// Spread.
         spread: f32,
+        /// Drop.
         drop: f32,
+        /// Color.
         color: Rgba,
     },
     /// A real soft shadow with CSS `box-shadow` semantics (outset): the rounded rectangle
@@ -124,16 +177,22 @@ pub enum Op {
     /// (`CGContextSetShadowWithColor` with `offset`, a blur of `blur` and `color`) under the
     /// grown shape, drawn outside the clip so only its shadow lands.
     SoftShadow {
+        /// Bounds in device pixels.
         rect: Rect,
+        /// Radius.
         radius: f32,
+        /// Blur.
         blur: f32,
+        /// Offset.
         offset: (f32, f32),
+        /// Spread.
         spread: f32,
+        /// Color.
         color: Rgba,
     },
     /// Clips what follows to `rect` (intersected with any clip already pushed) until the
     /// matching [`Op::Unclip`]. Scroll views wrap their content in a pair.
-    Clip { rect: Rect },
+    Clip { #[doc = "Bounds in device pixels."] rect: Rect },
     /// Ends the innermost [`Op::Clip`].
     Unclip,
 }
@@ -199,9 +258,13 @@ impl Op {
 /// Something the pointer, the keyboard and assistive technology can land on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
+    /// Stable identity used to match this item across frames.
     pub id: HitId,
+    /// Bounds in device pixels.
     pub rect: Rect,
+    /// Role.
     pub role: Role,
+    /// Text announced to assistive technology.
     pub label: Arc<str>,
     /// Disabled items are still announced (as disabled), but never selected.
     pub enabled: bool,
@@ -239,6 +302,7 @@ impl Hit {
 /// One frame of a surface.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DisplayList {
+    /// Ops.
     pub ops: Vec<Op>,
     /// Hit items, topmost last.
     pub hits: Vec<Hit>,

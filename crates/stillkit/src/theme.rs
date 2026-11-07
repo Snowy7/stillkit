@@ -49,6 +49,7 @@ pub enum Style {
 }
 
 impl Style {
+    /// All.
     pub const ALL: [Self; 5] = [
         Self::Liquid,
         Self::OneUi,
@@ -57,6 +58,7 @@ impl Style {
         Self::Mono,
     ];
 
+    /// Name.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Liquid => "liquid",
@@ -69,8 +71,11 @@ impl Style {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Scheme.
 pub enum Scheme {
+    /// Light.
     Light,
+    /// Dark.
     Dark,
 }
 
@@ -93,14 +98,19 @@ pub struct Palette {
     pub card: Rgba,
     /// A quieter well (a text field, a segmented control's track).
     pub well: Rgba,
+    /// Separator.
     pub separator: Rgba,
+    /// Accent.
     pub accent: Rgba,
     /// Text and glyphs on an accent fill.
     pub on_accent: Rgba,
     /// The accent as a wash (tinted buttons, a selected row).
     pub accent_wash: Rgba,
+    /// Destructive.
     pub destructive: Rgba,
+    /// Success.
     pub success: Rgba,
+    /// Warning.
     pub warning: Rgba,
     /// The surface's own fill where there is no glass (and the glass's tint).
     pub surface: Rgba,
@@ -108,11 +118,13 @@ pub struct Palette {
     pub elevated: Rgba,
     /// Washes over a hovered and a pressed control.
     pub hover: Rgba,
+    /// Pressed.
     pub pressed: Rgba,
     /// A switch's or slider's knob.
     pub knob: Rgba,
     /// The overlay scrollbar's thumb.
     pub scrollbar: Rgba,
+    /// Shadow.
     pub shadow: Rgba,
 }
 
@@ -121,6 +133,7 @@ pub struct Palette {
 pub enum TextRole {
     /// Hero values (a clock, a temperature in a large widget).
     LargeTitle,
+    /// Title1.
     Title1,
     /// Panel titles.
     Title2,
@@ -141,6 +154,7 @@ pub enum TextRole {
 }
 
 impl TextRole {
+    /// All.
     pub const ALL: [Self; 10] = [
         Self::LargeTitle,
         Self::Title1,
@@ -158,7 +172,9 @@ impl TextRole {
 /// One role's type, design px.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Font {
+    /// Size.
     pub size: f32,
+    /// Weight.
     pub weight: u16,
     /// Extra space per character (negative tightens).
     pub tracking: f32,
@@ -167,12 +183,16 @@ pub struct Font {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Type ramp.
 pub struct TypeRamp {
+    /// Family.
     pub family: Arc<str>,
+    /// Roles.
     pub roles: [Font; 10],
 }
 
 impl TypeRamp {
+    /// Font.
     pub fn font(&self, role: TextRole) -> Font {
         self.roles[role as usize]
     }
@@ -210,15 +230,19 @@ pub struct Metrics {
     pub row_single: f32,
     /// A button's height.
     pub control: f32,
+    /// Control small.
     pub control_small: f32,
     /// A row's or a button's glyph.
     pub icon: f32,
+    /// Icon small.
     pub icon_small: f32,
+    /// Icon large.
     pub icon_large: f32,
     /// Smallest pointer target.
     pub hit: f32,
     /// The overlay scrollbar's thickness and its inset from the viewport's edge.
     pub scrollbar: f32,
+    /// Scrollbar inset.
     pub scrollbar_inset: f32,
 }
 
@@ -249,8 +273,11 @@ impl Radii {
 /// `color` turns all of a theme's shadows off.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Elevation {
+    /// Spread.
     pub spread: f32,
+    /// Drop.
     pub drop: f32,
+    /// Color.
     pub color: Rgba,
 }
 
@@ -278,9 +305,13 @@ pub enum ShadowLevel {
 /// and in el, device px in [`crate::Op::SoftShadow`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SoftShadow {
+    /// Blur.
     pub blur: f32,
+    /// Offset.
     pub offset: (f32, f32),
+    /// Spread.
     pub spread: f32,
+    /// Color.
     pub color: Rgba,
 }
 
@@ -289,9 +320,13 @@ pub struct SoftShadow {
 /// 0.45 in dark ones), so one colour tunes, and one switch clears, every level.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShadowLayer {
+    /// Blur.
     pub blur: f32,
+    /// Vertical coordinate.
     pub y: f32,
+    /// Spread.
     pub spread: f32,
+    /// Strength.
     pub strength: f32,
 }
 
@@ -299,6 +334,7 @@ impl ShadowLayer {
     /// No shadow (the second layer of a one-layer level).
     pub const NONE: Self = Self { blur: 0.0, y: 0.0, spread: 0.0, strength: 0.0 };
 
+    /// Creates a new instance.
     pub const fn new(blur: f32, y: f32, spread: f32, strength: f32) -> Self {
         Self { blur, y, spread, strength }
     }
@@ -309,15 +345,22 @@ impl ShadowLayer {
 /// ([`Theme::shadows`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shadows {
+    /// Card.
     pub card: [ShadowLayer; 2],
+    /// Raised.
     pub raised: [ShadowLayer; 2],
+    /// Menu.
     pub menu: [ShadowLayer; 2],
+    /// Popover.
     pub popover: [ShadowLayer; 2],
+    /// Dialog.
     pub dialog: [ShadowLayer; 2],
+    /// Toast.
     pub toast: [ShadowLayer; 2],
 }
 
 impl Shadows {
+    /// Level.
     pub fn level(&self, level: ShadowLevel) -> &[ShadowLayer; 2] {
         match level {
             ShadowLevel::Card => &self.card,
@@ -343,6 +386,7 @@ pub struct MotionTokens {
     pub scroll: Spring,
     /// How long the scrollbar stays after the last scroll, then fades, in seconds.
     pub scrollbar_idle: f32,
+    /// Scrollbar fade.
     pub scrollbar_fade: f32,
 }
 
@@ -358,16 +402,25 @@ pub struct Theme {
     card_min: f32,
     mixed: bool,
     palettes: [Palette; 2],
+    /// Style.
     pub style: Style,
+    /// Scheme.
     pub scheme: Scheme,
+    /// Color.
     pub color: Palette,
+    /// Font.
     pub font: TypeRamp,
+    /// Metrics.
     pub metrics: Metrics,
+    /// Radius.
     pub radius: Radii,
+    /// Elevation.
     pub elevation: Elevation,
     /// The soft shadows of each [`ShadowLevel`], drawn in `elevation.color`.
     pub shadows: Shadows,
+    /// Motion.
     pub motion: MotionTokens,
+    /// Icons.
     pub icons: IconSet,
     /// Icon stroke per 24 units of icon size (Lucide draws 2; SF-like is lighter).
     pub icon_weight: f32,
@@ -403,6 +456,7 @@ impl Theme {
         }
     }
 
+    /// Dark.
     pub fn dark(&self) -> bool {
         self.scheme == Scheme::Dark
     }
@@ -526,7 +580,9 @@ pub struct Knobs {
     pub clarity: Option<f32>,
     /// Frost in design px (DIPs): 0 is no frost at all.
     pub blur: Option<f32>,
+    /// Refraction.
     pub refraction: Option<f32>,
+    /// Highlight.
     pub highlight: Option<f32>,
 }
 

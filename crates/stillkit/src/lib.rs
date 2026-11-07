@@ -9,6 +9,8 @@
 //! window messages. [`Menu`] is the first component built on it. Window class names come from
 //! [`set_identity`].
 
+#![warn(missing_docs)]
+
 mod a11y;
 pub mod platform;
 mod identity;
@@ -19,6 +21,8 @@ pub mod calendar;
 pub mod chart;
 pub mod color_row;
 pub use platform::current::compose;
+/// Legacy immediate-mode Studio controls; retained for mypaper. Prefer `el` and stillkit-kit.
+#[doc(hidden)]
 pub mod controls;
 pub mod damage;
 pub mod el;

@@ -16,13 +16,18 @@ use crate::geom::Rect;
 /// Padding on each side.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Insets {
+    /// Top.
     pub top: f32,
+    /// Right.
     pub right: f32,
+    /// Bottom.
     pub bottom: f32,
+    /// Left.
     pub left: f32,
 }
 
 impl Insets {
+    /// All.
     pub const fn all(v: f32) -> Self {
         Self {
             top: v,
@@ -47,8 +52,11 @@ impl Insets {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Align {
     #[default]
+    /// Start.
     Start,
+    /// Center.
     Center,
+    /// End.
     End,
 }
 
@@ -64,16 +72,22 @@ impl Align {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Axis.
 pub enum Axis {
+    /// Row.
     Row,
+    /// Column.
     Column,
 }
 
 /// Hands out boxes one after another along an axis, `gap` apart.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Stack {
+    /// Bounds in device pixels.
     pub rect: Rect,
+    /// Axis.
     pub axis: Axis,
+    /// Gap.
     pub gap: f32,
     /// Where the next box starts.
     pub cursor: f32,
@@ -142,7 +156,9 @@ impl Stack {
 /// A length in a [`split`]: fixed device px, or a share of what the fixed ones leave.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
+    /// Fixed.
     Fixed(f32),
+    /// Fill.
     Fill(f32),
 }
 
@@ -207,6 +223,7 @@ pub enum SizeClass {
 }
 
 impl SizeClass {
+    /// Of.
     pub fn of(width: f32, height: f32) -> Self {
         let side = width.min(height);
         if side < 150.0 {

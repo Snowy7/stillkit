@@ -80,7 +80,9 @@ pub(super) struct Entry {
 pub struct Popup {
     /// The overlay's identity, stable while it stays open.
     pub id: u64,
+    /// Bounds in device pixels.
     pub rect: Rect,
+    /// List.
     pub list: DisplayList,
 }
 

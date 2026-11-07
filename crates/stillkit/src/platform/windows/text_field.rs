@@ -28,6 +28,7 @@ const TIMER_BASE: usize = 0x50000;
 windows::core::imp::define_interface!(TextHost, HostVTable, 0x13e670f5_1a5a_11cf_abeb_00aa00b65ea1);
 impl windows::core::RuntimeName for TextHost {}
 #[repr(C)]
+/// Host vtable.
 pub struct HostVTable {
     base: ITextHost2_Vtbl,
 }
@@ -108,6 +109,7 @@ impl PartialEq for TextField {
 }
 
 impl TextField {
+    /// Creates a new instance.
     pub fn new(window: HWND, rect: Rect, multiline: bool, size: f32, color: Rgba) -> Result<Self> {
         let mut format = CHARFORMATW {
             cbSize: size_of::<CHARFORMATW>() as u32,
@@ -193,6 +195,7 @@ impl TextField {
         (state.caret_shown.get() && h > 0)
             .then(|| Rect::new(x as f32, y as f32, w.max(1) as f32, h as f32))
     }
+    /// Revision.
     pub fn revision(&self) -> u64 {
         self.inner.state.revision.get()
     }
@@ -217,6 +220,7 @@ impl TextField {
         self.send(EM_SETCHARFORMAT, WPARAM(SCF_ALL as usize), format_ptr);
         self.inner.state.invalidate();
     }
+    /// Sets rect.
     pub fn set_rect(&self, rect: Rect) {
         let rect = winrect(rect);
         if self.inner.state.rect.replace(rect) != rect {
@@ -229,6 +233,7 @@ impl TextField {
             self.inner.state.invalidate();
         }
     }
+    /// Sets text.
     pub fn set_text(&self, text: &str) -> Result<()> {
         // SAFETY: valid, terminated string for the synchronous call.
         unsafe {
@@ -236,6 +241,7 @@ impl TextField {
         }
         Ok(())
     }
+    /// Text content.
     pub fn text(&self) -> Result<String> {
         let mut value = BSTR::new();
         // SAFETY: BSTR out parameter is owned by `value` after the call.
@@ -266,6 +272,7 @@ impl TextField {
         unsafe { self.inner.services.OnTxInPlaceActivate(&mut self.inner.state.rect.get())?; }
         Ok(())
     }
+    /// The hit with keyboard focus.
     pub fn focus(&self) {
         self.inner.state.allow_focus.set(true);
         // SAFETY: the field's surface lives throughout the field's use.
@@ -280,6 +287,7 @@ impl TextField {
         }
         self.send(WM_SETFOCUS, WPARAM(0), LPARAM(0));
     }
+    /// Blur.
     pub fn blur(&self) {
         self.send(WM_KILLFOCUS, WPARAM(0), LPARAM(0));
         // SAFETY: paired with activation; kill every field timer as it stops receiving input.

@@ -52,17 +52,17 @@ const WM_MOUSELEAVE: u32 = 0x02A3;
 pub enum Kind {
     /// A topmost popup: menus, flyouts. With `activate` it takes the keyboard focus when
     /// asked ([`Surface::take_focus`]); without, clicking it never activates it (submenus).
-    Popup { activate: bool },
+    Popup { #[doc = "Whether the popup requests activation."] activate: bool },
     /// A floating bar: topmost and never activated. Its app-bar reservation
     /// (`SHAppBarMessage`) belongs to the bar (N2).
     Bar,
     /// Desktop-layer surface. The name is retained for callers, but this is a top-level
     /// layered tool window anchored immediately above `parent` (Progman), never a WS_CHILD.
     /// Raised desktops do not display ULW children, and WGC cannot exclude child windows.
-    DesktopChild { parent: HWND },
+    DesktopChild { #[doc = "Native parent handle retained for desktop surface compatibility."] parent: HWND },
     /// A normal app window (Studio): resizable, activated, in the taskbar, drawn opaque.
     /// `min` is its smallest client size in design pixels. See [`crate::app_window`].
-    App { min: (u32, u32) },
+    App { #[doc = "Minimum logical window size."] min: (u32, u32) },
 }
 
 /// Identifies a surface in [`Event`]s.
@@ -70,9 +70,13 @@ pub enum Kind {
 pub struct SurfaceId(isize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Button.
 pub enum Button {
+    /// Left.
     Left,
+    /// Right.
     Right,
+    /// Middle.
     Middle,
 }
 
@@ -90,13 +94,19 @@ pub struct Pointer {
 pub enum Event {
     /// A temporary animation requested another frame; no timer remains once it settles.
     Frame,
+    /// Move.
     Move(Pointer),
+    /// Leave.
     Leave,
     /// Positive delta scrolls up; position uses the same coordinates as other pointer events.
     Wheel(Pointer, i16),
+    /// Capture lost.
     CaptureLost,
+    /// Press.
     Press(Pointer, Button),
+    /// Release.
     Release(Pointer, Button),
+    /// Double click.
     DoubleClick(Pointer, Button),
     /// A key went down (a virtual-key code).
     Key(u16),
@@ -108,8 +118,11 @@ pub enum Event {
     Invoke(HitId),
     /// Assistive technology moved the focus to a hit item.
     Focus(HitId),
+    /// Dpi changed.
     DpiChanged(u32),
+    /// Visibility changed.
     VisibilityChanged,
+    /// Cancelled.
     Cancelled,
     /// Windowless RichEdit changed text, selection or caret.
     TextChanged,
@@ -505,10 +518,12 @@ impl Surface {
         }
     }
 
+    /// Stable identity used to match this item across frames.
     pub fn id(&self) -> SurfaceId {
         self.shared.id
     }
 
+    /// Hwnd.
     pub fn hwnd(&self) -> HWND {
         self.hwnd
     }
@@ -1011,12 +1026,14 @@ impl Surface {
         Ok(())
     }
 
+    /// Hide.
     pub fn hide(&self) {
         // SAFETY: our own window.
         let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
         self.close_glass();
     }
 
+    /// Whether visible.
     pub fn is_visible(&self) -> bool {
         // SAFETY: a query on our own window.
         unsafe { IsWindowVisible(self.hwnd) }.as_bool()

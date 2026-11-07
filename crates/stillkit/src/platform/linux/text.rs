@@ -11,6 +11,7 @@ pub struct Text {
     italic_loaded: bool,
 }
 impl Text {
+    /// Creates a new instance.
     pub fn new() -> anyhow::Result<Self> {
         let mut db = cosmic_text::fontdb::Database::new();
         // Fontconfig supplies the user's fallback faces; Inter guarantees a real 600 weight.
@@ -94,6 +95,7 @@ impl Text {
         }
         &self.cache[&key]
     }
+    /// Measures the text in device pixels.
     pub fn measure(&mut self, text: &str, style: &TextStyle) -> (f32, f32) {
         if text.chars().count() == 1
             && text
@@ -109,19 +111,23 @@ impl Text {
             (w.max(r.line_w), h.max(r.line_top + r.line_height))
         })
     }
+    /// Releases cached native text layouts.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
     }
+    /// Sets capacity.
     pub fn set_capacity(&mut self, capacity: usize) {
         self.capacity = capacity.max(1);
         self.cache.clear();
     }
+    /// Has family.
     pub fn has_family(&self, name: &str) -> bool {
         self.fonts
             .db()
             .faces()
             .any(|f| f.families.iter().any(|(n, _)| n == name))
     }
+    /// Families.
     pub fn families(&self) -> Vec<String> {
         let mut names: Vec<_> = self
             .fonts
@@ -133,6 +139,7 @@ impl Text {
         names.dedup();
         names
     }
+    /// Fit.
     pub fn fit(&mut self, text: &str, style: &TextStyle, width: f32) -> Arc<str> {
         if self.measure(text, style).0 <= width {
             return text.into();
@@ -147,6 +154,7 @@ impl Text {
         }
         "".into()
     }
+    /// Lines.
     pub fn lines(
         &mut self,
         text: &str,

@@ -5,15 +5,18 @@
 /// uses; the gallery's text lab (`docs/media/native/kit-text.png`) compares the others.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextQuality {
+    /// Gamma.
     pub gamma: f32,
     /// Grayscale enhanced contrast: thickens the coverage of light strokes.
     pub contrast: f32,
+    /// Mode.
     pub mode: TextMode,
     /// Hint vertical stems and heights to whole pixels.
     pub grid_fit: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Text mode.
 pub enum TextMode {
     /// Subpixel positions, antialiased in both directions (DirectWrite's default above 12 px).
     NaturalSymmetric,
@@ -40,8 +43,11 @@ impl Default for TextQuality {
 /// A premultiplied BGRA image, top-down, `width * 4` bytes per row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Image {
+    /// Width in device pixels.
     pub width: u32,
+    /// Height in device pixels.
     pub height: u32,
+    /// Pixels.
     pub pixels: Vec<u8>,
 }
 

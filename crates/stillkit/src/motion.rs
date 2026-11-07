@@ -9,8 +9,11 @@ use std::time::{Duration, Instant};
 /// A damped spring (m·x'' + c·x' + k·(x − 1) = 0), released from 0 at rest toward 1.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spring {
+    /// Mass.
     pub mass: f32,
+    /// Stiffness.
     pub stiffness: f32,
+    /// Damping.
     pub damping: f32,
 }
 
@@ -22,6 +25,7 @@ impl Spring {
     /// motion.ts `spring-bouncy`.
     pub const BOUNCY: Self = Self::new(1.0, 260.0, 13.0);
 
+    /// Creates a new instance.
     pub const fn new(mass: f32, stiffness: f32, damping: f32) -> Self {
         Self {
             mass,
@@ -155,7 +159,9 @@ impl Spring {
 /// A value moving from `from` to `to` along a spring.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tween {
+    /// From.
     pub from: f32,
+    /// To.
     pub to: f32,
     spring: Spring,
     start: Instant,
@@ -174,6 +180,7 @@ impl Tween {
         }
     }
 
+    /// Current value.
     pub fn value(&self, now: Instant) -> f32 {
         if self.done(now) {
             return self.to;
@@ -182,6 +189,7 @@ impl Tween {
         self.from + (self.to - self.from) * self.spring.at(t)
     }
 
+    /// Done.
     pub fn done(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.start) >= self.duration
     }

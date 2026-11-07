@@ -32,6 +32,7 @@ impl PartialEq for TextField {
 thread_local! { static FOCUSED: RefCell<Weak<RefCell<State>>> = const { RefCell::new(Weak::new()) }; }
 
 impl TextField {
+    /// Creates a new instance.
     pub fn new(window: &Surface, rect: Rect, multiline: bool, size: f32, color: Rgba) -> anyhow::Result<Self> {
         Ok(Self(Rc::new(RefCell::new(State {
             window: window.id(),
@@ -43,12 +44,15 @@ impl TextField {
             multiline,
         }))))
     }
+    /// Revision.
     pub fn revision(&self) -> u64 {
         self.0.borrow().revision
     }
+    /// Text content.
     pub fn text(&self) -> anyhow::Result<String> {
         Ok(self.0.borrow().text.clone())
     }
+    /// Sets text.
     pub fn set_text(&self, text: &str) -> anyhow::Result<()> {
         let mut s = self.0.borrow_mut();
         if s.text != text {
@@ -58,18 +62,22 @@ impl TextField {
         }
         Ok(())
     }
+    /// Sets style.
     pub fn set_style(&self, style: &TextStyle, color: Rgba) {
         let mut s = self.0.borrow_mut();
         s.style = style.clone();
         s.color = color;
         s.revision += 1;
     }
+    /// Sets rect.
     pub fn set_rect(&self, rect: Rect) {
         self.0.borrow_mut().rect = rect;
     }
+    /// The hit with keyboard focus.
     pub fn focus(&self) {
         FOCUSED.with_borrow_mut(|f| *f = Rc::downgrade(&self.0));
     }
+    /// Blur.
     pub fn blur(&self) {
         FOCUSED.with_borrow_mut(|f| {
             if f.ptr_eq(&Rc::downgrade(&self.0)) {
@@ -77,9 +85,11 @@ impl TextField {
             }
         });
     }
+    /// Caret.
     pub fn caret(&self) -> Option<Rect> {
         None
     }
+    /// Multiline.
     pub fn multiline(&self) -> bool {
         self.0.borrow().multiline
     }

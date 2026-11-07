@@ -30,13 +30,17 @@ pub mod text;
 pub mod text_field;
 pub mod timing;
 mod view;
+/// Layered app services.
 pub mod layered_app {}
+/// Compose services.
 pub mod compose {}
 /// Portable process identity.
 pub mod identity {
     pub use crate::identity::{Identity, set_identity};
 }
+/// Watch services.
 pub mod watch {
+    /// File watch.
     pub struct FileWatch;
 }
 pub use render::{Image, Ui};

@@ -18,6 +18,7 @@ pub struct Ticker {
 }
 
 impl Ticker {
+    /// Creates a new instance.
     pub fn new() -> Result<Self> {
         // SAFETY: creates an unnamed timer owned by this struct.
         let timer = unsafe {

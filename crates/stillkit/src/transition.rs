@@ -5,25 +5,35 @@ use std::time::{Duration, Instant};
 use crate::Spring;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Easing.
 pub enum Easing {
+    /// Bezier.
     Bezier([f32; 4]),
+    /// Spring.
     Spring(Spring),
     /// A named spring fitted to a configured duration; explicit physical springs keep their
     /// natural duration instead. `settle` is computed once when the configuration is resolved.
     TimedSpring {
+        /// Spring.
         spring: Spring,
+        /// Settle.
         settle: f32,
     },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Timing.
 pub struct Timing {
+    /// Whether the control accepts interaction.
     pub enabled: bool,
+    /// Duration.
     pub duration: Duration,
+    /// Easing.
     pub easing: Easing,
 }
 
 impl Timing {
+    /// Creates a new instance.
     pub fn new(enabled: bool, milliseconds: f32, easing: Easing) -> Self {
         let duration = match easing {
             Easing::Spring(spring) => Duration::from_secs_f32(spring.settle(0.001)),
@@ -36,6 +46,7 @@ impl Timing {
         }
     }
 
+    /// Start.
     pub fn start(self, from: f32, to: f32, now: Instant) -> Transition {
         Transition {
             from,
@@ -47,18 +58,22 @@ impl Timing {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Transition.
 pub struct Transition {
     from: f32,
     to: f32,
+    /// Timing.
     pub timing: Timing,
     start: Instant,
 }
 
 impl Transition {
+    /// Done.
     pub fn done(self, now: Instant) -> bool {
         !self.timing.enabled || now.saturating_duration_since(self.start) >= self.timing.duration
     }
 
+    /// Current value.
     pub fn value(self, now: Instant) -> f32 {
         if self.done(now) {
             return self.to;
@@ -77,6 +92,7 @@ impl Transition {
     }
 }
 
+/// Bezier at.
 pub fn bezier_at([x1, y1, x2, y2]: [f32; 4], x: f32) -> f32 {
     if x <= 0.0 {
         return 0.0;

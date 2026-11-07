@@ -23,9 +23,13 @@ pub trait Backdrop {
         }
         opened
     }
+    /// Style.
     fn style(&self, _client: WindowId, _style: &GlassStyle) {}
+    /// Place.
     fn place(&self, client: WindowId, shape: Shape, radius: f32);
+    /// Material.
     fn material(&self, client: WindowId, material: &GlassMaterial);
+    /// Close.
     fn close(&self, client: WindowId);
 }
 
