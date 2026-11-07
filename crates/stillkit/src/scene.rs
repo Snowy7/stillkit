@@ -171,10 +171,37 @@ pub struct Hit {
     pub rect: Rect,
     pub role: Role,
     pub label: Arc<str>,
-    /// Disabled items are still announced, but never selected.
+    /// Disabled items are still announced (as disabled), but never selected.
     pub enabled: bool,
+    /// It does something: only actionable items take hover, press, focus and activation, and
+    /// offer assistive technology their actions. A label with a role is enabled but not
+    /// actionable; a disabled control is neither.
+    pub actionable: bool,
     /// For check items: whether the mark is on.
     pub checked: Option<bool>,
+}
+
+impl Hit {
+    /// A hit item that is actionable exactly when it is enabled (every control). Set
+    /// `actionable: false` on an enabled one for plain announced content.
+    pub fn new(
+        id: HitId,
+        rect: Rect,
+        role: Role,
+        label: impl Into<Arc<str>>,
+        enabled: bool,
+        checked: Option<bool>,
+    ) -> Self {
+        Self {
+            id,
+            rect,
+            role,
+            label: label.into(),
+            enabled,
+            actionable: enabled,
+            checked,
+        }
+    }
 }
 
 /// One frame of a surface.

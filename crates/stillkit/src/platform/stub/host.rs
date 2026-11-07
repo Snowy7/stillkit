@@ -9,3 +9,7 @@ pub fn shift_down() -> bool {
 pub fn wait() {
     unimplemented!("native event wait")
 }
+/// No system setting to read: full motion.
+pub fn reduced_motion() -> bool {
+    false
+}

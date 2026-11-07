@@ -168,6 +168,7 @@ impl<'a> Frame<'a> {
             role,
             label: label.into(),
             enabled,
+            actionable: enabled,
             checked,
         });
     }
@@ -794,6 +795,7 @@ impl<'a> Frame<'a> {
             role,
             label: label.into(),
             enabled: row.enabled,
+            actionable: row.enabled,
             checked,
         };
         if row.id != NONE {

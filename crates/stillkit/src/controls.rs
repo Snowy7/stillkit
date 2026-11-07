@@ -600,6 +600,7 @@ impl<'a, A: Clone> Builder<'a, A> {
             role,
             label: label.into(),
             enabled: true,
+            actionable: true,
             checked,
         });
         if self.input.focus == Some(key) {

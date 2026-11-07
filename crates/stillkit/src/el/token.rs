@@ -2,7 +2,7 @@
 //! the theme the runtime holds, so a new look restyles every view without code changes. Make
 //! your own with `Len::Theme(|t| ..)` and `Paint::Theme(|t| ..)`.
 
-use super::{Len, Paint};
+use super::{Len, Motion, Paint};
 
 // ---- Lengths (design px) -------------------------------------------------------------------
 
@@ -10,7 +10,7 @@ use super::{Len, Paint};
 pub const PAD: Len = Len::Theme(|t| t.metrics.pad);
 /// The space between a surface's blocks.
 pub const GAP: Len = Len::Theme(|t| t.metrics.gap);
-/// A menu or list item's height.
+/// The space between the items of a list or a row of controls (a gap, not a height).
 pub const ITEM: Len = Len::Theme(|t| t.metrics.item);
 /// A list row's height (two lines).
 pub const ROW: Len = Len::Theme(|t| t.metrics.row);
@@ -47,3 +47,12 @@ pub const ACCENT: Paint = Paint::Theme(|t| t.color.accent);
 pub const ON_ACCENT: Paint = Paint::Theme(|t| t.color.on_accent);
 /// A switch's or slider's knob.
 pub const KNOB: Paint = Paint::Theme(|t| t.color.knob);
+
+// ---- Motion (springs, [`El::motion`](super::El::motion)) -----------------------------------
+
+/// Layout moves and morphs.
+pub const MOTION_LAYOUT: Motion = Motion::Theme(|t| t.motion.layout);
+/// A tight follow of a press or a toggle (a switch's knob).
+pub const MOTION_INTERACTIVE: Motion = Motion::Theme(|t| t.motion.interactive);
+/// Opening, closing, entering and exiting.
+pub const MOTION_OPEN: Motion = Motion::Theme(|t| t.motion.open);

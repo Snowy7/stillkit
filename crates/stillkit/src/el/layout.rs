@@ -42,6 +42,8 @@ pub(crate) struct Laid {
     pub hit: HitId,
     /// Device pixels, in the surface.
     pub rect: Rect,
+    /// The parent's place in the same list (`None` for the root).
+    pub parent: Option<usize>,
 }
 
 /// The retained Taffy tree of one runtime.
@@ -142,7 +144,6 @@ impl Layout {
         }
         // Absolute rects: each node's location is relative to its parent's.
         let mut origin: Vec<(f32, f32)> = Vec::with_capacity(order.len());
-        let mut parents: Vec<Option<usize>> = Vec::with_capacity(order.len());
         let mut laid = Vec::with_capacity(order.len());
         let mut stack: Vec<(NodeId, usize)> = Vec::new();
         for (i, &(id, node)) in order.iter().enumerate() {
@@ -151,7 +152,6 @@ impl Layout {
                 stack.pop();
             }
             let at = stack.last().map(|&(_, i)| i);
-            parents.push(at);
             let l = self.taffy.layout(node).copied().unwrap_or_default();
             let base = at.map_or((0.0, 0.0), |p| origin[p]);
             let (x, y) = (base.0 + l.location.x, base.1 + l.location.y);
@@ -160,6 +160,7 @@ impl Layout {
                 id,
                 hit: hit_of(id),
                 rect: Rect::new(x, y, l.size.width, l.size.height),
+                parent: at,
             });
             stack.push((node, i));
         }

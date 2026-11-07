@@ -479,6 +479,7 @@ pub fn view_animated<C>(
             },
             label: item.label().into(),
             enabled: selectable,
+            actionable: selectable,
             checked,
         });
     }
@@ -894,6 +895,7 @@ impl<C: Clone> Menu<C> {
                         role: Role::MenuItem,
                         label: item.label().into(),
                         enabled: item.selectable(),
+                        actionable: item.selectable(),
                         checked: None,
                     })
                     .collect();

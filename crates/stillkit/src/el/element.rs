@@ -7,7 +7,7 @@ use std::sync::Arc;
 use accesskit::Role;
 
 use crate::icons::Icon;
-use crate::{Frame, HitId, Image, Rect, Rgba, TextRole, Theme};
+use crate::{Frame, HitId, Image, Rect, Rgba, Spring, TextRole, Theme};
 
 /// Names an element among its siblings, across frames: for the keyed diff, hit ids,
 /// accessibility, scripts and tests ([`super::Runtime::find`]).
@@ -58,6 +58,87 @@ impl From<Rgba> for Paint {
     }
 }
 
+/// The spring an element animates along ([`El::motion`]): fixed, or one of the theme's
+/// motion tokens ([`super::token::MOTION_LAYOUT`]...).
+#[derive(Clone, Copy)]
+pub enum Motion {
+    Spring(Spring),
+    Theme(fn(&Theme) -> Spring),
+}
+
+impl Motion {
+    pub fn resolve(self, theme: &Theme) -> Spring {
+        match self {
+            Self::Spring(s) => s,
+            Self::Theme(read) => read(theme),
+        }
+    }
+}
+
+impl From<Spring> for Motion {
+    fn from(s: Spring) -> Self {
+        Self::Spring(s)
+    }
+}
+
+/// How an element comes and goes ([`El::transition`]): the pose it enters from and exits
+/// to. Every transition fades; `scale` and `slide` also move it (not under reduced motion).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transition {
+    /// Opacity when away.
+    pub(crate) opacity: f32,
+    /// Scale about its centre when away.
+    pub(crate) scale: f32,
+    /// Offset when away, design px.
+    pub(crate) slide: (f32, f32),
+}
+
+impl Transition {
+    /// Fades in and out.
+    pub const fn fade() -> Self {
+        Self {
+            opacity: 0.0,
+            scale: 1.0,
+            slide: (0.0, 0.0),
+        }
+    }
+
+    /// Fades while growing from (and shrinking to) `scale` of its size, about its centre.
+    pub const fn scale(scale: f32) -> Self {
+        Self {
+            scale,
+            ..Self::fade()
+        }
+    }
+
+    /// Fades while sliding in from (and out to) `(x, y)` design px away.
+    pub const fn slide(x: f32, y: f32) -> Self {
+        Self {
+            slide: (x, y),
+            ..Self::fade()
+        }
+    }
+}
+
+/// What a handler can ask of the frame its change lands in ([`El::on_press_with`]).
+#[derive(Default)]
+pub struct Tx {
+    pub(crate) instant: bool,
+    pub(crate) theme: Option<Theme>,
+}
+
+impl Tx {
+    /// Applies this change with no motion: everything lands on its target at once.
+    pub fn instant(&mut self) {
+        self.instant = true;
+    }
+
+    /// A new look for the whole view; colours spring across where elements have motion.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = Some(theme);
+    }
+}
+
 /// Where children sit across a row or column (CSS `align-items`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align {
@@ -96,8 +177,8 @@ pub(crate) enum Flow {
     Grid(u16),
 }
 
-/// A press handler ([`El::on_press`]).
-pub(crate) type Press<S> = Box<dyn Fn(&mut S)>;
+/// A press handler ([`El::on_press`], [`El::on_press_with`]).
+pub(crate) type Press<S> = Box<dyn Fn(&mut S, &mut Tx)>;
 /// A drag handler ([`El::on_drag`]): the pointer's place across the box, 0..=1 each way.
 pub(crate) type Drag<S> = Box<dyn Fn(&mut S, f32, f32)>;
 
@@ -142,6 +223,14 @@ pub(crate) struct Look {
     pub opacity: f32,
 }
 
+/// How an element animates (`motion` and `instant` reach its whole subtree).
+#[derive(Default, Clone, Copy)]
+pub(crate) struct Anim {
+    pub motion: Option<Motion>,
+    pub instant: bool,
+    pub transition: Option<Transition>,
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct Sem {
     pub role: Option<Role>,
@@ -159,6 +248,7 @@ pub struct El<S> {
     pub(crate) sizing: Sizing,
     pub(crate) look: Look,
     pub(crate) sem: Sem,
+    pub(crate) anim: Anim,
     pub(crate) on_press: Option<Press<S>>,
     pub(crate) on_drag: Option<Drag<S>>,
     pub(crate) children: Vec<El<S>>,
@@ -177,6 +267,7 @@ fn new<S>(what: What) -> El<S> {
             opacity: 1.0,
         },
         sem: Sem::default(),
+        anim: Anim::default(),
         on_press: None,
         on_drag: None,
         children: Vec::new(),
@@ -428,17 +519,57 @@ impl<S> El<S> {
         self
     }
 
+    // ---- Motion ---------------------------------------------------------------------------
+
+    /// Animates the element and everything in it along `motion` (a [`Spring`] or a theme
+    /// token like [`super::token::MOTION_INTERACTIVE`]) whenever a view run or a new theme
+    /// gives it new targets: each edge of its box on its own (a stationary edge never moves),
+    /// its fill, text and icon colour (in OKLab, without overshoot; ink leads its fill),
+    /// opacity, radius and shadow. Children ride along their parent; a child sets its own
+    /// motion to override. Nothing animates on the first frame.
+    pub fn motion(mut self, motion: impl Into<Motion>) -> Self {
+        self.anim.motion = Some(motion.into());
+        self
+    }
+
+    /// [`motion`](Self::motion) with the theme's layout spring.
+    pub fn animate(self) -> Self {
+        self.motion(super::token::MOTION_LAYOUT)
+    }
+
+    /// Changes in this subtree land at once, whatever motion an ancestor gives it.
+    pub fn instant(mut self) -> Self {
+        self.anim.instant = true;
+        self
+    }
+
+    /// How the element enters when it appears after the first frame, and exits: it stays
+    /// drawn, out of hit testing, until its exit settles, and coming back mid-exit reverses
+    /// smoothly. It moves along its own motion, or the theme's open spring.
+    pub fn transition(mut self, transition: Transition) -> Self {
+        self.anim.transition = Some(transition);
+        self
+    }
+
     // ---- Handlers -------------------------------------------------------------------------
 
     /// Runs on `&mut S` between frames after a click (release over the element), Enter or
     /// Space while focused, or assistive technology's invoke. The view then runs again.
     pub fn on_press(mut self, handler: impl Fn(&mut S) + 'static) -> Self {
+        self.on_press = Some(Box::new(move |s, _| handler(s)));
+        self
+    }
+
+    /// [`on_press`](Self::on_press) with the frame's [`Tx`]: `tx.instant()` lands the change
+    /// with no motion, `tx.set_theme(..)` switches the look.
+    pub fn on_press_with(mut self, handler: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
         self.on_press = Some(Box::new(handler));
         self
     }
 
     /// Runs on `&mut S` while the pointer is pressed on the element, with the pointer's place
-    /// across its box (`0.0..=1.0` each way): sliders.
+    /// across its box (`0.0..=1.0` each way): sliders. Its changes land at once (a drag
+    /// follows the pointer), with no motion.
     pub fn on_drag(mut self, handler: impl Fn(&mut S, f32, f32) + 'static) -> Self {
         self.on_drag = Some(Box::new(handler));
         self

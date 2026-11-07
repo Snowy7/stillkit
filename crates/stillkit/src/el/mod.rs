@@ -33,6 +33,7 @@
 //! - [`run`] hosts a runtime in a window, and doubles as the agent tooling (`--snap`,
 //!   `--tree`, `--script`).
 
+mod animate;
 mod element;
 mod host;
 mod json;
@@ -42,7 +43,9 @@ mod runtime;
 pub mod token;
 
 pub use element::{
-    Align, El, Justify, Key, Len, Paint, Painter, col, el, grid, icon, image, paint, row, text,
+    Align, El, Justify, Key, Len, Motion, Paint, Painter, Transition, Tx, col, el, grid, icon, image,
+    paint, row, text,
 };
+pub use crate::platform::current::host::reduced_motion;
 pub use host::{App, Input, Script, run};
 pub use runtime::{Change, Runtime, Shown, Snapshot};
