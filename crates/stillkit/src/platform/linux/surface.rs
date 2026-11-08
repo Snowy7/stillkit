@@ -308,6 +308,7 @@ pub(super) fn wait() {
                 libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: timer.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: r.state.a11y.fd(), events: libc::POLLIN, revents: 0 },
+                libc::pollfd { fd: super::wake::waker_fd().unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             ];
             fds.extend(r.state.windows.values().filter_map(|n| {
                 let fd = n.a11y.fd();
@@ -335,10 +336,16 @@ pub(super) fn wait() {
                 r.queue.dispatch_pending(&mut r.state)?;
                 return Ok(());
             }
+            if fds[3].revents & libc::POLLIN != 0 {
+                super::wake::woken();
+                r.queue.dispatch_pending(&mut r.state)?;
+                return Ok(());
+            }
         }
     }) {
         log::error!("Wayland wait: {e}");
     }
+    crate::waker::rearm();
 }
 pub(super) fn screen_size() -> (i32, i32) {
     runtime(|r| Ok(r.state.screen_size)).unwrap_or((1920, 1080))

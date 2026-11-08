@@ -425,7 +425,10 @@ an animation (Add invoked through UI Automation, so no input or focus) settled: 
 0 ms CPU, 8.0 MB private (the UI Automation adapter now has a tree), and no frame thread left.
 
 Apps with their own loop host a `Runtime` directly: feed `handle(&event)`, call `frame(dt)`,
-and `present(&mut surface, origin)` when it returns `true`.
+and `present(&mut surface, origin)` when it returns `true`. Workers wake such a loop with
+`stillkit::waker()` (made on the UI thread; `Waker::wake` from any thread ends the current or
+next `host::wait`, coalesced into one native message: an `NSEvent` on macOS, a thread message on
+Windows, an eventfd beside the display on Linux). Drain your channels after every wait.
 
 ## Agent tooling
 
