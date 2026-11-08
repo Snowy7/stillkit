@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `Runtime::touch`: host bookkeeping on the state (draining outgoing requests) without running the view.
 - `El::cascade_ink`: opt-in ink inheritance, so labels and icons follow their control's colour and hover look.
 - el file drops: `on_drop_files` and a `dropping` state look on the innermost target.
 - File drops: `Event::FilesHover`/`FilesLeave`/`FilesDropped` and `take_dropped_files()` (macOS with hover feedback; Windows on drop).

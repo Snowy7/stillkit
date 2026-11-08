@@ -161,3 +161,16 @@ fn a_label_with_a_role_is_announced_enabled_but_takes_no_focus_or_hover() {
     rt.frame(FRAME);
     assert!(rt.presented("go").unwrap().focused, "and only on it");
 }
+
+#[test]
+fn touching_the_state_runs_no_view() {
+    use std::time::Duration;
+    let theme = stillkit::Theme::new(stillkit::Style::Solid, stillkit::Scheme::Dark, stillkit::theme::SYSTEM_BLUE);
+    let mut rt = stillkit::el::Runtime::new(vec![1, 2, 3], |s: &Vec<i32>| stillkit::el::text(format!("{}", s.len())), theme, (100, 40), 1.0).unwrap();
+    rt.frame(Duration::ZERO);
+    let runs = rt.view_runs();
+    let drained: Vec<i32> = rt.touch(|s| std::mem::take(s));
+    rt.frame(Duration::from_millis(16));
+    assert_eq!(drained, [1, 2, 3]);
+    assert_eq!(rt.view_runs(), runs, "touch never runs the view");
+}
