@@ -11,7 +11,7 @@ use std::sync::Arc;
 use taffy::Overflow;
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent, LengthPercentage,
-    LengthPercentageAuto, NodeId, Position, Style, TaffyTree, fr, repeat,
+    FlexWrap, LengthPercentageAuto, NodeId, Position, Style, TaffyTree, fr, repeat,
 };
 
 use super::element::{Align, Axis, Dim, El, Flow, Justify, Len, What};
@@ -422,6 +422,11 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
         }),
         ..Style::default()
     };
+    if z.flow_wrap {
+        style.flex_wrap = FlexWrap::Wrap;
+        // Lines pack at the start, `gap` apart, however tall the box is.
+        style.align_content = taffy::AlignContent::FLEX_START;
+    }
     if let Some(gap) = z.gap {
         style.gap = taffy::Size {
             width: len(gap),

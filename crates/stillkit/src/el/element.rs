@@ -580,6 +580,8 @@ pub(crate) struct Sizing {
     pub align: Option<Align>,
     pub justify: Option<Justify>,
     pub absolute: Option<(Len, Len)>,
+    /// Children flow onto further lines when they overflow the main axis.
+    pub flow_wrap: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -726,6 +728,8 @@ pub struct El<S> {
     pub(crate) group: Option<Group>,
     /// A scroll view along this axis ([`El::scroll`]); boxes only.
     pub(crate) scroll: Option<Axis>,
+    /// A scroll view that stays at its end while content grows ([`El::follow_end`]).
+    pub(crate) follow_end: bool,
     pub(crate) on_context: Option<OnContext<S>>,
     pub(crate) on_timeout: Option<OnTimeout<S>>,
     pub(crate) on_char: Option<OnChar<S>>,
@@ -770,6 +774,7 @@ fn new<S>(what: What) -> El<S> {
         on_step: None,
         group: None,
         scroll: None,
+        follow_end: false,
         on_context: None,
         on_timeout: None,
         on_char: None,
@@ -977,6 +982,14 @@ impl<S> El<S> {
     /// Space between children.
     pub fn gap(mut self, gap: impl Into<Len>) -> Self {
         self.sizing.gap = Some(gap.into());
+        self
+    }
+
+    /// Lets a box's children flow onto further lines (rows below, or columns beside) when
+    /// they overflow its main axis, `gap` apart both ways: a tile grid whose column count
+    /// follows the width.
+    pub fn flow_wrap(mut self) -> Self {
+        self.sizing.flow_wrap = true;
         self
     }
 
@@ -1267,6 +1280,14 @@ impl<S> El<S> {
     /// (`h`, `grow`, `max_h`) for it to be smaller than its content.
     pub fn scroll(mut self, axis: Axis) -> Self {
         self.scroll = Some(axis);
+        self
+    }
+
+    /// Keeps a scroll view at its end while content grows, as long as it rests there: a log
+    /// or a chat shows what arrived, and scrolling back holds the place until the person
+    /// scrolls to the end again. Works with [`super::virtual_list`].
+    pub fn follow_end(mut self) -> Self {
+        self.follow_end = true;
         self
     }
 
