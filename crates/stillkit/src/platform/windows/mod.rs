@@ -2,6 +2,7 @@
 pub mod a11y;
 pub mod app_window;
 pub mod compose;
+pub mod clipboard;
 /// Glass services.
 pub mod glass;
 #[cfg(feature = "gpu")]

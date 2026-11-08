@@ -83,3 +83,8 @@ impl super::Backend for Backend {
     type Window = Surface;
     type TextInput = TextField;
 }
+/// No system clipboard here: a process-local one.
+pub mod clipboard {
+    /// The system clipboard (process-local on this platform).
+    pub type System = crate::el::MemoryClipboard;
+}

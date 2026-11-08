@@ -62,6 +62,9 @@ features = [
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_Com",
+  # The system clipboard (`clipboard::System`).
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
   "Win32_System_LibraryLoader",
   "Win32_System_ProcessStatus",
   # The spike's clock (GetSystemTimePreciseAsFileTime).
