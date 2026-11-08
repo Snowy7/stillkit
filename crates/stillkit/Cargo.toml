@@ -9,10 +9,11 @@ license.workspace = true
 keywords = ["gui", "native", "wayland", "windows", "declarative"]
 categories = ["gui", "rendering"]
 readme = "../../README.md"
-rust-version = "1.101"
+rust-version = "1.96"
 
 [package.metadata.stillkit]
-# Cargo requires a numeric rust-version, not a nightly date.
+# The crates build on stable (rust-version, verified with 1.96 and 1.99.1); this repo's own
+# dev loop uses nightly for Cranelift (rust-toolchain.toml), which downstream builds never need.
 toolchain = "nightly"
 verified-rustc-commit-date = "2026-11-02"
 
