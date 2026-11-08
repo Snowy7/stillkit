@@ -182,6 +182,8 @@ pub(crate) struct State {
     pub(super) serial: u32,
     pub(super) clip: super::clipboard::Clip,
     pub(super) ime: super::ime::Ime,
+    /// Whether windows get AT-SPI adapters, and the session-bus socket that watches it.
+    a11y: super::a11y::Gate,
 }
 pub(super) struct Runtime {
     pub(super) conn: Connection,
@@ -219,6 +221,7 @@ fn runtime<T>(f: impl FnOnce(&mut Runtime) -> Result<T>) -> Result<T> {
                 serial: 0,
                 clip: Default::default(),
                 ime: Default::default(),
+                a11y: super::a11y::Gate::new(),
             };
             queue.roundtrip(&mut state)?;
             queue.roundtrip(&mut state)?;
@@ -259,14 +262,18 @@ pub fn next_event() -> Option<(SurfaceId, Event)> {
         if r.state.events.is_empty() {
             r.conn.flush()?;
             if let Some(guard) = r.queue.prepare_read() {
-                let mut fd = libc::pollfd {
-                    fd: guard.connection_fd().as_raw_fd(),
-                    events: libc::POLLIN,
-                    revents: 0,
-                };
-                // SAFETY: fd points to one initialized pollfd; timeout zero only checks readiness.
-                if unsafe { libc::poll(&mut fd, 1, 0) } > 0 {
+                let mut fds = [
+                    libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 },
+                    libc::pollfd { fd: r.state.a11y.fd(), events: libc::POLLIN, revents: 0 },
+                ];
+                // SAFETY: fds holds two initialized pollfds; timeout zero only checks readiness.
+                if unsafe { libc::poll(fds.as_mut_ptr(), 2, 0) } > 0 && fds[0].revents & libc::POLLIN != 0 {
                     guard.read()?;
+                } else {
+                    drop(guard);
+                }
+                if fds[1].revents != 0 {
+                    r.state.accessibility_status();
                 }
             }
             r.queue.dispatch_pending(&mut r.state)?;
@@ -300,6 +307,7 @@ pub(super) fn wait() {
             let mut fds = vec![
                 libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: timer.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
+                libc::pollfd { fd: r.state.a11y.fd(), events: libc::POLLIN, revents: 0 },
             ];
             fds.extend(r.state.windows.values().filter_map(|n| {
                 let fd = n.a11y.fd();
@@ -317,6 +325,10 @@ pub(super) fn wait() {
                 }
             } else {
                 drop(guard);
+            }
+            // Hang-ups count too: the gate then closes the socket, so poll can't spin on it.
+            if fds[2].revents != 0 {
+                r.state.accessibility_status();
             }
             if fds[1].revents & libc::POLLIN != 0 {
                 super::wake::fired();
@@ -449,7 +461,7 @@ impl Surface {
             r.state.windows.insert(
                 id,
                 Native {
-                    a11y: super::a11y::A11y::new(role, name),
+                    a11y: super::a11y::A11y::new(role, name, r.state.a11y.enabled()),
                     surface,
                     shell,
                     configured: false,
@@ -1326,6 +1338,14 @@ impl Dispatch<wl_seat::WlSeat, ()> for State {
     }
 }
 impl State {
+    /// The status socket is readable: bring every window's adapter up or down if the answer changed.
+    fn accessibility_status(&mut self) {
+        if let Some(enabled) = self.a11y.ready() {
+            for native in self.windows.values_mut() {
+                native.a11y.set_enabled(enabled);
+            }
+        }
+    }
     fn accessibility_events(&mut self) {
         for (id, native) in &mut self.windows {
             self.events.extend(native.a11y.drain().into_iter().map(|event| (*id, event)));

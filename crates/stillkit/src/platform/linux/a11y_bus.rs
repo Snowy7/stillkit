@@ -66,6 +66,11 @@ const STATUS: &str = "org.a11y.Status";
 const PROPERTIES: &str = "org.freedesktop.DBus.Properties";
 const MATCH: &str = "type='signal',sender='org.a11y.Bus',interface='org.freedesktop.DBus.Properties',\
 member='PropertiesChanged',path='/org/a11y/bus',arg0='org.a11y.Status'";
+/// The status service restarting under a new unique name, or exiting.
+const OWNERS: &str = "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',\
+member='NameOwnerChanged',path='/org/freedesktop/DBus',arg0='org.a11y.Bus'";
+const DBUS: &str = "org.freedesktop.DBus";
+const DBUS_PATH: &str = "/org/freedesktop/DBus";
 /// The largest message kept in memory; bigger ones (never sent by the status service) are
 /// read past and dropped.
 const MAX_MESSAGE: usize = 64 * 1024;
@@ -90,8 +95,8 @@ pub(crate) struct Session {
     output: Vec<u8>,
 }
 impl Session {
-    /// Starts a conversation for `uid`; `bytes()` holds everything to write first. The status
-    /// call has NO_AUTO_START, so a missing service is not started on our behalf.
+    /// Starts a conversation for `uid`; `take_output()` holds everything to write first. The
+    /// status call has NO_AUTO_START, so a missing service is not started on our behalf.
     pub(crate) fn start(uid: u32) -> Self {
         let mut output = Vec::with_capacity(512);
         output.push(0);
@@ -109,8 +114,9 @@ impl Session {
             known: false,
             output,
         };
-        session.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "Hello", None, 0);
-        session.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "AddMatch", Some(MATCH), NO_REPLY_EXPECTED);
+        session.call(DBUS, DBUS_PATH, DBUS, "Hello", None, 0);
+        session.call(DBUS, DBUS_PATH, DBUS, "AddMatch", Some(MATCH), NO_REPLY_EXPECTED);
+        session.call(DBUS, DBUS_PATH, DBUS, "AddMatch", Some(OWNERS), NO_REPLY_EXPECTED);
         session.request();
         session
     }
@@ -164,7 +170,28 @@ impl Session {
                 self.owner = m.sender.map(str::to_owned);
                 self.known = true;
             }
-            ERROR if m.reply_serial == Some(self.get_all) => return Err(Gone),
+            // Absent at startup: give up. Later (a restart race): off until a new owner appears.
+            ERROR if m.reply_serial == Some(self.get_all) => {
+                if !self.known {
+                    return Err(Gone);
+                }
+                self.off();
+            }
+            SIGNAL if m.member == Some("NameOwnerChanged")
+                && m.interface == Some(DBUS)
+                && m.path == Some(DBUS_PATH)
+                && m.sender == Some(DBUS) =>
+            {
+                let mut r = m.body_reader(bytes, "sss").ok_or(Gone)?;
+                let (name, _old, new) = (r.str().ok_or(Gone)?, r.str().ok_or(Gone)?, r.str().ok_or(Gone)?);
+                if name != BUS || !self.known {
+                    return Ok(());
+                }
+                self.off();
+                if !new.is_empty() {
+                    self.request();
+                }
+            }
             SIGNAL if m.member == Some("PropertiesChanged")
                 && m.interface == Some(PROPERTIES)
                 && m.path == Some(PATH)
@@ -189,6 +216,12 @@ impl Session {
             _ => {}
         }
         Ok(())
+    }
+    /// The service is gone: no assistive technology can reach us.
+    fn off(&mut self) {
+        self.owner = None;
+        self.is_enabled = false;
+        self.screen_reader = false;
     }
     /// Reads an `a{sv}` of properties, keeping the two booleans and skipping anything else.
     fn apply(&mut self, r: &mut Reader) -> Option<()> {
@@ -530,16 +563,17 @@ mod tests {
         let (auth, sent) = sent(&s.take_output());
         assert_eq!(auth, "\0AUTH EXTERNAL 31303030\r\nBEGIN\r\n");
         let names: Vec<_> = sent.iter().map(|m| m.header().member().unwrap().to_string()).collect();
-        assert_eq!(names, ["Hello", "AddMatch", "GetAll"]);
-        let add_match = sent[1].body();
-        assert_eq!(add_match.deserialize::<&str>().unwrap(), MATCH);
-        let h = sent[2].header();
+        assert_eq!(names, ["Hello", "AddMatch", "AddMatch", "GetAll"]);
+        for (m, rule) in [(&sent[1], MATCH), (&sent[2], OWNERS)] {
+            assert_eq!(m.body().deserialize::<&str>().unwrap(), rule);
+            assert!(m.primary_header().flags().contains(zbus::message::Flags::NoReplyExpected));
+        }
+        let h = sent[3].header();
         assert_eq!(h.destination().unwrap().as_str(), BUS);
         assert_eq!(h.path().unwrap().as_str(), PATH);
-        assert_eq!(sent[2].body().deserialize::<&str>().unwrap(), STATUS);
-        let flags = sent[2].primary_header().flags();
-        assert!(flags.contains(zbus::message::Flags::NoAutoStart));
-        assert!(sent[1].primary_header().flags().contains(zbus::message::Flags::NoReplyExpected));
+        assert_eq!(h.interface().unwrap().as_str(), PROPERTIES);
+        assert_eq!(sent[3].body().deserialize::<&str>().unwrap(), STATUS);
+        assert!(sent[3].primary_header().flags().contains(zbus::message::Flags::NoAutoStart));
         assert!(sent.iter().all(|m| m.message_type() == Type::MethodCall));
         assert!(s.take_output().is_empty());
     }
@@ -582,6 +616,29 @@ mod tests {
         assert_eq!(again[0].header().member().unwrap().as_str(), "GetAll");
     }
     #[test]
+    fn a_restarted_service_is_asked_again_and_its_signals_count() {
+        let owners = |old: &str, new: &str| {
+            Zmsg::signal(DBUS_PATH, DBUS, "NameOwnerChanged").unwrap().sender(DBUS).unwrap()
+                .build(&(BUS, old, new)).unwrap().data().to_vec()
+        };
+        let (mut s, get_all) = started();
+        s.feed(OK).unwrap();
+        s.feed(&reply(&get_all, Endian::Little, &HashMap::from([("IsEnabled", Value::from(true))]))).unwrap();
+        assert_eq!(s.enabled(), Some(true));
+        s.feed(&owners(OWNER, "")).unwrap();
+        assert_eq!(s.enabled(), Some(false), "the service exited");
+        assert!(s.take_output().is_empty());
+        s.feed(&owners("", ":1.50")).unwrap();
+        let (_, again) = sent(&[b"BEGIN\r\n".as_slice(), &s.take_output()].concat());
+        let mut props = HashMap::from([("IsEnabled", Value::from(false))]);
+        let answer = Zmsg::method_return(&again[0].header()).unwrap().sender(":1.50").unwrap().build(&props).unwrap();
+        s.feed(answer.data()).unwrap();
+        assert_eq!(s.enabled(), Some(false));
+        props.insert("IsEnabled", Value::from(true));
+        s.feed(&changed(":1.50", &props, &[])).unwrap();
+        assert_eq!(s.enabled(), Some(true), "the new owner's changes are followed");
+    }
+    #[test]
     fn rejected_auth_absent_service_and_garbage_close() {
         let mut s = Session::start(1000);
         assert_eq!(s.feed(b"REJECTED EXTERNAL\r\n"), Err(Gone));
@@ -589,7 +646,7 @@ mod tests {
         s.feed(OK).unwrap();
         let error = Zmsg::error(&get_all.header(), "org.freedesktop.DBus.Error.ServiceUnknown").unwrap()
             .build(&"The name is not activatable").unwrap();
-        assert_eq!(s.feed(&error.data().to_vec()), Err(Gone));
+        assert_eq!(s.feed(error.data()), Err(Gone));
         let (mut s, _) = started();
         s.feed(OK).unwrap();
         assert_eq!(s.feed(&[b'x'; 16]), Err(Gone));
