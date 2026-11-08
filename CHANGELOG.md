@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `Event::KeyUp`: a key going up on macOS, Windows and Linux, for held-key input such as fly navigation.
 - Real soft shadows (`Op::SoftShadow`) with elevation levels per look, and Windows system backdrop frost for CPU surfaces.
 - Kit text components (text, secure and search fields, text area, combobox, command palette) and Linux Vulkan/Vello Hybrid GPU rendering and glass.
 - Portable process `Identity` and Wayland app_id, preserving Windows window class names.

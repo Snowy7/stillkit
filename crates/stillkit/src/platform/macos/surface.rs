@@ -100,6 +100,9 @@ pub enum Event {
     DoubleClick(Pointer, Button),
     /// A key went down (a virtual-key code).
     Key(u16),
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
     /// The surface's window became the key window.
     Activated,
     /// The surface's window stopped being the key window.

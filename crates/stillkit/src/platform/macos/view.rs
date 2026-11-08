@@ -173,6 +173,14 @@ define_class!(
             }
         }
 
+        #[unsafe(method(keyUp:))]
+        fn key_up(&self, event: &NSEvent) {
+            let unmodified = event.charactersIgnoringModifiers().and_then(|s| s.to_string().chars().next());
+            if let Some(vk) = keys::vk(event.keyCode(), unmodified) {
+                self.send(Event::KeyUp(vk));
+            }
+        }
+
         #[unsafe(method(updateTrackingAreas))]
         fn update_tracking_areas(&self) {
             if let Some(old) = self.ivars().tracking.take() {
