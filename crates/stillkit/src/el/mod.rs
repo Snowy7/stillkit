@@ -50,6 +50,8 @@ mod json;
 mod layout;
 mod overlay;
 mod png;
+mod virtualize;
+pub use virtualize::virtual_list;
 mod runtime;
 mod rotate;
 mod scroll;
