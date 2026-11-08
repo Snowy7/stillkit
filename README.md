@@ -92,6 +92,6 @@ Reference: [elements](docs/el.md), [surfaces and measurements](docs/ui.md), [kit
 
 ## Credits and licence
 
-Extracted from [mypaper](https://github.com/Snowy7/desktop-wallpaper). Liquid Glass is based on **liquid-rust by al1h3n**, MIT OR Apache-2.0; [retained attribution](crates/stillkit-glass/CREDITS.md). [Lucide](https://lucide.dev) icons are ISC licensed. Bundled [Inter fonts](crates/stillkit/assets/) use the [SIL Open Font License](crates/stillkit/assets/OFL-Inter.txt).
+Extracted from mypaper, a private Windows desktop customizer that still builds on it. Liquid Glass is based on **liquid-rust by al1h3n**, MIT OR Apache-2.0; [retained attribution](crates/stillkit-glass/CREDITS.md). [Lucide](https://lucide.dev) icons are ISC licensed. Bundled [Inter fonts](crates/stillkit/assets/) use the [SIL Open Font License](crates/stillkit/assets/OFL-Inter.txt).
 
 stillkit and stillkit-kit are [MIT](LICENSE); stillkit-glass retains [MIT](crates/stillkit-glass/LICENSE-MIT) OR [Apache-2.0](crates/stillkit-glass/LICENSE-APACHE).
