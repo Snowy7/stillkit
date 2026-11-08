@@ -16,9 +16,9 @@ Reviewed against the mypaper shell, Studio and Files source in its original chec
 
 ## Linux verification
 
-AT-SPI uses the shared Snapshot tree, retained hits/focus/semantics, lazy AccessKit activation, bounded action queues and a socket integrated into Wayland poll. `STILLKIT_ACCESSIBILITY=1` opts into AccessKit Unix's eager executor and D-Bus discovery; unset means no adapter/thread/connection/wake descriptor. An enabled process may discover clients started later. Automatic discovery in the default disconnected mode is intentionally unavailable. Linux adapter tests are compile-checked here; WSL has no compositor.
+AT-SPI uses the shared Snapshot tree, retained hits/focus/semantics, lazy AccessKit activation, bounded action queues and a socket integrated into Wayland poll. It is on by default. A hand-written session-bus client (`platform/linux/a11y_bus.rs`, no new dependency) reads `org.a11y.Status` and watches it on one socket in the same poll. Adapters exist only while `IsEnabled || ScreenReaderEnabled`, so they come up when Orca starts and go away when it stops. `STILLKIT_ACCESSIBILITY=1`/`0` forces them on or off. With no session bus or no running `org.a11y.Bus`, nothing is opened. AccessKit Unix's executor threads and session connection outlive the last adapter (it has no shutdown). The status codec and decision logic are unit-tested on every host against messages built and parsed by zbus. The socket, poll and adapter wiring are compile-checked only; WSL has no compositor.
 
-On m6u test Orca/AT-SPI discovery; latest tree on initial/late activation; labels, roles, focus, numeric/text updates, reorder actions and live status; multiple windows, close and client reconnect; idle CPU/wakes before enabling, while connected and after Orca exits; CPU mode without GPU drivers. Verify custom app_id in the compositor. See platform-notes.md for startup instructions.
+On m6u run the checklist in ui.md ("Linux accessibility"). Then test labels, roles, focus, numeric/text updates, reorder actions and live status; multiple windows, close and client reconnect; and CPU mode without GPU drivers. Verify custom app_id in the compositor.
 
 ## Declaration inventory
 

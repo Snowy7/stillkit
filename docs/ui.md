@@ -995,7 +995,7 @@ and Windows MSVC all-target checking pass. The eight existing non-Windows access
 dead-code warnings remain.
 
 Not yet supported: Wayland text-input-v3/IBus IME, field selection/caret interaction,
-AT-SPI accessibility, X11, fractional scaling, complete mixed-monitor placement, cursor
+X11, fractional scaling, complete mixed-monitor placement, cursor
 shapes, and compositor blur. Fontconfig discovery currently loads the primary sans
 fallback; complete script-specific fallback discovery is pending. Integer preferred-buffer-scale changes are forwarded as
 DPI events; physical mixed-DPI hardware remains untested. Global position and work-area
@@ -1004,6 +1004,133 @@ panel reservations. Bars/background surfaces use layer-shell when advertised and
 an error on GNOME, which has no layer-shell. Layer-shell and parented popup paths compile
 but have not been exercised on another compositor. DirectWrite text-quality controls are
 Windows-only; Linux uses Vello's grayscale outline rasterization for all presets.
+
+### Linux accessibility (AT-SPI)
+
+AT-SPI is on by default. Until assistive technology is running, it costs one idle socket and
+nothing else. It is built on AccessKit Unix 0.24, whose `Adapter::new` starts an executor
+thread and a D-Bus connection. stillkit creates adapters only while the desktop says
+assistive technology is on (`platform/linux/a11y.rs`, `a11y_bus.rs`).
+
+**Deciding.** `Gate` decides once per UI thread, when the Wayland runtime opens.
+`STILLKIT_ACCESSIBILITY=1` forces adapters on and `0` forces them off; in both cases no
+socket is opened. Unset (or any other value) is automatic:
+
+- Connect to the session bus without blocking. It is found from `DBUS_SESSION_BUS_ADDRESS`
+  (`unix:path=` or `unix:abstract=`), or from `$XDG_RUNTIME_DIR/bus` when that is unset.
+  A local socket either accepts at once or is refused.
+- Send the whole conversation in one write, pipelined as sd-bus does:
+  - SASL `AUTH EXTERNAL <uid>` and `BEGIN`;
+  - `Hello`;
+  - two `AddMatch` rules: `PropertiesChanged` for `org.a11y.Status` from `org.a11y.Bus`,
+    and `NameOwnerChanged` for `org.a11y.Bus`;
+  - `Properties.GetAll("org.a11y.Status")` with `NO_AUTO_START`.
+- From then on, only read. The socket sits in `host::wait`'s poll beside the display fd
+  and timerfd, and in `next_event`'s zero-timeout poll. It wakes only when the bus sends
+  us one of those messages.
+- Decide as Qt does: on when `IsEnabled || ScreenReaderEnabled`. AccessKit itself
+  registers on `IsEnabled` only. at-spi2-core's launcher is expected to set `IsEnabled`
+  whenever a screen reader is enabled; m6u step 5 checks this.
+
+There is no blocking startup call. It isn't needed: the first window is created with
+adapters off, and the reply, usually there by the first `host::wait`, brings them up the
+same way a later Orca start does.
+
+A refused auth, an error reply to the first `GetAll` (no `org.a11y.Bus` running), EOF,
+or a malformed stream closes the socket, which then leaves the poll. The last answer
+stands, and it is off if none came. `NO_AUTO_START` means stillkit never launches
+at-spi-bus-launcher on a system that isn't running it. Every full desktop starts it from
+the at-spi2-core autostart entry or user unit. If the service restarts, `NameOwnerChanged`
+switches adapters off and asks the new owner. Only the owner's signals count.
+
+**Adapters.** Each window keeps its `Snapshot` (hits, focus, semantics) current whether
+or not it has an adapter. When the gate opens, every window gets a wake socketpair and an
+adapter, and is told its focus state. AccessKit then asks `Initial` for the latest tree
+when it activates. When the gate closes, the adapter and socketpair are dropped, and
+AccessKit removes the window from AT-SPI.
+
+**What lingers after the last adapter.** AccessKit Unix keeps its message channel in a
+process-wide `OnceLock` and has no shutdown. The first adapter therefore leaves two threads
+behind: the executor (unnamed, so it shows the process name) and `async-io` (zbus's
+reactor). It also leaves their session-bus connection and the reactor's epoll and
+notification fds. All of these are blocked in `epoll_wait` or a futex. They wake only for
+D-Bus traffic on that connection: its `IsEnabled` match and the bus's own signals to it.
+AccessKit closes its AT-SPI-bus connection when `IsEnabled` goes false (its `Bus` and
+ticking task drop). A process that never sees assistive technology on never creates any
+of this.
+
+**Dependency choice.** The client is hand-written, about 500 lines for the codec plus
+100 for the socket, with no new runtime dependency. It needs `libc`, which is already a dependency. The alternatives were
+worse:
+
+- zbus is already linked through AccessKit, but its sockets are `async_io::Async`. The
+  first use spawns the global `async-io` thread, and `blocking::Connection` adds an
+  executor thread as well. It can't hand a raw fd to someone else's poll.
+- rustbus is synchronous and pollable, but it is a new dependency tree for three method
+  calls and two signals.
+
+The client only marshals method calls with zero or one string argument. It parses
+headers, `a{sv}` and `sa{sv}as` in either byte order, skips unknown values by signature
+(nesting bounded at 64), and reads past messages over 64 KiB without keeping them.
+
+Measured cost: a release `x86_64-unknown-linux-gnu` object of the stillkit lib (no LTO,
+before linking), against this branch's base, grows by **+19.9 KB code, +2.9 KB read-only
+data, +0.3 KB writable data**. The run-time cost with assistive technology off is
+**1 socket fd and a few hundred bytes of buffers**, with no thread or timer. zbus is a
+dev-dependency only: the codec tests build real messages with it and parse ours with it,
+on every host.
+
+**Tested versus compile-checked.** Unit tests in `a11y_bus.rs` run on Windows and Linux.
+They check the override values and address parsing. They check our pipelined bytes,
+parsed back by zbus. They check replies in both byte orders fed one byte at a time,
+either property, unknown properties skipped, signals from other senders ignored,
+invalidation asking again, a service restart, refused auth, an absent service, garbage
+input and oversized messages. The socket, the poll wiring and adapter creation and
+dropping are compile-checked only (`x86_64-unknown-linux-gnu` check and Clippy, zero
+warnings). Nothing here has run against a real bus or Orca.
+
+**Test on m6u.** Use release `el_hello`; `pid=$(pgrep -n el_hello)`. Count fds with
+`ls -l /proc/$pid/fd | wc -l`, and see the sockets with `ss -xp | grep "pid=$pid,"`. List
+threads with `cat /proc/$pid/task/*/comm`. Measure wakes per thread with
+`for t in /proc/$pid/task/*; do echo $(cat $t/comm) $(grep ctxt $t/status); done`, taken
+twice, 30 s apart, after a 10 s settle; `/proc/$pid/status` covers only the main thread.
+Read the bus with
+`busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled ScreenReaderEnabled`.
+
+1. **Baseline:** `STILLKIT_ACCESSIBILITY=0`. Record the fd count F and thread count T. No
+   session-bus socket appears in `ss`.
+2. **No session bus:** `env -u DBUS_SESSION_BUS_ADDRESS XDG_RUNTIME_DIR=/nonexistent`.
+   Keep `WAYLAND_DISPLAY` set to an absolute socket path. Expect F fds and T threads.
+3. **No `org.a11y.Bus`:** `dbus-run-session -- target/release/examples/el_hello`. Expect
+   F fds and T threads within a second of startup (the socket closes after the error
+   reply), and no new `at-spi-bus-launcher` (`pgrep -a at-spi-bus-laun`).
+4. **Automatic, disabled:** both properties false. If they aren't, run
+   `busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b false`
+   and the same for `ScreenReaderEnabled`. Expect F+1 fds (one socket to the session bus,
+   no socketpair) and T threads. Wakes: 0 voluntary and involuntary switches on every
+   thread, and 0 CPU ticks.
+5. **Orca start:** with the app idle, start Orca (`orca --replace &`, or Settings >
+   Accessibility > Screen Reader). Orca reads the window title and focused control without
+   a restart. Expect T+2 threads (executor and `async-io`), the window's socketpair, and
+   AccessKit's sockets. Read both properties: if only `ScreenReaderEnabled` is true,
+   AccessKit stays inactive and the gate should follow `IsEnabled` alone. Check focus,
+   names and an action from Orca. Then leave everything
+   idle 30 s with Orca running: the app's threads should show 0 wakes unless Orca polls
+   the tree; record what it does.
+6. **Orca stop:** quit Orca and set both properties false, as in step 4. The window leaves
+   Accerciser's tree, the socketpair and the AT-SPI-bus socket close, and T+2 threads
+   remain. Wakes: 0 on every thread over 30 s. Also try a stop that leaves `IsEnabled`
+   true (just quitting Orca). Adapters then stay, which is correct, because another client
+   may be listening; record the bus values.
+7. **Restart:** set the properties true again. Adapters return (Orca or Accerciser finds
+   the window) with no new threads.
+8. **Overrides:** `STILLKIT_ACCESSIBILITY=1` with both properties false gives adapters at
+   once, and the status socket is absent. `0` with Orca running gives no adapters, no
+   status socket and T threads. Any other value behaves as unset.
+9. **Restarted service:** `systemctl --user restart at-spi-dbus-bus` (or kill
+   `at-spi-bus-launcher`). Adapters drop, then follow the new instance's properties.
+10. CPU mode still maps no GPU library (`grep -cE 'libEGL|libGL|libvulkan' /proc/$pid/maps`
+    gives 0) in every state.
 
 ### Linux GPU mode
 

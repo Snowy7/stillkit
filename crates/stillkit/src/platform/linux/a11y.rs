@@ -1,40 +1,178 @@
-//! Opt-in AT-SPI bridge. No executor, D-Bus connection or wake descriptor unless enabled.
-use crate::{a11y::Snapshot, AccessibilityAction, HitId};
+//! AT-SPI through AccessKit Unix, on by default but created only while assistive technology is
+//! on. `Gate` decides per thread: `STILLKIT_ACCESSIBILITY` (`1` on, `0` off) or, unset, the
+//! `org.a11y.Status` properties watched on one session-bus socket in the Wayland poll
+//! (`a11y_bus.rs`). Each window's `A11y` keeps its tree current without an adapter and brings
+//! one up, with that tree, when the gate opens; it drops it when the gate closes.
+use super::a11y_bus::{Address, Gone, Mode, Session};
 use super::surface::Event;
-use accesskit::{Action, ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, Role, TreeUpdate};
-use std::{collections::VecDeque, io::{Read, Write}, os::{fd::{AsRawFd, RawFd}, unix::net::UnixStream}, sync::{Arc, Mutex}};
+use crate::{AccessibilityAction, HitId, a11y::Snapshot};
+use accesskit::{
+    Action, ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, Role, TreeUpdate,
+};
+use std::{
+    collections::VecDeque,
+    io::{ErrorKind, Read, Write},
+    os::{
+        fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
+        unix::net::UnixStream,
+    },
+    sync::{Arc, Mutex},
+};
+
+/// Whether this thread's windows should have AT-SPI adapters.
+pub(super) struct Gate {
+    enabled: bool,
+    bus: Option<(UnixStream, Session)>,
+}
+impl Gate {
+    /// Reads the override; in automatic mode opens the status socket and sends the whole
+    /// conversation in one non-blocking write. No session bus: no socket, never enabled.
+    pub(super) fn new() -> Self {
+        let mode = Mode::from_env(std::env::var("STILLKIT_ACCESSIBILITY").ok().as_deref());
+        let bus = if mode == Mode::Auto { connect() } else { None };
+        Self { enabled: mode == Mode::On, bus }
+    }
+    pub(super) fn enabled(&self) -> bool {
+        self.enabled
+    }
+    /// The status socket for the poll set, or -1 (which poll skips).
+    pub(super) fn fd(&self) -> RawFd {
+        self.bus.as_ref().map_or(-1, |(stream, _)| stream.as_raw_fd())
+    }
+    /// Handles a readable (or hung-up) status socket; returns the decision when it changed.
+    /// On error, EOF or an absent status service the socket is closed and leaves the poll, and
+    /// the last answer stands (off if none came).
+    pub(super) fn ready(&mut self) -> Option<bool> {
+        let (stream, session) = self.bus.as_mut()?;
+        let result = exchange(stream, session);
+        let answer = session.enabled();
+        if result.is_err() {
+            log::debug!("AT-SPI status: session bus closed or org.a11y.Bus absent");
+            self.bus = None;
+        }
+        let enabled = answer.unwrap_or(self.enabled);
+        (enabled != self.enabled).then(|| {
+            self.enabled = enabled;
+            enabled
+        })
+    }
+}
+/// Reads until the socket would block, then writes anything the session queued.
+fn exchange(stream: &mut UnixStream, session: &mut Session) -> Result<(), Gone> {
+    let mut bytes = [0; 4096];
+    loop {
+        match stream.read(&mut bytes) {
+            Ok(0) => return Err(Gone),
+            Ok(n) => session.feed(&bytes[..n])?,
+            Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(_) => return Err(Gone),
+        }
+    }
+    send(stream, &session.take_output())
+}
+/// Writes a whole message batch at once; a short write (never seen for these few hundred
+/// bytes on a fresh socket) is treated as a broken connection rather than buffered.
+fn send(stream: &mut UnixStream, bytes: &[u8]) -> Result<(), Gone> {
+    if bytes.is_empty() || stream.write(bytes).is_ok_and(|n| n == bytes.len()) { Ok(()) } else { Err(Gone) }
+}
+fn connect() -> Option<(UnixStream, Session)> {
+    let list = std::env::var("DBUS_SESSION_BUS_ADDRESS").ok();
+    let addresses = match &list {
+        Some(list) => super::a11y_bus::addresses(list),
+        None => {
+            let dir = std::env::var_os("XDG_RUNTIME_DIR")?;
+            vec![Address::Path([std::os::unix::ffi::OsStrExt::as_bytes(dir.as_os_str()), b"/bus"].concat())]
+        }
+    };
+    let mut stream = addresses.iter().find_map(open)?;
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let mut session = Session::start(unsafe { libc::getuid() });
+    send(&mut stream, &session.take_output()).ok()?;
+    Some((stream, session))
+}
+/// A non-blocking connect: a local socket either accepts at once or is refused (a full backlog
+/// returns EAGAIN), so startup never waits on the bus.
+fn open(address: &Address) -> Option<UnixStream> {
+    let (prefix, name): (&[u8], &[u8]) = match address {
+        Address::Path(path) => (b"", path),
+        Address::Abstract(name) => (b"\0", name),
+    };
+    // SAFETY: sockaddr_un is plain data; all-zero is a valid value.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as _;
+    let path = [prefix, name].concat();
+    // Pathnames keep a trailing NUL inside sun_path; abstract names are counted exactly.
+    if path.len() + usize::from(prefix.is_empty()) > addr.sun_path.len() {
+        return None;
+    }
+    for (slot, byte) in addr.sun_path.iter_mut().zip(&path) {
+        *slot = *byte as _;
+    }
+    let len = std::mem::offset_of!(libc::sockaddr_un, sun_path) + path.len() + usize::from(prefix.is_empty());
+    // SAFETY: plain socket creation; the result is checked before use.
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC, 0) };
+    if fd < 0 {
+        return None;
+    }
+    // SAFETY: fd is a new socket we own.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    // SAFETY: addr is an initialized sockaddr_un and len is within its size.
+    let connected = unsafe { libc::connect(fd.as_raw_fd(), (&raw const addr).cast(), len as libc::socklen_t) } == 0;
+    connected.then(|| UnixStream::from(fd))
+}
 
 type Requests = Arc<Mutex<VecDeque<(Event, Option<(HitId, AccessibilityAction)>)>>>;
+/// One window's accessibility: the retained tree, and the adapter while the gate is open.
 pub(super) struct A11y {
-    adapter: Option<accesskit_unix::Adapter>,
+    live: Option<Live>,
     snapshot: Arc<Mutex<Snapshot>>,
     requests: Requests,
     pending: VecDeque<(HitId, AccessibilityAction)>,
-    reader: Option<UnixStream>,
+    focused: bool,
+}
+/// An adapter and the socket its action handler writes to, waking the poll.
+struct Live {
+    adapter: accesskit_unix::Adapter,
+    reader: UnixStream,
 }
 impl A11y {
-    pub(super) fn new(role: Role, name: &str) -> Self {
+    pub(super) fn new(role: Role, name: &str, enabled: bool) -> Self {
         let snapshot = Arc::new(Mutex::new(Snapshot { role, name: name.into(), hits: vec![], focus: None, semantics: vec![] }));
-        let requests = Requests::default();
-        let mut result = Self { adapter: None, snapshot, requests, pending: VecDeque::new(), reader: None };
-        if std::env::var("STILLKIT_ACCESSIBILITY").as_deref() == Ok("1") {
-            match UnixStream::pair().and_then(|(reader, writer)| {
-                reader.set_nonblocking(true)?;
-                writer.set_nonblocking(true)?;
-                Ok((reader, writer))
-            }) {
-                Ok((reader, writer)) => {
-                    result.reader = Some(reader);
-                    result.adapter = Some(accesskit_unix::Adapter::new(
-                        Initial(result.snapshot.clone()),
-                        Actions { requests: result.requests.clone(), writer },
-                        Inactive,
-                    ));
-                }
-                Err(e) => log::error!("AT-SPI wake descriptor: {e}"),
-            }
-        }
+        let mut result = Self { live: None, snapshot, requests: Requests::default(), pending: VecDeque::new(), focused: false };
+        result.set_enabled(enabled);
         result
+    }
+    /// Brings the adapter up (AccessKit asks for the latest tree when a client activates it),
+    /// or drops it. AccessKit Unix keeps its executor thread and session-bus connection for
+    /// the life of the process once the first adapter exists; see docs/ui.md, "Linux accessibility".
+    pub(super) fn set_enabled(&mut self, enabled: bool) {
+        if enabled == self.live.is_some() {
+            return;
+        }
+        if !enabled {
+            self.live = None;
+            return;
+        }
+        let pair = UnixStream::pair().and_then(|(reader, writer)| {
+            reader.set_nonblocking(true)?;
+            writer.set_nonblocking(true)?;
+            Ok((reader, writer))
+        });
+        match pair {
+            Ok((reader, writer)) => {
+                let mut adapter = accesskit_unix::Adapter::new(
+                    Initial(self.snapshot.clone()),
+                    Actions { requests: self.requests.clone(), writer },
+                    Inactive,
+                );
+                if self.focused {
+                    adapter.update_window_focus_state(true);
+                }
+                self.live = Some(Live { adapter, reader });
+            }
+            Err(e) => log::error!("AT-SPI wake descriptor: {e}"),
+        }
     }
     pub(super) fn update(&mut self, hits: &[crate::Hit], focus: Option<HitId>) {
         let mut snapshot = self.snapshot.lock().unwrap();
@@ -47,8 +185,8 @@ impl A11y {
         self.publish();
     }
     fn publish(&mut self) {
-        if let Some(adapter) = &mut self.adapter {
-            adapter.update_if_active(|| self.snapshot.lock().unwrap().tree());
+        if let Some(live) = &mut self.live {
+            live.adapter.update_if_active(|| self.snapshot.lock().unwrap().tree());
         }
     }
     pub(super) fn semantics(&mut self, semantics: Vec<(HitId, crate::Semantics)>) {
@@ -59,13 +197,14 @@ impl A11y {
         self.publish();
     }
     pub(super) fn focus(&mut self, focused: bool) {
-        if let Some(adapter) = &mut self.adapter { adapter.update_window_focus_state(focused); }
+        self.focused = focused;
+        if let Some(live) = &mut self.live { live.adapter.update_window_focus_state(focused); }
     }
-    pub(super) fn fd(&self) -> RawFd { self.reader.as_ref().map_or(-1, AsRawFd::as_raw_fd) }
+    pub(super) fn fd(&self) -> RawFd { self.live.as_ref().map_or(-1, |live| live.reader.as_raw_fd()) }
     pub(super) fn drain(&mut self) -> Vec<Event> {
-        if let Some(reader) = &mut self.reader {
+        if let Some(live) = &mut self.live {
             let mut bytes = [0; 128];
-            while reader.read(&mut bytes).is_ok_and(|n| n > 0) {}
+            while live.reader.read(&mut bytes).is_ok_and(|n| n > 0) {}
         }
         let mut events = Vec::new();
         for (event, rich) in self.requests.lock().unwrap().drain(..) {

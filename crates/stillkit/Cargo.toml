@@ -87,6 +87,10 @@ features = [
 
 [dev-dependencies]
 png.workspace = true
+# Builds and parses the D-Bus messages that check the AT-SPI status codec
+# (platform/linux/a11y_bus.rs) on every host. Test-only; the Linux build already has zbus
+# through accesskit_unix.
+zbus = { version = "5.19", default-features = false, features = ["async-io"] }
 
 # `glass_measure` reads per-process GPU memory counters.
 [target.'cfg(windows)'.dev-dependencies.windows]
