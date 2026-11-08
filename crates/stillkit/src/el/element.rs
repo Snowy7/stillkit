@@ -561,6 +561,8 @@ pub struct El<S> {
     pub(crate) tip: Option<Arc<str>>,
     /// The look it takes while focus is on it or inside it ([`El::focus_within`]).
     pub(crate) within: Option<Look>,
+    /// Draws no focus ring of its own ([`El::focus_ring`]).
+    pub(crate) quiet: bool,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -593,6 +595,7 @@ fn new<S>(what: What) -> El<S> {
         popup: None,
         tip: None,
         within: None,
+        quiet: false,
         children: Vec::new(),
     }
 }
@@ -1136,6 +1139,15 @@ impl<S> El<S> {
     /// [`motion`](Self::motion) with the theme's layout spring.
     pub fn animate(self) -> Self {
         self.motion(super::token::MOTION_LAYOUT)
+    }
+
+    /// Whether it draws its own keyboard focus ring (on by default). Turn it off where a
+    /// container shows the focus instead, through [`focus_within`](Self::focus_within): a
+    /// search box's border lighting up around its field, so the field isn't ringed twice.
+    /// Focus, Tab order and assistive technology are unchanged.
+    pub fn focus_ring(mut self, on: bool) -> Self {
+        self.quiet = !on;
+        self
     }
 
     /// A look it takes while keyboard focus is on it or anywhere inside it (CSS's
