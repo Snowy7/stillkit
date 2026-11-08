@@ -1563,3 +1563,17 @@ wayland_client::delegate_noop!(State: ignore xdg_positioner::XdgPositioner);
 wayland_client::delegate_noop!(State: ignore layer_shell::ZwlrLayerShellV1);
 
 wayland_client::delegate_noop!(State: ignore wl_region::WlRegion);
+
+impl Surface {
+    /// Native layers aren't available here yet (on Wayland they will be subsurfaces below the
+    /// surface's buffer): this fails, and a [`crate::el::native`] element stays a transparent hole.
+    pub fn native_layer(&self, name: &str) -> anyhow::Result<crate::NativeHandle> {
+        anyhow::bail!("native layer {name}: not available on this platform yet")
+    }
+
+    /// Nothing to place (see [`native_layer`](Self::native_layer)).
+    pub fn place_native_layer(&self, _: &str, _: Option<crate::Rect>) {}
+
+    /// Nothing to release (see [`native_layer`](Self::native_layer)).
+    pub fn release_native_layer(&self, _: &str) {}
+}

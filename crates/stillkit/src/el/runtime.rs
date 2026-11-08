@@ -1054,6 +1054,33 @@ impl<S> Runtime<S> {
         }
     }
 
+    /// Where each [`native`](super::native) element shows now: its name and its visible box in
+    /// device px (cut to the scroll views around it), in paint order. Hosts place the surface's
+    /// layers there after each frame ([`crate::Surface::place_native_layer`]); a name missing
+    /// from the list is hidden (its element went away or scrolled out of sight).
+    pub fn natives(&self) -> Vec<(Key, Rect)> {
+        let flat = flatten(&self.root);
+        let mut out = Vec::new();
+        for (i, el) in flat.iter().enumerate() {
+            let What::Native(name) = &el.what else { continue };
+            let (Some(laid), Some(pose)) = (self.laid.get(i), self.poses.get(i)) else { continue };
+            let mut rect = pose.rect;
+            let mut at = laid.parent;
+            while let Some(p) = at {
+                if flat.get(p).is_some_and(|el| el.scrolls().is_some())
+                    && let Some(view) = self.poses.get(p)
+                {
+                    rect = rect.intersect(view.rect);
+                }
+                at = self.laid.get(p).and_then(|l| l.parent);
+            }
+            if !rect.is_empty() && pose.opacity > 0.0 {
+                out.push((name.clone(), rect));
+            }
+        }
+        out
+    }
+
     /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
     /// pass them before each pointer event ([`run`](super::run) does).
     pub fn set_modifiers(&mut self, mods: Modifiers) {
@@ -2203,6 +2230,7 @@ fn paint_el<S>(
     let width = me.rect.width();
     match &el.what {
         What::Box(_) => {}
+        What::Native(_) => f.push(Op::Hole { rect }),
         What::Field(spec) => {
             if let Some(field) = w.fields.get(&me.id) {
                 let focused = w.focus == Some(me.hit);
@@ -2505,7 +2533,7 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
             Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
             Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
-            Op::TextField { .. } | Op::Clip { .. } | Op::Unclip => {}
+            Op::TextField { .. } | Op::Clip { .. } | Op::Hole { .. } | Op::Unclip => {}
         }
     }
 }

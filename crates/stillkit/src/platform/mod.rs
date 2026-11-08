@@ -153,3 +153,14 @@ pub(crate) mod keys {
     pub const ESCAPE: u16 = 0x1b;
     pub const RETURN: u16 = 0x0d;
 }
+
+/// A native layer's handle ([`Surface::native_layer`](crate::Surface::native_layer)), for the
+/// host's own GPU API. It stays valid until the layer is released or its surface dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeHandle {
+    /// A `CAMetalLayer *` (macOS): Metal presents to it, Vulkan through VK_EXT_metal_surface.
+    /// Set its `drawableSize` to the placed rect's device size.
+    Metal(*mut std::ffi::c_void),
+    /// A child `HWND` (Windows) covering the placed rect: a swapchain for its client area.
+    Hwnd(isize),
+}

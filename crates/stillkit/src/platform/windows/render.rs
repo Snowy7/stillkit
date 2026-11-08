@@ -801,6 +801,12 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
+                Op::Hole { rect } => {
+                    // Clear ignores blending: the clip bounds it to the hole.
+                    t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
+                    t.Clear(Some(&color(Rgba::TRANSPARENT)));
+                    t.PopAxisAlignedClip();
+                }
                 Op::RoundedClipped { rect, radius, ops } => {
                     use windows::Win32::Graphics::Direct2D::{
                         D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_LAYER_OPTIONS_NONE,

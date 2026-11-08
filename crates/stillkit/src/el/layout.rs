@@ -457,7 +457,7 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
             }
         }
         What::Field(_) if z.min_w.is_none() => style.min_size.width = LengthPercentageAuto::length(0.0),
-        What::Text { .. } | What::Paint(_) | What::Field(_) => {}
+        What::Text { .. } | What::Paint(_) | What::Field(_) | What::Native(_) => {}
     }
     // The root is the surface.
     if let Some((w, h)) = root {

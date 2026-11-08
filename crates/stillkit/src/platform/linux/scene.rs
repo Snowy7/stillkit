@@ -41,6 +41,13 @@ pub(super) fn draw_ops(
     let mut clips = 0;
     for op in ops {
         match op {
+            Op::Hole { rect: r } => {
+                ctx.set_blend_mode(vello_cpu::peniko::BlendMode::new(vello_cpu::peniko::Mix::Normal, vello_cpu::peniko::Compose::Copy));
+                paint(ctx, Rgba::TRANSPARENT);
+                ctx.fill_path(&rounded(*r, 0.));
+                // Nothing else changes the blend mode: back to source-over.
+                ctx.set_blend_mode(Default::default());
+            }
             Op::Clip { rect: r } => {
                 ctx.push_clip_layer(&rounded(*r, 0.));
                 clips += 1;
