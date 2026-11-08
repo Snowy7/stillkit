@@ -27,6 +27,18 @@ pub enum Cursor {
     Resize,
     /// Resize horizontal.
     ResizeHorizontal,
+    /// Resize vertically (a horizontal splitter).
+    ResizeVertical,
+    /// An open hand: something can be dragged.
+    Grab,
+    /// A closed hand: something is being dragged.
+    Grabbing,
+    /// A crosshair: precise picking.
+    Crosshair,
+    /// The action is not allowed here (a refused drop).
+    NotAllowed,
+    /// A drop here copies.
+    Copy,
 }
 /// Sets modal hook.
 pub fn set_modal_hook(_: Option<Box<dyn FnMut()>>) {}

@@ -974,6 +974,9 @@ impl Surface {
     pub fn take_focus(&self) -> &'static str {
         "Wayland focus is compositor controlled"
     }
+    /// The pointer's shape over the surface. Wayland surfaces keep the compositor's default
+    /// until the cursor-shape-v1 protocol is wired up.
+    pub fn set_cursor(&self, _: super::app_window::Cursor) {}
     /// Sets chrome.
     pub fn set_chrome(&self, parts: &[(crate::Rect, super::app_window::Chrome)]) {
         let _ = runtime(|r| {
