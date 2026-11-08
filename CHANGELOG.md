@@ -3,18 +3,19 @@
 ## [Unreleased]
 
 ### Added
-- macOS AppKit/CoreGraphics/CoreText backend, native input, AccessKit and optional Metal (compile-checked; native verification pending).
-- Real soft shadows and Windows system backdrop frost for CPU surfaces.
-- Kit text components and Linux Vulkan/Vello Hybrid GPU rendering and glass.
-- Portable process Identity and Wayland app_id, preserving Windows window class names.
-- Opt-in Linux AT-SPI via AccessKit Unix, lazy trees and event-driven action delivery (compile-checked; compositor verification pending).
+- Real soft shadows (`Op::SoftShadow`) with elevation levels per look, and Windows system backdrop frost for CPU surfaces.
+- Kit text components (text, secure and search fields, text area, combobox, command palette) and Linux Vulkan/Vello Hybrid GPU rendering and glass.
+- Portable process `Identity` and Wayland app_id, preserving Windows window class names.
+- Linux AT-SPI via AccessKit Unix, on by default but only while assistive technology is enabled (one idle socket otherwise); `STILLKIT_ACCESSIBILITY=1/0` overrides. Compile-checked; compositor verification pending.
+- el round 3: eased hover/press washes and focus ring, focus/blur by key, `focus_within`, `invalid` and `active_descendant`, cell hits that pass presses through, `rotate`, `spin` (only while visible), arcs from any angle.
+- Newcomer guides, executable examples and a settings showcase.
+- 0.1 metadata groundwork and Windows/Linux CI with an advisory macOS cross-check.
 
 ### Changed
-- Interaction motion has one implementation; interact::motion remains a compatibility re-export.
+- Interaction motion has one implementation; `interact::motion` remains a compatibility re-export.
 
-### Added
-- Newcomer guides, executable examples and a settings showcase.
-- 0.1 metadata groundwork and Windows/Linux CI with advisory macOS cross-check.
+### Preview, planned for 0.2
+- macOS AppKit/CoreGraphics/CoreText backend, native input and IME, AccessKit, system frost and optional Metal. It is compile-checked only and has not run on a Mac; it is not part of 0.1. The test checklist is in `docs/ui.md` ("macOS backend").
 
 ## [0.1.0] - unreleased draft
 
@@ -32,9 +33,9 @@ A draft inventory, not a published release. The target is a real small Windows/W
 - Element text input/area, editing, selection, clipboard and IME; Windows RichEdit and UI Automation text runs.
 
 ### Known limits
-- No Linux X11; AT-SPI requires STILLKIT_ACCESSIBILITY=1 and live verification; GNOME bars need an extension. Native Linux editing needs broader live verification.
-- macOS backend is compile-checked; native behavior is unverified.
-- el::run does not attach glass bodies from theme materials; use Surface hooks.
-- Kit hover/press washes snap; tree parent/child focus and continuous spinner visibility need further runtime support.
+- No Linux X11; GNOME bars need a Shell extension. Linux editing, IME and AT-SPI need live verification.
+- macOS is a preview for 0.2 (see above).
+- `el::run` does not attach glass bodies from theme materials; use Surface hooks.
+- `rotate` turns arcs, lines and icons exactly; text, images and boxes at other than quarter turns stay upright.
 
-History checked through 38c21c4 (text follow-up), ebecc37 (element editing), ef42434 (kit layout/data), 0944ca2 (kit overlays), plus earlier render-mode/glass history. No packages were published by this work.
+No packages have been published.

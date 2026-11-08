@@ -1,6 +1,6 @@
 # stillkit
 
-A native Rust UI library for small apps on Windows and Wayland Linux, with a compile-checked macOS backend.
+A native Rust UI library for small apps on Windows and Wayland Linux. A macOS backend is in preview for 0.2.
 Compose elements and kit components; redraw only what changed, CPU-first, with no UI work while idle.
 
 ![One UI + Liquid material, dark](docs/media/kit/kit-oneui-liquid-dark.png)
@@ -52,8 +52,8 @@ cargo run -p stillkit-kit --example showcase -- --snap settings.png --tree setti
 | Platform | Status |
 | --- | --- |
 | Windows | Full backend: CPU/GPU, native text input/IME, UI Automation. |
-| Linux | Wayland, CPU and GPU. Opt-in AT-SPI (compile-checked); no X11. GNOME bars require a Shell extension. |
-| macOS | AppKit/CoreGraphics/CoreText, native input, AccessKit and optional Metal; compile-checked, native testing pending. |
+| Linux | Wayland, CPU and GPU. AT-SPI on whenever a screen reader is (compile-checked); no X11. GNOME bars require a Shell extension. |
+| macOS | **Preview, planned for 0.2.** AppKit/CoreGraphics/CoreText backend, native input, AccessKit and optional Metal; compile-checked only, not yet run on a Mac. |
 
 [Platform notes](docs/guide/platform-notes.md) describe the limits.
 
