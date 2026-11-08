@@ -749,6 +749,8 @@ pub struct El<S> {
     pub(crate) states: States,
     /// The pointer's shape over it ([`El::cursor`]).
     pub(crate) cursor: Option<crate::Cursor>,
+    /// Its ink flows to descendants that set none ([`El::cascade_ink`]).
+    pub(crate) cascade: bool,
     /// What a [`virtual_list`](super::virtual_list) built.
     pub(crate) virt: Option<super::virtualize::Virt>,
     pub(crate) children: Vec<El<S>>,
@@ -789,6 +791,7 @@ fn new<S>(what: What) -> El<S> {
         states: States::default(),
         cursor: None,
         virt: None,
+        cascade: false,
         children: Vec::new(),
     }
 }
@@ -1352,6 +1355,15 @@ impl<S> El<S> {
     /// springs along the element's [`motion`](Self::motion) like any other.
     pub fn focus_within(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
         self.states.within = Some(style(el()).look);
+        self
+    }
+
+    /// Its ink (its `color`, or a state look's) flows to every descendant that sets none, as
+    /// CSS's `color` inherits: a button's label and icon follow the button's hover colour,
+    /// springing with it. Inside, an element that sets its own ink passes that one on.
+    /// Without it, text and icons take the theme's label ink.
+    pub fn cascade_ink(mut self) -> Self {
+        self.cascade = true;
         self
     }
 
