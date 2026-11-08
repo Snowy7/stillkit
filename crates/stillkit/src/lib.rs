@@ -71,7 +71,7 @@ pub use render::{Image, TextMode, TextQuality, Ui, render};
 pub use scene::{DisplayList, Hit, HitId, Op};
 pub use scroll::Scroll;
 pub use surface::AnimationFrames;
-pub use surface::{Button, Event, Kind, Pointer, Surface, SurfaceId, next_event, queue_event};
+pub use surface::{Button, Event, Kind, Pointer, Surface, SurfaceId, next_event, queue_event, take_dropped_files};
 pub use platform::NativeHandle;
 pub use platform::Caption;
 pub use text::{Text, TextStyle, VARIABLE};

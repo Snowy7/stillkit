@@ -108,6 +108,13 @@ pub enum Event {
     Release(Pointer, Button),
     /// Double click.
     DoubleClick(Pointer, Button),
+    /// Files dragged from another app are over the surface ([`take_dropped_files`] after
+    /// [`Event::FilesDropped`]).
+    FilesHover(Pointer),
+    /// The dragged files left the surface, or the drag was cancelled.
+    FilesLeave,
+    /// Files were dropped here; [`take_dropped_files`] has their paths.
+    FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
     /// A desktop surface activated; Explorer may finish reordering its band afterwards.
@@ -359,6 +366,9 @@ impl Surface {
         if let Kind::App { min } = kind {
             let ex = if gpu { layered } else { WINDOW_EX_STYLE::default() };
             let hwnd = crate::app_window::create(name, Some(wndproc), ex)?;
+            // Files dropped from Explorer arrive as WM_DROPFILES.
+            // SAFETY: the window this call just made.
+            unsafe { windows::Win32::UI::Shell::DragAcceptFiles(hwnd, true) };
             let app = crate::app_window::AppShared::new(min);
             return Ok(Self::adopt(hwnd, kind, name, role, deferred, Some(app), gpu));
         }
@@ -1541,6 +1551,28 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(id, Event::Move(pointer(shared, lparam)));
         }
         WM_MOUSELEAVE => push(id, Event::Leave),
+        windows::Win32::UI::WindowsAndMessaging::WM_DROPFILES => {
+            use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, DragQueryPoint, HDROP};
+            let drop = HDROP(wparam.0 as *mut _);
+            let mut at = POINT::default();
+            // SAFETY: the HDROP this message carries, read then released once.
+            let paths = unsafe {
+                let _ = DragQueryPoint(drop, &mut at);
+                let count = DragQueryFileW(drop, u32::MAX, None);
+                let paths = (0..count)
+                    .map(|i| {
+                        let mut buf = vec![0u16; DragQueryFileW(drop, i, None) as usize + 1];
+                        let len = DragQueryFileW(drop, i, Some(&mut buf)) as usize;
+                        std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]))
+                    })
+                    .collect();
+                DragFinish(drop);
+                paths
+            };
+            set_dropped_files(paths);
+            let (ox, oy) = shared.origin.get();
+            push(id, Event::FilesDropped(Pointer { at: Point::new(at.x as f32, at.y as f32), screen: (ox + at.x, oy + at.y) }));
+        }
         WM_CAPTURECHANGED => push(id, Event::CaptureLost),
         WM_MOUSEWHEEL => {
             let mut at = POINT {
@@ -1774,4 +1806,19 @@ impl Surface {
     pub fn system_controls(&self) -> Option<crate::Rect> {
         None
     }
+}
+
+thread_local! {
+    static DROPPED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The paths of the files dropped with the last [`Event::FilesDropped`] (taken once).
+pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
+    DROPPED.with_borrow_mut(std::mem::take)
+}
+
+/// Keeps dropped paths for [`take_dropped_files`].
+#[allow(dead_code)]
+pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
+    DROPPED.with_borrow_mut(|d| *d = paths);
 }
