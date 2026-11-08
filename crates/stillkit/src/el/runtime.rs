@@ -2045,7 +2045,7 @@ fn keyed<S>(root: &El<S>, laid: &[Laid], theme: &Theme) -> HashMap<u64, (Key, Sn
 /// subtree. Elements in `within` (identities) take their focus-within look.
 fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::element::Active) -> Vec<Target> {
     type Cx<'a> = (&'a [Laid], &'a Theme, f32, &'a super::element::Active);
-    fn walk<S>(el: &El<S>, cx: Cx, i: &mut usize, motion: Option<crate::Spring>, instant: bool, out: &mut Vec<Target>) {
+    fn walk<S>(el: &El<S>, cx: Cx, i: &mut usize, motion: Option<crate::Spring>, instant: bool, inherited: Option<Rgba>, out: &mut Vec<Target>) {
         let (laid, theme, s, on) = cx;
         let Some(&me) = laid.get(*i) else { return };
         *i += 1;
@@ -2058,16 +2058,19 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
         };
         let origin = me.parent.map_or(Point::new(0.0, 0.0), |p| Point::new(laid[p].rect.left, laid[p].rect.top));
         let r = me.rect;
+        // Its own ink, else (inside a `cascade_ink` element) the ink it inherits, else the label.
+        let own = look.color.map(|p| p.resolve(theme));
         let (ink, value) = match &el.what {
-            What::Arc(a) => (look.color.unwrap_or(token::ACCENT), a.fraction),
-            _ => (look.color.unwrap_or(token::LABEL), 0.0),
+            What::Arc(a) => (own.unwrap_or_else(|| token::ACCENT.resolve(theme)), a.fraction),
+            _ => (own.or(inherited).unwrap_or_else(|| token::LABEL.resolve(theme)), 0.0),
         };
+        let passed = (el.cascade || inherited.is_some()).then_some(ink);
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
             fill: look.fill.map(|p| p.resolve(theme)),
             border: look.border.map(|b| b.paint.resolve(theme)),
             border_width: look.border.map_or(0.0, |b| (b.width.resolve(theme) * s).max(0.0)),
-            ink: ink.resolve(theme),
+            ink,
             opacity: look.opacity,
             radius: look
                 .radius
@@ -2085,11 +2088,11 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             }),
         });
         for child in &el.children {
-            walk(child, cx, i, motion, instant, out);
+            walk(child, cx, i, motion, instant, passed, out);
         }
     }
     let mut out = Vec::with_capacity(laid.len());
-    walk(root, (laid, theme, s, on), &mut 0, None, false, &mut out);
+    walk(root, (laid, theme, s, on), &mut 0, None, false, None, &mut out);
     out
 }
 

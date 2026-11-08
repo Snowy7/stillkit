@@ -53,7 +53,7 @@ notes area).
 - **Style:** `fill`, `color` (text and icon ink), `radius` (clamped to a capsule), `shadow`
   (the theme's soft shadow at `ShadowLevel::Raised`), `shadow_level(ShadowLevel::Menu)` (a
   menu's, a dialog's...), `box_shadow(SoftShadow)` (a custom one), `opacity` (the element and
-  everything in it), `focus_within(|el| el.fill(..))` (a look while focus is on or in it). `hovered(|el| ..)` and `pressed(|el| ..)` are the same for the pointer over it (or an interactive element inside it) and a press on it; pressed lies over focus, focus over hover, and none runs the view. A
+  everything in it), `focus_within(|el| el.fill(..))` (a look while focus is on or in it). `cascade_ink()` makes its ink (own or a state look's) flow to descendants that set none, as CSS's `color` inherits, so a button's label follows its hover colour. `hovered(|el| ..)` and `pressed(|el| ..)` are the same for the pointer over it (or an interactive element inside it) and a press on it; pressed lies over focus, focus over hover, and none runs the view. A
   popup's window grows by its shadows' reach.
 - **Text:** `font(TextRole)`, and `family(..)`, `weight(..)`, `text_size(..)` (its line scales with it) and `text_align(TextAlign::Start | Center | End)` over the role; fields take them too.
 - **Pointer:** `cursor(Cursor)`: the shape over it (innermost wins; fields show an I-beam), kept through a press that began on it. `Runtime::cursor()` reads it; `el::run` applies it. Shapes: arrow, text, hand, move, resize (both ways), grab, grabbing, crosshair, not allowed, copy.
