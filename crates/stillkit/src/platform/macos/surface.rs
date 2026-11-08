@@ -846,5 +846,48 @@ impl Surface {
         if let Some(n) = self.natives.borrow_mut().remove(name) {
             n.view.removeFromSuperview();
         }
+impl Surface {
+    /// How tall the title area is where the traffic lights sit: [`Caption::Compact`] gives the
+    /// window an empty compact toolbar, which makes the title area 40 points and centres the
+    /// lights in it, for an app's own taller title bar. App windows only.
+    ///
+    /// [`Caption::Compact`]: crate::Caption::Compact
+    pub fn set_caption(&self, caption: crate::Caption) {
+        if !self.is_app() {
+            return;
+        }
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        match caption {
+            crate::Caption::Standard => self.window.setToolbar(None),
+            crate::Caption::Compact => {
+                if self.window.toolbar().is_none() {
+                    let toolbar = objc2_app_kit::NSToolbar::new(mtm);
+                    self.window.setToolbar(Some(&toolbar));
+                }
+                self.window.setToolbarStyle(objc2_app_kit::NSWindowToolbarStyle::UnifiedCompact);
+            }
+        }
+    }
+
+    /// Where the system draws the window controls (the traffic lights, close to zoom), in
+    /// device px from the client's top-left, so an app's title bar leaves them room. `None`
+    /// in full screen, where they are hidden, and for non-app surfaces.
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        if !self.is_app() || self.window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+            return None;
+        }
+        let close = self.window.standardWindowButton(objc2_app_kit::NSWindowButton::CloseButton)?;
+        let zoom = self.window.standardWindowButton(objc2_app_kit::NSWindowButton::ZoomButton)?;
+        let height = self.window.contentView()?.bounds().size.height;
+        let s = self.window.backingScaleFactor();
+        let frame = |b: &objc2_app_kit::NSButton| b.convertRect_toView(b.bounds(), None);
+        let (c, z) = (frame(&close), frame(&zoom));
+        let px = |v: f64| (v * s) as f32;
+        Some(crate::Rect {
+            left: px(c.origin.x),
+            top: px(height - (c.origin.y + c.size.height)),
+            right: px(z.origin.x + z.size.width),
+            bottom: px(height - c.origin.y),
+        })
     }
 }
