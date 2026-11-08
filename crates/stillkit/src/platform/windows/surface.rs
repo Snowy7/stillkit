@@ -117,6 +117,9 @@ pub enum Event {
     FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
     /// A desktop surface activated; Explorer may finish reordering its band afterwards.
     Activated,
     /// The surface lost the activation (another window was clicked or focused).
@@ -1607,6 +1610,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(id, Event::Release(p, b));
         }
         WM_KEYDOWN => push(id, Event::Key(wparam.0 as u16)),
+        windows::Win32::UI::WindowsAndMessaging::WM_KEYUP
+        | windows::Win32::UI::WindowsAndMessaging::WM_SYSKEYUP => push(id, Event::KeyUp(wparam.0 as u16)),
         windows::Win32::UI::WindowsAndMessaging::WM_DPICHANGED => {
             push(id, Event::DpiChanged((wparam.0 & 0xffff) as u32))
         }
