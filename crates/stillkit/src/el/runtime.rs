@@ -61,9 +61,22 @@ use crate::{
 type View<S> = Box<dyn Fn(&S) -> El<S>>;
 
 /// Input waiting for its handler, run at the start of the next frame.
+/// A press an `on_pointer` element holds until release (device px).
+#[derive(Debug, Clone, Copy)]
+struct Capture {
+    hit: HitId,
+    button: Button,
+    origin: Point,
+    last: Point,
+}
+
 enum Action<S> {
     Press(HitId),
     Drag(HitId, f32, f32),
+    /// The pointer's story on an element with `on_pointer`.
+    Pointer(HitId, super::element::PointerEvent),
+    /// The wheel over an element with `on_wheel`.
+    Wheel(HitId, super::element::WheelEvent),
     /// A range stepped by this much.
     Step(HitId, f64),
     /// A context menu asked for at this point (design px).
@@ -263,6 +276,11 @@ pub struct Runtime<S> {
     clipboard: Box<dyn super::Clipboard>,
     /// The modifier keys held with the key being handled.
     mods: Modifiers,
+    /// The modifiers held, as the host last said ([`Runtime::set_modifiers`]).
+    held: Modifiers,
+    /// The press an `on_pointer` element holds, and where the pointer last hovered one.
+    capture: Option<Capture>,
+    hovered_at: Option<(HitId, Point)>,
     /// Whether the window has the keyboard (the caret blinks and shows only then).
     active: bool,
     /// Whether the last paint drew the caret.
@@ -358,6 +376,9 @@ impl<S: 'static> Runtime<S> {
             selecting: None,
             clipboard: Box::new(super::clipboard::Memory::default()),
             mods: Modifiers::NONE,
+            held: Modifiers::NONE,
+            capture: None,
+            hovered_at: None,
             active: true,
             caret_shown: false,
             feedback: Feedback::default(),
@@ -538,6 +559,8 @@ impl<S> Runtime<S> {
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
+                | Action::Pointer(hit, _)
+                | Action::Wheel(hit, _)
                 | Action::Step(hit, _)
                 | Action::Context(hit, ..)
                 | Action::Timeout(hit) => *hit,
@@ -557,6 +580,19 @@ impl<S> Runtime<S> {
                         tx.instant();
                     }
                     None => continue,
+                },
+                Action::Pointer(_, event) => match &el.on_pointer {
+                    Some(handler) => {
+                        if !handler(state, &event, &mut tx) {
+                            continue;
+                        }
+                        tx.instant();
+                    }
+                    None => continue,
+                },
+                Action::Wheel(_, event) => match &el.on_wheel {
+                    Some(handler) if handler(state, &event, &mut tx) => {}
+                    _ => continue,
                 },
                 Action::Step(_, delta) => match &el.on_step {
                     Some(handler) => handler(state, delta),
@@ -963,6 +999,9 @@ impl<S> Runtime<S> {
                 self.pointer = Some(p);
                 // Scrolling closes a tooltip; its trigger shows none until the pointer leaves.
                 self.hide_tip();
+                if self.wheel_handler(p.at, delta) {
+                    return;
+                }
                 return self.wheel(p.at, delta);
             }
             Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) => self.pointer = Some(p),
@@ -979,6 +1018,7 @@ impl<S> Runtime<S> {
         if let Response::Activate(hit) = self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), event) {
             self.queue.push(Action::Press(hit));
         }
+        self.pointer_input(event);
         if !self.fields.is_empty()
             && matches!(event, Event::Press(..) | Event::Move(_) | Event::Release(..) | Event::CaptureLost | Event::Cancelled | Event::Leave)
         {
@@ -1012,6 +1052,125 @@ impl<S> Runtime<S> {
                 self.reveal_index(index);
             }
         }
+    }
+
+    /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
+    /// pass them before each pointer event ([`run`](super::run) does).
+    pub fn set_modifiers(&mut self, mods: Modifiers) {
+        self.held = mods;
+    }
+
+    /// Whether the element hit `hit` takes raw pointer events.
+    fn takes_pointer(&self, hit: HitId) -> bool {
+        element(&self.root, &self.laid, hit).is_some_and(|el| el.on_pointer.is_some())
+    }
+
+    /// Feeds `on_pointer` elements: a press that begins on one holds the pointer until it is
+    /// released; moves over one with nothing held hover it.
+    fn pointer_input(&mut self, event: &Event) {
+        use super::element::PointerPhase as Phase;
+        match *event {
+            Event::Press(p, button) | Event::DoubleClick(p, button) if self.capture.is_none() => {
+                let clicks = if matches!(event, Event::DoubleClick(..)) { 2 } else { 1 };
+                let Some(hit) = self.ix.hover.filter(|&h| self.takes_pointer(h)) else { return };
+                self.capture = Some(Capture { hit, button, origin: p.at, last: p.at });
+                self.push_pointer(hit, Phase::Down, button, p.at, p.at, p.at, clicks);
+            }
+            Event::Move(p) => match self.capture.as_mut() {
+                Some(c) => {
+                    let (hit, button, origin, last) = (c.hit, c.button, c.origin, c.last);
+                    c.last = p.at;
+                    self.push_pointer(hit, Phase::Move, button, p.at, last, origin, 1);
+                }
+                None => {
+                    let hover = self.ix.hover.filter(|&h| self.takes_pointer(h));
+                    let last = self.hovered_at.filter(|(h, _)| Some(*h) == hover).map_or(p.at, |(_, at)| at);
+                    self.hovered_at = hover.map(|h| (h, p.at));
+                    if let Some(hit) = hover {
+                        self.push_pointer(hit, Phase::Hover, Button::Left, p.at, last, p.at, 1);
+                    }
+                }
+            },
+            Event::Release(p, button) if self.capture.is_some_and(|c| c.button == button) => {
+                if let Some(c) = self.capture.take() {
+                    self.push_pointer(c.hit, Phase::Up, button, p.at, c.last, c.origin, 1);
+                }
+            }
+            Event::CaptureLost | Event::Cancelled | Event::Deactivated => {
+                if let Some(c) = self.capture.take() {
+                    self.push_pointer(c.hit, Phase::Cancel, c.button, c.last, c.last, c.origin, 1);
+                }
+            }
+            Event::Leave => self.hovered_at = None,
+            _ => {}
+        }
+    }
+
+    /// Queues a pointer event for `hit` (device px in; design px out). A move right after a
+    /// queued move of the same element merges into it, its deltas added.
+    #[allow(clippy::too_many_arguments)]
+    fn push_pointer(
+        &mut self,
+        hit: HitId,
+        phase: super::element::PointerPhase,
+        button: Button,
+        at: Point,
+        last: Point,
+        origin: Point,
+        clicks: u8,
+    ) {
+        use super::element::PointerPhase as Phase;
+        let s = self.scale;
+        let rect = self
+            .laid
+            .iter()
+            .position(|l| l.hit == hit)
+            .map(|i| self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect))
+            .unwrap_or_default();
+        let design = |p: Point| Point::new(p.x / s, p.y / s);
+        let mut event = super::element::PointerEvent {
+            phase,
+            button,
+            at: design(at),
+            local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+            delta: Point::new((at.x - last.x) / s, (at.y - last.y) / s),
+            origin: design(origin),
+            size: (rect.width() / s, rect.height() / s),
+            mods: self.held,
+            clicks,
+        };
+        if matches!(phase, Phase::Move | Phase::Hover)
+            && let Some(Action::Pointer(h, prev)) = self.queue.last()
+            && *h == hit
+            && prev.phase == phase
+        {
+            event.delta = Point::new(event.delta.x + prev.delta.x, event.delta.y + prev.delta.y);
+            self.queue.pop();
+        }
+        self.queue.push(Action::Pointer(hit, event));
+    }
+
+    /// Gives the wheel to the innermost element under the pointer with `on_wheel`; whether
+    /// one took it.
+    fn wheel_handler(&mut self, at: Point, delta: i16) -> bool {
+        let s = self.scale;
+        let mut index = self.ix.hover.and_then(|h| self.index_of_hit(h));
+        let flat = if index.is_some() { flatten(&self.root) } else { Vec::new() };
+        while let Some(i) = index.filter(|&i| i < self.laid.len()) {
+            if flat.get(i).is_some_and(|el| el.on_wheel.is_some()) {
+                let rect = self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect);
+                let event = super::element::WheelEvent {
+                    at: Point::new(at.x / s, at.y / s),
+                    local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+                    delta: f32::from(delta) / 120.0,
+                    mods: self.held,
+                };
+                self.queue.push(Action::Wheel(self.laid[i].hit, event));
+                return true;
+            }
+            index = self.laid[i].parent;
+        }
+        false
     }
 
     fn drag(&mut self, at: Point) {
