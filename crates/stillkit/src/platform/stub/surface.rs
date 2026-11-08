@@ -61,6 +61,13 @@ pub enum Event {
     Release(Pointer, Button),
     /// Double click.
     DoubleClick(Pointer, Button),
+    /// Files dragged from another app are over the surface ([`take_dropped_files`] after
+    /// [`Event::FilesDropped`]).
+    FilesHover(Pointer),
+    /// The dragged files left the surface, or the drag was cancelled.
+    FilesLeave,
+    /// Files were dropped here; [`take_dropped_files`] has their paths.
+    FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
     /// A desktop surface activated; Explorer may finish reordering its band afterwards.
@@ -239,4 +246,19 @@ impl crate::platform::Window for Surface {
     fn next_event() -> Option<(SurfaceId, Event)> {
         next_event()
     }
+}
+
+thread_local! {
+    static DROPPED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The paths of the files dropped with the last [`Event::FilesDropped`] (taken once).
+pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
+    DROPPED.with_borrow_mut(std::mem::take)
+}
+
+/// Keeps dropped paths for [`take_dropped_files`].
+#[allow(dead_code)]
+pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
+    DROPPED.with_borrow_mut(|d| *d = paths);
 }

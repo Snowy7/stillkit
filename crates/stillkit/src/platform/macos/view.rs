@@ -130,6 +130,34 @@ define_class!(
             self.send(Event::Move(self.pointer(event)));
         }
 
+        /// Files dragged from Finder or another app: hover, leave and drop, so views can show
+        /// a drop target and take the paths.
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, info: &AnyObject) -> usize {
+            self.files_over(info)
+        }
+
+        #[unsafe(method(draggingUpdated:))]
+        fn dragging_updated(&self, info: &AnyObject) -> usize {
+            self.files_over(info)
+        }
+
+        #[unsafe(method(draggingExited:))]
+        fn dragging_exited(&self, _info: Option<&AnyObject>) {
+            self.send(Event::FilesLeave);
+        }
+
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag_operation(&self, info: &AnyObject) -> objc2::runtime::Bool {
+            let paths = dragged_files(info);
+            if paths.is_empty() {
+                return objc2::runtime::Bool::NO;
+            }
+            super::surface::set_dropped_files(paths);
+            self.send(Event::FilesDropped(self.drag_pointer(info)));
+            objc2::runtime::Bool::YES
+        }
+
         #[unsafe(method(mouseExited:))]
         fn mouse_exited(&self, _event: &NSEvent) {
             self.send(Event::Leave);
@@ -446,4 +474,43 @@ impl View {
             events.raise();
         }
     }
+}
+
+impl View {
+    /// Files over the view: where, as a pointer; the copy operation when they are files.
+    fn files_over(&self, info: &AnyObject) -> usize {
+        if dragged_files(info).is_empty() {
+            return 0; // NSDragOperationNone
+        }
+        self.send(Event::FilesHover(self.drag_pointer(info)));
+        1 // NSDragOperationCopy
+    }
+
+    /// A drag's place as a pointer in the view's device pixels.
+    fn drag_pointer(&self, info: &AnyObject) -> Pointer {
+        // SAFETY: NSDraggingInfo's `draggingLocation`, in window coordinates.
+        let at: NSPoint = unsafe { msg_send![info, draggingLocation] };
+        let local = self.convertPoint_fromView(at, None);
+        let s = self.scale();
+        Pointer { at: Point::new((local.x * s) as f32, (local.y * s) as f32), screen: screen::to_px(NSEvent::mouseLocation()) }
+    }
+}
+
+/// The file paths a drag carries (file URLs on its pasteboard).
+fn dragged_files(info: &AnyObject) -> Vec<std::path::PathBuf> {
+    use objc2_app_kit::NSPasteboard;
+    // SAFETY: NSDraggingInfo's `draggingPasteboard`, an NSPasteboard.
+    let board: Option<Retained<NSPasteboard>> = unsafe { msg_send![info, draggingPasteboard] };
+    let Some(board) = board else { return Vec::new() };
+    let Some(items) = board.pasteboardItems() else { return Vec::new() };
+    // SAFETY: an extern static AppKit defines.
+    let file_url = unsafe { objc2_app_kit::NSPasteboardTypeFileURL };
+    items
+        .iter()
+        .filter_map(|item| item.stringForType(file_url))
+        .filter_map(|url| {
+            let url = objc2_foundation::NSURL::URLWithString(&url)?;
+            url.path().map(|p| std::path::PathBuf::from(p.to_string()))
+        })
+        .collect()
 }
