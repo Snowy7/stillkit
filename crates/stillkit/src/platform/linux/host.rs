@@ -34,3 +34,6 @@ pub fn reduced_motion() -> bool {
             .is_ok_and(|out| out.status.success() && out.stdout.trim_ascii() == b"false")
     })
 }
+
+/// The [`Waker`](crate::Waker)'s native half (an eventfd beside the display).
+pub(crate) use super::wake::Poster;

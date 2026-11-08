@@ -157,3 +157,8 @@ test = true
 [[test]]
 name = "macos_no_gpu_driver"
 harness = false
+
+# Waking the UI thread's wait from another thread needs a main-thread event queue.
+[[test]]
+name = "waker"
+harness = false

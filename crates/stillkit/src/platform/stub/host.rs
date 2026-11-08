@@ -24,3 +24,11 @@ pub fn wait() {
 pub fn reduced_motion() -> bool {
     false
 }
+/// Compile-only waker half.
+pub(crate) struct Poster;
+impl Poster {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+    pub(crate) fn post(&self) {}
+}
