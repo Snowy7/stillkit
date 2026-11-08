@@ -37,7 +37,7 @@ notes area).
 |---|---|
 | `el()`, `col()`, `row()`, `grid(n)` | containers: a column, a row, `n` equal columns |
 | `text(s)` | one line in a type role (`.font(TextRole)`), cut with an ellipsis; `.wrap(lines)` wraps |
-| `icon(Icon)` | a vector icon filling its square box (`token::ICON` unless sized) |
+| `icon(Icon)` | a vector icon filling its square box (`token::ICON` unless sized); `Icon::Path(&IconPath)` draws an app's own SVG path data on the 24-unit grid |
 | `image(Arc<Image>)` | a bitmap at its own size unless sized; rounded with `.radius` |
 | `arc(fraction)` | a ring or meter: a circle fitting its box, `fraction` of its span filled in `color` (`token::ACCENT`) over a track (`.track(paint)`, `token::FILL`; `.no_track()`), stroked `token::RING` wide (`.stroke(len)`) with round caps; `.arc_start(ArcStart::Top \| Right \| Bottom \| Left)` or any start, `.arc_angle(radians)` clockwise from twelve (`1.25 * PI` is half past seven), and `.arc_span(0..=1)` (`Left` with `0.5` is a semicircle meter; 7:30 with `0.75` a gauge); with motion the fraction springs |
 | `paint(\|f, rect, id\| ..)` | draws with the kit (`Frame`) into its laid-out rect; `id` is the element's hit id, so a kit control drawn here hovers, presses and focuses like any element |
