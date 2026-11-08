@@ -42,7 +42,7 @@ use windows::Win32::System::Registry::{
 };
 use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
 use windows::Win32::System::WinRT::{
-    CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
+    DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions,
     IActivationFactory, RoGetActivationFactory,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -59,6 +59,27 @@ use windows_numerics::Vector2;
 
 use super::glass::Backdrop;
 use crate::glass::{GlassMaterial, Shape};
+
+/// `CreateDispatcherQueueController`, looked up the first time a frost needs a queue. A static
+/// import would map coremessaging.dll into every stillkit process at start, frost or not (rule:
+/// nothing loads until a surface asks for it).
+fn create_queue(options: DispatcherQueueOptions) -> Result<DispatcherQueueController> {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW};
+    type Create = unsafe extern "system" fn(DispatcherQueueOptions, *mut *mut core::ffi::c_void) -> windows::core::HRESULT;
+    // SAFETY: a System32 DLL by name; the handle stays loaded for the process's life.
+    let module = unsafe { LoadLibraryExW(w!("coremessaging.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }
+        .context("coremessaging.dll")?;
+    // SAFETY: a live module and a NUL-terminated export name.
+    let proc = unsafe { GetProcAddress(module, windows::core::s!("CreateDispatcherQueueController")) }
+        .context("CreateDispatcherQueueController")?;
+    // SAFETY: the export has exactly this signature (dispatcherqueue.h).
+    let create: Create = unsafe { std::mem::transmute(proc) };
+    let mut raw = std::ptr::null_mut();
+    // SAFETY: `options` is plain data; `raw` receives an owned reference on success.
+    unsafe { create(options, &mut raw) }.ok()?;
+    // SAFETY: on success `raw` is a DispatcherQueueController we now own.
+    Ok(unsafe { DispatcherQueueController::from_raw(raw) })
+}
 
 /// The provider of one UI thread ([`crate::glass`] uses it when no backdrop is installed).
 #[derive(Default)]
@@ -229,8 +250,7 @@ impl SystemBackdrop {
                     threadType: DQTYPE_THREAD_CURRENT,
                     apartmentType: DQTAT_COM_NONE,
                 };
-                // SAFETY: a plain options struct; the controller lives as long as this thread.
-                *queue = Some(unsafe { CreateDispatcherQueueController(options) }.context("dispatcher queue")?);
+                *queue = Some(create_queue(options).context("dispatcher queue")?);
             }
             Ok(())
         })
