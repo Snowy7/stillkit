@@ -64,6 +64,9 @@ pub use element::{
 };
 pub use crate::platform::current::host::reduced_motion;
 pub use clipboard::{Clipboard, Memory as MemoryClipboard};
+/// The system clipboard: copy and paste with other apps outside fields (`set_clipboard`, or
+/// an app's own "Copy" action).
+pub use crate::platform::current::clipboard::System as SystemClipboard;
 pub use host::{App, Input, Script, run};
 /// What a trigger opens, as [`crate::Detail::popup`] tells assistive technology.
 pub use accesskit::HasPopup;
