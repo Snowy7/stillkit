@@ -225,6 +225,8 @@ pub struct Runtime<S> {
     scrolling: bool,
     /// Keys to scroll into view once the layout is current.
     reveal: Vec<Key>,
+    /// A [`El::follow_end`] view jumped to its end in the last layout.
+    followed: bool,
     /// Range steps queued since the view last ran, by hit, so quick keys add up.
     stepped: HashMap<HitId, f64>,
     /// Focus stops of the last paint.
@@ -347,6 +349,7 @@ impl<S: 'static> Runtime<S> {
             scrolls: HashMap::new(),
             scrolling: false,
             reveal: Vec::new(),
+            followed: false,
             stepped: HashMap::new(),
             nav: Vec::new(),
             semantics: Vec::new(),
@@ -445,7 +448,7 @@ impl<S> Runtime<S> {
         if !left.is_empty() {
             self.ghosts.retain(|g| !left.contains(&g.id));
         }
-        let scrolled = self.tick_scrolls();
+        let scrolled = self.tick_scrolls() || std::mem::take(&mut self.followed);
         // A virtual list scrolled past what it built: build again, in this frame.
         if scrolled && self.virtual_stale() {
             let before = keyed(&self.root, &self.laid, &self.theme);
@@ -760,6 +763,7 @@ impl<S> Runtime<S> {
     fn sync_scrolls(&mut self) {
         let t = self.anim.t;
         let mut seen = HashSet::new();
+        let mut followed = false;
         let areas: HashMap<u64, (f32, f32)> =
             self.fields.keys().filter_map(|&id| Some((id, self.field_extent(id)?))).collect();
         each(&self.root, &self.laid, &mut |el, i, _| {
@@ -771,11 +775,17 @@ impl<S> Runtime<S> {
                 if view.axis != axis {
                     *view = ScrollView::new(axis);
                 }
+                let follow = el.follow_end && view.at_end();
                 view.laid(l.rect, extent, t);
+                if follow && !view.at_end() {
+                    view.to(view.max, None, t);
+                    followed = true;
+                }
                 seen.insert(l.id);
             }
         });
         self.scrolls.retain(|id, _| seen.contains(id));
+        self.followed |= followed;
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
