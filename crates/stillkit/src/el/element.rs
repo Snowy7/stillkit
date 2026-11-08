@@ -378,6 +378,68 @@ pub(crate) type OnText<S> = Box<dyn Fn(&mut S, &str)>;
 pub(crate) type OnContext<S> = Box<dyn Fn(&mut S, f32, f32)>;
 /// A timeout handler ([`El::on_timeout`]).
 pub(crate) type OnTimeout<S> = (Duration, Box<dyn Fn(&mut S)>);
+/// A pointer handler ([`El::on_pointer`]): whether it changed the state (the view runs).
+pub(crate) type OnPointer<S> = Box<dyn Fn(&mut S, &PointerEvent, &mut Tx) -> bool>;
+/// A wheel handler ([`El::on_wheel`]): whether it changed the state (the view runs).
+pub(crate) type OnWheel<S> = Box<dyn Fn(&mut S, &WheelEvent, &mut Tx) -> bool>;
+
+/// What a pointer did on an element with [`El::on_pointer`]. Positions are design px.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointerEvent {
+    /// What happened.
+    pub phase: PointerPhase,
+    /// The button pressed (for every phase of a press; `Left` while hovering).
+    pub button: crate::Button,
+    /// Where the pointer is, from the window's top-left.
+    pub at: crate::Point,
+    /// Where it is from the element's top-left (outside its box during a captured drag).
+    pub local: crate::Point,
+    /// How far it moved since the element's last event (moves within a frame add up).
+    pub delta: crate::Point,
+    /// Where the press began, from the window's top-left (`at` while hovering).
+    pub origin: crate::Point,
+    /// The element's size.
+    pub size: (f32, f32),
+    /// The modifier keys held.
+    pub mods: Modifiers,
+    /// 1 for a click, 2 for a double click (on `Down`).
+    pub clicks: u8,
+}
+
+impl PointerEvent {
+    /// How far the pointer is from where the press began.
+    pub fn travel(&self) -> crate::Point {
+        crate::Point::new(self.at.x - self.origin.x, self.at.y - self.origin.y)
+    }
+}
+
+/// The phase of a [`PointerEvent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerPhase {
+    /// It moved over the element with no button held.
+    Hover,
+    /// A button went down on the element: the element holds the pointer until it is released.
+    Down,
+    /// It moved while held (anywhere, even outside the element or the window).
+    Move,
+    /// The button went up.
+    Up,
+    /// The press ended without a release (the window lost the pointer or deactivated).
+    Cancel,
+}
+
+/// The wheel turned over an element with [`El::on_wheel`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WheelEvent {
+    /// Where the pointer is, from the window's top-left (design px).
+    pub at: crate::Point,
+    /// Where it is from the element's top-left (design px).
+    pub local: crate::Point,
+    /// Notches, positive away from the user (up); a touchpad gives fractions.
+    pub delta: f32,
+    /// The modifier keys held.
+    pub mods: Modifiers,
+}
 
 /// A range's values ([`El::range`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -655,6 +717,8 @@ pub struct El<S> {
     pub(crate) anim: Anim,
     pub(crate) on_press: Option<Press<S>>,
     pub(crate) on_drag: Option<Drag<S>>,
+    pub(crate) on_pointer: Option<OnPointer<S>>,
+    pub(crate) on_wheel: Option<OnWheel<S>>,
     pub(crate) on_key: Option<OnKey<S>>,
     pub(crate) on_step: Option<OnStep<S>>,
     pub(crate) group: Option<Group>,
@@ -696,6 +760,8 @@ fn new<S>(what: What) -> El<S> {
         anim: Anim::default(),
         on_press: None,
         on_drag: None,
+        on_pointer: None,
+        on_wheel: None,
         on_key: None,
         on_step: None,
         group: None,
@@ -1405,6 +1471,28 @@ impl<S> El<S> {
         self
     }
 
+    /// Runs on `&mut S` for the pointer's raw story on the element: `Hover` while it moves
+    /// over with no button held, then `Down`, `Move`… and `Up` (or `Cancel`) for a press of
+    /// any button that began on it, which holds the pointer until released, wherever it goes.
+    /// Each event has its place, its delta since the last (moves within a frame add up, so a
+    /// fast drag runs the handler once a frame), the press's origin, the modifiers and the
+    /// click count: number scrubbing, splitters, tab and row drags, canvases.
+    ///
+    /// Return whether the state changed: `false` (a hover that changed nothing) runs no view.
+    /// Changes land at once, with no motion, as a drag's do. Presses still reach `on_press`.
+    pub fn on_pointer(mut self, handler: impl Fn(&mut S, &PointerEvent, &mut Tx) -> bool + 'static) -> Self {
+        self.on_pointer = Some(Box::new(handler));
+        self
+    }
+
+    /// Runs on `&mut S` when the wheel turns over the element (or anything inside it without
+    /// its own): the element takes the wheel, so scroll views around it stay put. Return
+    /// whether the state changed: zooming a canvas, nudging a number.
+    pub fn on_wheel(mut self, handler: impl Fn(&mut S, &WheelEvent, &mut Tx) -> bool + 'static) -> Self {
+        self.on_wheel = Some(Box::new(handler));
+        self
+    }
+
     /// Runs on `&mut S` when a key goes down while focus is on the element or inside it, the
     /// innermost first: `on_key(|s, key, tx| match key { KeyCode::DELETE => { ..; Handled::Yes }
     /// _ => Handled::No })`. A used key re-runs the view and goes no further; an unused one
@@ -1483,6 +1571,8 @@ impl<S> El<S> {
     pub(crate) fn interactive(&self) -> bool {
         self.on_press.is_some()
             || self.on_drag.is_some()
+            || self.on_pointer.is_some()
+            || self.on_wheel.is_some()
             || self.on_step.is_some()
             || self.sem.focusable
             || self.scroll.is_some() && matches!(self.what, What::Box(_))
