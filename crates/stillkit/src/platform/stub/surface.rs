@@ -240,3 +240,14 @@ impl crate::platform::Window for Surface {
         next_event()
     }
 }
+
+impl Surface {
+    /// The title area's height where the system draws window controls: only macOS does, so
+    /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
+    pub fn set_caption(&self, _: crate::Caption) {}
+
+    /// Where the system draws the window controls: nowhere here (apps draw their own).
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        None
+    }
+}
