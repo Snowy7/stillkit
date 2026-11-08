@@ -2473,7 +2473,7 @@ fn paint_el<S>(
             scrollbar(f, rect, me.extent, *bar);
         }
     }
-    if controls {
+    if controls && !el.quiet {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
     }
     // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
