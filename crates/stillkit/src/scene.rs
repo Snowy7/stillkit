@@ -193,6 +193,9 @@ pub enum Op {
         /// Color.
         color: Rgba,
     },
+    /// Clears `rect` to transparent: a hole that shows what lies beneath the surface, such as
+    /// a native GPU layer ([`crate::el::native`]). Drawn in order, so later ops paint over it.
+    Hole { #[doc = "Bounds in device pixels."] rect: Rect },
     /// Clips what follows to `rect` (intersected with any clip already pushed) until the
     /// matching [`Op::Unclip`]. Scroll views wrap their content in a pair.
     Clip { #[doc = "Bounds in device pixels."] rect: Rect },
@@ -223,6 +226,7 @@ impl Op {
             | Self::RoundedImage { rect, .. }
             | Self::TextField { rect, .. } => rect.inflate(1.0),
             Self::Fill { rect, .. } => rect.inflate(1.0),
+            Self::Hole { rect } => *rect,
             Self::Icon { rect, weight, .. } => rect.inflate(weight + 1.0),
             Self::Stroke { rect, width, .. } => rect.inflate(width / 2.0 + 1.0),
             Self::Line {
@@ -344,6 +348,7 @@ impl DisplayList {
                     | Op::Text { rect, .. }
                     | Op::Emphasis { rect, .. }
                     | Op::Clip { rect }
+                    | Op::Hole { rect }
                     | Op::Shadow { rect, .. }
                     | Op::SoftShadow { rect, .. } => *rect = rect.offset(dx, dy),
                     Op::Unclip => {}

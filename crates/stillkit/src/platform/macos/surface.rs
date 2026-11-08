@@ -286,6 +286,8 @@ pub struct Surface {
     glass: Cell<Option<crate::Glass>>,
     glass_style: Cell<crate::glass::GlassStyle>,
     glass_open: Cell<bool>,
+    /// Native layers by name ([`Surface::native_layer`]): layer-hosting views under the content.
+    natives: RefCell<HashMap<String, Native>>,
     #[cfg(feature = "gpu")]
     gpu: Option<Rc<RefCell<super::gpu::Window>>>,
     #[cfg(feature = "gpu")]
@@ -353,6 +355,7 @@ impl Surface {
             glass: Cell::new(None),
             glass_style: Cell::new(Default::default()),
             glass_open: Cell::new(false),
+            natives: RefCell::default(),
             #[cfg(feature = "gpu")]
             gpu: None,
             #[cfg(feature = "gpu")]
@@ -774,5 +777,74 @@ impl crate::platform::Window for Surface {
     }
     fn next_event() -> Option<(SurfaceId, Event)> {
         next_event()
+    }
+}
+
+/// A native layer: a layer-hosting view with a `CAMetalLayer`, below the content view.
+struct Native {
+    view: Retained<NSView>,
+    layer: Retained<objc2_quartz_core::CALayer>,
+    /// The device-px rect it was last placed at.
+    rect: Option<crate::Rect>,
+}
+
+impl Surface {
+    /// The native layer `name`, made on first use: a `CAMetalLayer` in a layer-hosting view
+    /// beneath the surface's content, where the host draws with its own GPU device. It shows
+    /// only where the content is transparent ([`crate::Op::Hole`], drawn by
+    /// [`crate::el::native`]) and once placed ([`place_native_layer`](Self::place_native_layer)).
+    /// Making one loads no GPU driver: the layer has no device until the host gives it one.
+    pub fn native_layer(&self, name: &str) -> Result<crate::NativeHandle> {
+        if let Some(n) = self.natives.borrow().get(name) {
+            return Ok(crate::NativeHandle::Metal(Retained::as_ptr(&n.layer).cast_mut().cast()));
+        }
+        let mtm = MainThreadMarker::new().context("AppKit views need the main thread")?;
+        // The window's content view is the container the surface's view hangs in.
+        let container = self.window.contentView().context("the surface's window has no container")?;
+        let class = objc2::runtime::AnyClass::get(c"CAMetalLayer").context("QuartzCore has no CAMetalLayer")?;
+        // SAFETY: `+layer` is CALayer's autoreleased constructor; CAMetalLayer is a CALayer.
+        let layer: Retained<objc2_quartz_core::CALayer> = unsafe { msg_send![class, layer] };
+        layer.setContentsScale(self.window.backingScaleFactor());
+        let view = NSView::initWithFrame(NSView::alloc(mtm), NSRect::ZERO);
+        // Layer-hosting: the layer is set before the view wants one.
+        view.setLayer(Some(&layer));
+        view.setWantsLayer(true);
+        view.setHidden(true);
+        container.addSubview_positioned_relativeTo(&view, objc2_app_kit::NSWindowOrderingMode::Below, Some(&self.view));
+        let handle = crate::NativeHandle::Metal(Retained::as_ptr(&layer).cast_mut().cast());
+        self.natives.borrow_mut().insert(name.to_owned(), Native { view, layer, rect: None });
+        Ok(handle)
+    }
+
+    /// Shows native layer `name` at `rect` (device px from the client's top-left), or hides it
+    /// (`None`). Unchanged rects cost nothing; unknown names are ignored.
+    pub fn place_native_layer(&self, name: &str, rect: Option<crate::Rect>) {
+        let mut natives = self.natives.borrow_mut();
+        let Some(n) = natives.get_mut(name) else { return };
+        if n.rect == rect {
+            return;
+        }
+        n.rect = rect;
+        let Some(r) = rect else {
+            n.view.setHidden(true);
+            return;
+        };
+        let s = self.window.backingScaleFactor();
+        let height = self.window.contentView().map_or(0.0, |c| c.bounds().size.height);
+        // The container isn't flipped: AppKit's origin is its bottom-left.
+        let frame = NSRect::new(
+            NSPoint::new(f64::from(r.left) / s, height - f64::from(r.bottom) / s),
+            NSSize::new(f64::from(r.width()) / s, f64::from(r.height()) / s),
+        );
+        n.view.setFrame(frame);
+        n.layer.setContentsScale(s);
+        n.view.setHidden(false);
+    }
+
+    /// Removes native layer `name`; its handle is invalid afterwards.
+    pub fn release_native_layer(&self, name: &str) {
+        if let Some(n) = self.natives.borrow_mut().remove(name) {
+            n.view.removeFromSuperview();
+        }
     }
 }

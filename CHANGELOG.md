@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- Native layers: `el::native(name)` holes and `Surface::native_layer`/`place_native_layer`/`release_native_layer`, so a host's Metal or Vulkan view (a 3D viewport) lives under el content with overlays on top (macOS; Windows GPU surfaces; not yet Wayland).
 - el raw pointer and wheel: `on_pointer` (hover, held press with capture, merged moves, deltas, modifiers, click count) and `on_wheel`; `Runtime::set_modifiers`.
 - el styling for dense tools: `border`, `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - Real soft shadows (`Op::SoftShadow`) with elevation levels per look, and Windows system backdrop frost for CPU surfaces.
