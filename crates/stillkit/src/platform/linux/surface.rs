@@ -1576,6 +1576,9 @@ impl Surface {
 
     /// Nothing to release (see [`native_layer`](Self::native_layer)).
     pub fn release_native_layer(&self, _: &str) {}
+}
+
+impl Surface {
     /// The title area's height where the system draws window controls: only macOS does, so
     /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
     pub fn set_caption(&self, _: crate::Caption) {}

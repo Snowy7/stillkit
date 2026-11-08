@@ -163,6 +163,8 @@ pub enum NativeHandle {
     Metal(*mut std::ffi::c_void),
     /// A child `HWND` (Windows) covering the placed rect: a swapchain for its client area.
     Hwnd(isize),
+}
+
 /// How tall an app window's title area is where the system draws the window controls
 /// ([`Surface::set_caption`](crate::Surface::set_caption); macOS: the traffic lights).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

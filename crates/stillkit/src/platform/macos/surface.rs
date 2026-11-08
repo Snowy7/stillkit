@@ -846,6 +846,9 @@ impl Surface {
         if let Some(n) = self.natives.borrow_mut().remove(name) {
             n.view.removeFromSuperview();
         }
+    }
+}
+
 impl Surface {
     /// How tall the title area is where the traffic lights sit: [`Caption::Compact`] gives the
     /// window an empty compact toolbar, which makes the title area 40 points and centres the

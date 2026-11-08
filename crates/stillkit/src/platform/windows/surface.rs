@@ -1762,6 +1762,9 @@ impl Surface {
             // SAFETY: a child window this surface made.
             let _ = unsafe { DestroyWindow(HWND(child as *mut _)) };
         }
+    }
+}
+
 impl Surface {
     /// The title area's height where the system draws window controls: only macOS does, so
     /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
