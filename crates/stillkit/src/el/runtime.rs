@@ -1647,6 +1647,14 @@ impl<S> Runtime<S> {
         self.stale_view = true;
     }
 
+    /// Runs `f` on the state without running the view: for host bookkeeping the view doesn't
+    /// show (draining a model's outgoing requests, landing a cache), returning what `f`
+    /// returns. Anything the view depends on goes through [`update`](Self::update) instead,
+    /// or the screen keeps the old picture until the view next runs.
+    pub fn touch<R>(&mut self, f: impl FnOnce(&mut S) -> R) -> R {
+        f(&mut self.state)
+    }
+
     /// [`update`](Self::update) with no motion: everything lands on its target at once.
     pub fn update_instant(&mut self, change: impl FnOnce(&mut S)) {
         self.update(change);
