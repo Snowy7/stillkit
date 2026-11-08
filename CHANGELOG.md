@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- File drops: `Event::FilesHover`/`FilesLeave`/`FilesDropped` and `take_dropped_files()` (macOS with hover feedback; Windows on drop).
 - `el::virtual_list`: lists of any length that build only the rows near sight, rebuilding in the same frame when scrolling passes them.
 - Native layers: `el::native(name)` holes and `Surface::native_layer`/`place_native_layer`/`release_native_layer`, so a host's Metal or Vulkan view (a 3D viewport) lives under el content with overlays on top (macOS; Windows GPU surfaces; not yet Wayland).
 - el raw pointer and wheel: `on_pointer` (hover, held press with capture, merged moves, deltas, modifiers, click count) and `on_wheel`; `Runtime::set_modifiers`.
