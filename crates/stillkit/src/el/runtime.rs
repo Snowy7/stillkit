@@ -276,10 +276,13 @@ pub struct Runtime<S> {
     /// Where `Tx::focus`/`blur` (or `Runtime::focus`/`blur`) move focus once the view has run,
     /// and whether a key asked.
     focus_to: Option<(Option<Key>, bool)>,
-    /// Elements with a focus-within look, by identity.
-    withins: Vec<u64>,
-    /// Those of them holding focus now (innermost first).
-    within_on: Vec<u64>,
+    /// Elements with a state look ([`El::hovered`], [`El::pressed`], [`El::focus_within`]),
+    /// by identity.
+    stateful: Vec<u64>,
+    /// Those of them in each state now (innermost first).
+    states_on: super::element::Active,
+    /// Elements that set a pointer shape (and text fields, an I-beam), by identity.
+    cursors: Vec<(u64, crate::Cursor)>,
     // ---- Spinning (`El::spin`) -------------------------------------------------------
     /// Each spinner's turn when it last showed, by identity.
     spins: HashMap<u64, f32>,
@@ -360,8 +363,9 @@ impl<S: 'static> Runtime<S> {
             feedback: Feedback::default(),
             focus_to: None,
             pointing: None,
-            withins: Vec::new(),
-            within_on: Vec::new(),
+            stateful: Vec::new(),
+            states_on: Default::default(),
+            cursors: Vec::new(),
             spins: HashMap::new(),
             spinning: false,
             visible: true,
@@ -401,9 +405,7 @@ impl<S> Runtime<S> {
         if let Some((to, keyed)) = self.focus_to.take() {
             self.move_focus(to, keyed);
         }
-        if !self.withins.is_empty() || !self.within_on.is_empty() {
-            self.follow_focus_within();
-        }
+        self.follow_states();
         if !self.reveal.is_empty() {
             for key in std::mem::take(&mut self.reveal) {
                 if let Some(index) = self.index_of_key(&key) {
@@ -439,29 +441,56 @@ impl<S> Runtime<S> {
             let hover = self.ix.hover;
             self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), &Event::Move(p));
             if self.ix.hover != hover {
+                self.follow_states();
                 self.paint();
             }
         }
         true
     }
 
-    /// Restyles the elements with a [`El::focus_within`] look when focus moved in or out of
-    /// them: their targets change (springing along their motion); the view does not run.
-    fn follow_focus_within(&mut self) {
-        let mut on = Vec::new();
-        let mut at = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
+    /// The pointer's shape now: that of the innermost element under the pointer (or holding
+    /// a press that began on it) that sets one ([`El::cursor`]; text fields show an I-beam),
+    /// else the arrow. Hosts apply it after input ([`run`](super::run) does).
+    pub fn cursor(&self) -> crate::Cursor {
+        let mut at = self.ix.pressed.or(self.ix.hover).and_then(|hit| self.index_of_hit(hit));
         while let Some(i) = at.filter(|&i| i < self.laid.len()) {
             let id = self.laid[i].id;
-            if self.withins.contains(&id) {
-                on.push(id);
+            if let Some(&(_, cursor)) = self.cursors.iter().find(|(c, _)| *c == id) {
+                return cursor;
             }
             at = self.laid[i].parent;
         }
-        if on == self.within_on {
+        crate::Cursor::Arrow
+    }
+
+    /// Restyles the elements with a state look ([`El::hovered`], [`El::pressed`],
+    /// [`El::focus_within`]) when the pointer or focus moved in or out of them, or a press
+    /// began or ended: their targets change (springing along their motion); the view does
+    /// not run.
+    fn follow_states(&mut self) {
+        if self.stateful.is_empty() && self.states_on == Default::default() {
             return;
         }
-        self.within_on = on;
-        let targets = targets(&self.root, &self.laid, &self.theme, self.scale, &self.within_on);
+        let chain = |hit: Option<crate::HitId>| {
+            let mut on = Vec::new();
+            let mut at = hit.and_then(|hit| self.index_of_hit(hit));
+            while let Some(i) = at.filter(|&i| i < self.laid.len()) {
+                let id = self.laid[i].id;
+                if self.stateful.contains(&id) {
+                    on.push(id);
+                }
+                at = self.laid[i].parent;
+            }
+            on
+        };
+        // Pressed shows only while the pointer is still over what was pressed, as washes do.
+        let pressed = self.ix.pressed.filter(|&p| self.ix.hover == Some(p));
+        let active = super::element::Active { hover: chain(self.ix.hover), within: chain(self.ix.focus), press: chain(pressed) };
+        if active == self.states_on {
+            return;
+        }
+        self.states_on = active;
+        let targets = targets(&self.root, &self.laid, &self.theme, self.scale, &self.states_on);
         let all: HashSet<u64> = self.laid.iter().map(|l| l.id).collect();
         self.anim.retarget(&self.laid, &targets, &all, Mode::Animate);
         self.targets = targets;
@@ -621,13 +650,18 @@ impl<S> Runtime<S> {
         if !self.layers.is_empty() {
             laid = self.place_layers(laid);
         }
-        self.withins.clear();
+        self.stateful.clear();
+        self.cursors.clear();
         each(&self.root, &laid, &mut |el, i, _| {
-            if el.within.is_some() {
-                self.withins.push(laid[i].id);
+            if el.states.any() {
+                self.stateful.push(laid[i].id);
+            }
+            let field = el.field().map(|_| crate::Cursor::Text);
+            if let Some(cursor) = el.cursor.or(field) {
+                self.cursors.push((laid[i].id, cursor));
             }
         });
-        let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.within_on);
+        let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.states_on);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
             && mode == Mode::Animate
@@ -969,6 +1003,7 @@ impl<S> Runtime<S> {
         }
         if self.ix != before {
             self.stale_paint = true;
+            self.follow_states();
             // Assistive technology moved the focus: show it.
             if self.ix.focus_visible
                 && self.ix.focus != before.focus
@@ -1732,16 +1767,13 @@ fn keyed<S>(root: &El<S>, laid: &[Laid], theme: &Theme) -> HashMap<u64, (Key, Sn
 
 /// Each laid-out element's targets, in the same order. Motion and `instant` reach down the
 /// subtree. Elements in `within` (identities) take their focus-within look.
-fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]) -> Vec<Target> {
-    type Cx<'a> = (&'a [Laid], &'a Theme, f32, &'a [u64]);
+fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::element::Active) -> Vec<Target> {
+    type Cx<'a> = (&'a [Laid], &'a Theme, f32, &'a super::element::Active);
     fn walk<S>(el: &El<S>, cx: Cx, i: &mut usize, motion: Option<crate::Spring>, instant: bool, out: &mut Vec<Target>) {
-        let (laid, theme, s, within) = cx;
+        let (laid, theme, s, on) = cx;
         let Some(&me) = laid.get(*i) else { return };
         *i += 1;
-        let look = match el.within {
-            Some(patch) if within.contains(&me.id) => el.look.with(patch),
-            _ => el.look,
-        };
+        let look = on.look(me.id, el.look, &el.states);
         let instant = instant || el.anim.instant;
         let motion = if instant {
             None
@@ -1757,6 +1789,8 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
             fill: look.fill.map(|p| p.resolve(theme)),
+            border: look.border.map(|b| b.paint.resolve(theme)),
+            border_width: look.border.map_or(0.0, |b| (b.width.resolve(theme) * s).max(0.0)),
             ink: ink.resolve(theme),
             opacity: look.opacity,
             radius: look
@@ -1779,7 +1813,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]
         }
     }
     let mut out = Vec::with_capacity(laid.len());
-    walk(root, (laid, theme, s, within), &mut 0, None, false, &mut out);
+    walk(root, (laid, theme, s, on), &mut 0, None, false, &mut out);
     out
 }
 
@@ -1974,7 +2008,8 @@ fn paint_el<S>(
     // A shadowed box keeps its ops while they fade in (popups size themselves by them).
     if pose.shadow > 0.0 || el.look.shadow.is_some() {
         // A shadow fading out after its box dropped it fades the default level.
-        let cast = el.look.shadow.or(el.within.and_then(|w| w.shadow));
+        let states = [el.states.within, el.states.hover, el.states.press];
+        let cast = el.look.shadow.or(states.iter().flatten().find_map(|w| w.shadow));
         let cast = cast.unwrap_or(super::element::Cast::Level(Default::default()));
         for layer in cast.layers(theme).iter().filter(|l| l.color.a > 0.0) {
             f.push(Op::SoftShadow {
@@ -1995,6 +2030,15 @@ fn paint_el<S>(
         let c = &theme.color;
         let wash = if enabled { w.feedback.wash(me.hit, w.t, c.hover, c.pressed) } else { Rgba::TRANSPARENT };
         f.fill(rect, radius, wash);
+    }
+    if let Some(color) = pose.border.filter(|c| c.a > 0.0 && pose.border_width > 0.0) {
+        let bw = (pose.border_width * pose.xf.s).max(1.0);
+        f.push(Op::Stroke {
+            rect: rect.inflate(-bw / 2.0),
+            radius: (radius - bw / 2.0).max(0.0),
+            width: bw,
+            color,
+        });
     }
     // Text fits its laid-out width, so a box springing narrower never cuts it short.
     let width = me.rect.width();
@@ -2030,21 +2074,20 @@ fn paint_el<S>(
                 }
             }
         }
-        What::Text { text, role, wrap: None } => {
-            let style = theme.font.style(*role, s);
+        What::Text { text, face, wrap: None } => {
+            let style = face.style(theme, s);
             let fitted = f.text.fit(text, &style, width);
             let (w, h) = f.text.measure(&fitted, &style);
             let top = (rect.top + (rect.height() - h) / 2.0).round();
+            let left = align_x(rect, w, face.align);
             f.push(Op::Text {
-                rect: Rect::new(rect.left, top, w, h),
+                rect: Rect::new(left, top, w, h),
                 text: fitted,
                 style,
                 color: ink,
             });
         }
-        What::Text { text, role, wrap: Some(lines) } => {
-            f.paragraph(rect.left, rect.top, width, text, *role, ink, *lines);
-        }
+        What::Text { text, face, wrap: Some(lines) } => paragraph(f, rect, text, face, ink, *lines),
         What::Icon(icon) => f.icon(rect, *icon, rect.width().min(rect.height()) / s, ink),
         What::Image(image) if radius > 0.0 => f.push(Op::RoundedImage {
             rect,
@@ -2319,5 +2362,35 @@ fn hit<S>(el: &El<S>, id: HitId, rect: Rect) -> Hit {
         enabled: !el.sem.disabled,
         actionable: el.interactive() && !el.sem.disabled,
         checked: el.sem.checked,
+    }
+}
+
+/// Where a line `w` wide starts in `rect` for `align`, on a whole device pixel.
+fn align_x(rect: Rect, w: f32, align: super::element::TextAlign) -> f32 {
+    use super::element::TextAlign;
+    match align {
+        TextAlign::Start => rect.left,
+        TextAlign::Center => (rect.left + (rect.width() - w) / 2.0).round(),
+        TextAlign::End => (rect.right - w).round(),
+    }
+}
+
+/// Wrapped text in `face`: at most `lines` lines of `rect`'s width, each centred in the
+/// face's line height and placed across by its alignment.
+fn paragraph(f: &mut Frame, rect: Rect, text: &str, face: &super::element::Face, color: Rgba, lines: usize) {
+    let style = face.style(f.theme, f.s);
+    let line = face.line(f.theme, f.s);
+    let (_, h) = f.text.measure("Ag", &style);
+    let lead = ((line - h) / 2.0).round();
+    let mut top = rect.top.round();
+    for text in f.text.lines(text, &style, rect.width(), lines) {
+        let (w, h) = f.text.measure(&text, &style);
+        f.push(Op::Text {
+            rect: Rect::new(align_x(rect, w, face.align), top + lead, w, h),
+            text,
+            style: style.clone(),
+            color,
+        });
+        top += line;
     }
 }

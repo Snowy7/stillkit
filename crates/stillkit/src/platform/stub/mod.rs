@@ -33,7 +33,22 @@ pub mod app_window {
         Close,
     }
     /// Cursor.
-    pub enum Cursor {}
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum Cursor {
+        #[default]
+        Arrow,
+        Text,
+        Hand,
+        Move,
+        Resize,
+        ResizeHorizontal,
+        ResizeVertical,
+        Grab,
+        Grabbing,
+        Crosshair,
+        NotAllowed,
+        Copy,
+    }
     /// Sets modal hook.
     pub fn set_modal_hook(_: Option<fn(bool)>) {
         unimplemented!("native windows")
