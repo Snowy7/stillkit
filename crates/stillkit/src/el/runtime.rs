@@ -77,6 +77,8 @@ enum Action<S> {
     Pointer(HitId, super::element::PointerEvent),
     /// The wheel over an element with `on_wheel`.
     Wheel(HitId, super::element::WheelEvent),
+    /// Files dropped on an element with `on_drop_files`.
+    Files(HitId, Vec<std::path::PathBuf>),
     /// A range stepped by this much.
     Step(HitId, f64),
     /// A context menu asked for at this point (design px).
@@ -281,6 +283,8 @@ pub struct Runtime<S> {
     /// The press an `on_pointer` element holds, and where the pointer last hovered one.
     capture: Option<Capture>,
     hovered_at: Option<(HitId, Point)>,
+    /// The element dragged files are over that would take them (its place in `laid`).
+    drop_target: Option<usize>,
     /// Whether the window has the keyboard (the caret blinks and shows only then).
     active: bool,
     /// Whether the last paint drew the caret.
@@ -379,6 +383,7 @@ impl<S: 'static> Runtime<S> {
             held: Modifiers::NONE,
             capture: None,
             hovered_at: None,
+            drop_target: None,
             active: true,
             caret_shown: false,
             feedback: Feedback::default(),
@@ -516,7 +521,8 @@ impl<S> Runtime<S> {
         };
         // Pressed shows only while the pointer is still over what was pressed, as washes do.
         let pressed = self.ix.pressed.filter(|&p| self.ix.hover == Some(p));
-        let active = super::element::Active { hover: chain(self.ix.hover), within: chain(self.ix.focus), press: chain(pressed) };
+        let drop = self.drop_target.and_then(|i| self.laid.get(i)).map(|l| vec![l.id]).unwrap_or_default();
+        let active = super::element::Active { hover: chain(self.ix.hover), within: chain(self.ix.focus), press: chain(pressed), drop };
         if active == self.states_on {
             return;
         }
@@ -571,6 +577,7 @@ impl<S> Runtime<S> {
                 | Action::Drag(hit, ..)
                 | Action::Pointer(hit, _)
                 | Action::Wheel(hit, _)
+                | Action::Files(hit, _)
                 | Action::Step(hit, _)
                 | Action::Context(hit, ..)
                 | Action::Timeout(hit) => *hit,
@@ -598,6 +605,10 @@ impl<S> Runtime<S> {
                         }
                         tx.instant();
                     }
+                    None => continue,
+                },
+                Action::Files(_, paths) => match &el.on_files {
+                    Some(handler) => handler(state, &paths),
                     None => continue,
                 },
                 Action::Wheel(_, event) => match &el.on_wheel {
@@ -1005,6 +1016,9 @@ impl<S> Runtime<S> {
             Event::TextSubmit => return self.rich_edit_submit(),
             Event::Key(0x09) => return self.tab(self.mods.shift),
             Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
+            Event::FilesHover(p) => return self.files_over(Some(p.at)),
+            Event::FilesLeave => return self.files_over(None),
+            Event::FilesDropped(p) => return self.drop_files(p.at.x, p.at.y, crate::take_dropped_files()),
             Event::Wheel(p, delta) => {
                 self.pointer = Some(p);
                 // Scrolling closes a tooltip; its trigger shows none until the pointer leaves.
@@ -1123,6 +1137,38 @@ impl<S> Runtime<S> {
             }
         }
         out
+    }
+
+    /// Files dragged from another app are over `at` (device px; `None`: they left): the
+    /// innermost element there with [`on_drop_files`](super::El::on_drop_files) takes its
+    /// [`dropping`](super::El::dropping) look.
+    pub fn files_over(&mut self, at: Option<Point>) {
+        let target = at.and_then(|p| self.drop_target_at(p));
+        if target != self.drop_target {
+            self.drop_target = target;
+            self.follow_states();
+            self.stale_paint = true;
+        }
+    }
+
+    /// Files dropped at (`x`, `y`) device px: the innermost element there with
+    /// [`on_drop_files`](super::El::on_drop_files) gets their paths. Hosts call it with
+    /// [`take_dropped_files`](crate::take_dropped_files) on `Event::FilesDropped`
+    /// ([`handle`](Self::handle) does).
+    pub fn drop_files(&mut self, x: f32, y: f32, paths: Vec<std::path::PathBuf>) {
+        let target = self.drop_target_at(Point::new(x, y));
+        self.files_over(None);
+        if let Some(i) = target.filter(|_| !paths.is_empty()) {
+            self.queue.push(Action::Files(self.laid[i].hit, paths));
+        }
+    }
+
+    /// The innermost element under `p` that takes dropped files.
+    fn drop_target_at(&self, p: Point) -> Option<usize> {
+        let flat = flatten(&self.root);
+        (0..self.laid.len().min(flat.len()))
+            .rev()
+            .find(|&i| flat[i].on_files.is_some() && self.poses.get(i).is_some_and(|pose| pose.rect.contains(p)))
     }
 
     /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
