@@ -3,6 +3,10 @@
 pub mod linux;
 #[cfg(target_os = "linux")]
 pub use linux as current;
+// The AT-SPI status codec is pure bytes, so its tests run on every host.
+#[cfg(all(test, not(target_os = "linux")))]
+#[path = "linux/a11y_bus.rs"]
+mod a11y_bus;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "macos")]

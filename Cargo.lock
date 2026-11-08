@@ -2308,6 +2308,7 @@ dependencies = [
  "windows-core",
  "windows-numerics",
  "xkbcommon-dl",
+ "zbus",
 ]
 
 [[package]]

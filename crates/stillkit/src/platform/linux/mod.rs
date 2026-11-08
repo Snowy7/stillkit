@@ -1,5 +1,6 @@
 //! CPU rendering and native Wayland surfaces, plus opt-in Vulkan rendering and glass.
 mod a11y;
+mod a11y_bus;
 pub mod app_window;
 /// Glass services.
 pub mod glass;
