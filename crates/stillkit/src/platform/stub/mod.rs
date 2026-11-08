@@ -1,6 +1,7 @@
 //! Compile-only backend. Native services are unavailable until a backend is installed.
 /// Glass.
 pub mod glass;
+pub(crate) mod dialog;
 /// Caret.
 pub mod caret;
 /// Host.

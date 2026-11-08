@@ -25,6 +25,7 @@ pub use platform::current::compose;
 #[doc(hidden)]
 pub mod controls;
 pub mod damage;
+pub mod dialog;
 pub mod el;
 pub mod focus;
 pub mod geom;
