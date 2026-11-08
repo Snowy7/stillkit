@@ -145,7 +145,7 @@ impl A11y {
     }
     /// Brings the adapter up (AccessKit asks for the latest tree when a client activates it),
     /// or drops it. AccessKit Unix keeps its executor thread and session-bus connection for
-    /// the life of the process once the first adapter exists; see platform-notes.md.
+    /// the life of the process once the first adapter exists; see docs/ui.md, "Linux accessibility".
     pub(super) fn set_enabled(&mut self, enabled: bool) {
         if enabled == self.live.is_some() {
             return;
