@@ -134,11 +134,11 @@ fn parse(source: &str) -> Vec<Block> {
                 | TagEnd::Table
                 | TagEnd::TableHead
                 | TagEnd::TableRow
-                | TagEnd::TableCell => {
-                    if stack.len() > 1 {
-                        let block = stack.pop().unwrap();
-                        stack.last_mut().unwrap().children.push(block);
-                    }
+                | TagEnd::TableCell
+                    if stack.len() > 1 =>
+                {
+                    let block = stack.pop().unwrap();
+                    stack.last_mut().unwrap().children.push(block);
                 }
                 _ => {}
             },
@@ -152,7 +152,7 @@ fn parse(source: &str) -> Vec<Block> {
                 let mut run = marks.last().unwrap().clone();
                 run.text = value.to_string().into();
                 if matches!(stack.last().unwrap().kind, Kind::Code) {
-                    run.code = true;
+                    run = run.mono();
                 }
                 stack.last_mut().unwrap().runs.push(run);
             }
@@ -193,12 +193,13 @@ fn render<S: 'static>(
     match block.kind {
         Kind::Paragraph | Kind::Cell => paragraph(block.runs),
         Kind::Heading(level) => paragraph(block.runs)
-            .font(if level == 1 {
-                TextRole::Title1
-            } else if level == 2 {
-                TextRole::Title2
-            } else {
-                TextRole::Headline
+            .font(match level {
+                1 => TextRole::Title1,
+                2 => TextRole::Title2,
+                3 => TextRole::Title3,
+                4 => TextRole::Headline,
+                5 => TextRole::Body,
+                _ => TextRole::Subheadline,
             })
             .weight(700)
             .role(stillkit::Role::Heading),
@@ -240,14 +241,18 @@ fn render<S: 'static>(
                     el::row()
                         .align(el::Align::Start)
                         .gap(token::GAP)
-                        .child(el::text(first.map_or_else(
-                            || "•".into(),
-                            |n| format!("{}.", n.saturating_add(i as u64)),
-                        )))
+                        .child(
+                            el::text(first.map_or_else(
+                                || "•".into(),
+                                |n| format!("{}.", n.saturating_add(i as u64)),
+                            ))
+                            .min_w(24.0),
+                        )
                         .child(render(child, link, copy_handler).grow(1.0).min_w(0.0))
                 }))
         }
         Kind::Quote => el::col()
+            .gap(token::GAP)
             .pad(token::PAD)
             .border(1.0, token::SEPARATOR)
             .children(
@@ -338,6 +343,6 @@ mod tests {
         );
         assert!(blocks[0].runs.iter().any(|r| &*r.text == "alt"));
         assert!(matches!(blocks[1].kind, Kind::Code));
-        assert!(blocks[1].runs.iter().all(|r| r.code));
+        assert!(blocks[1].runs.iter().all(|r| r.family.is_some() && !r.code));
     }
 }

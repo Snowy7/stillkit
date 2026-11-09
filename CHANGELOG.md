@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Optional kit Markdown view with document selection, themed blocks, tables, links and fenced-code copying.
 - Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
 
 ### Added

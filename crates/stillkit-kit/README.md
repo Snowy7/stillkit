@@ -1,6 +1,6 @@
 # stillkit-kit
 
-Declarative components for `stillkit::el`. The crate depends only on stillkit;
+Declarative components for `stillkit::el`. The default crate depends only on stillkit;
 there are no look-name branches. Charts use public chart drawing inside el paint nodes;
 all other components use el primitives.
 
@@ -528,3 +528,28 @@ a file-like tree, with resizing, sorting, reveal and filtering.
 ## Component stories
 
 The optional [playground](../../docs/guide/playground.md) includes each supported component and all button kinds. Run `cargo run -p stillkit-playground --example stories`; `--goldens DIR` renders every story across looks and schemes.
+
+## Markdown (`markdown` feature)
+
+`Markdown::new(source).on_link(|state, url| ..).build()` renders headings,
+paragraphs, nested ordered/unordered lists, quotes, rules and equal-width GFM tables
+(including column alignment). Inline bold, italic, strike, code and links use native
+rich runs. Fenced code uses a monospace face and a Copy code button. Copy preserves
+the fence contents; `.on_copy(..)` lets an app supply its own clipboard handler.
+Without it the button writes to the system clipboard on activation.
+
+The whole view is one selectable document in reading order. Ctrl+A/C and drag selection
+cross blocks; copy buttons keep their input and their labels are excluded. Layout,
+typography, spacing and paint follow the current theme. Give the built element a
+stable `.key(..)` and compose it inside a bounded scroll view for long documents.
+
+Enable `stillkit-kit = { ..., features = ["markdown"] }`. This opts into
+pulldown-cmark with default features disabled. Parsing happens only when `build`
+runs; retained hover/selection does not parse, and there are no timers, workers or
+network requests. Image markup shows alt text only. Raw HTML is ignored; applications
+can compose their own supplied image elements outside the Markdown view. There is
+no syntax highlighting, HTML renderer or streaming parse cache.
+
+Run `cargo run -p stillkit-kit --features markdown --example markdown_viewer`.
+Without the feature, this example renders the source as selectable plain text, for
+comparing the optional parser/renderer's executable cost.
