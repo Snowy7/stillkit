@@ -58,6 +58,8 @@ pub(crate) struct Layout {
     generation: u64,
     /// Nodes created, restyled, re-measured or re-parented by the last [`Layout::sync`].
     pub touched: usize,
+    #[cfg(feature = "inspect")]
+    pub inspected: Option<Vec<u64>>,
 }
 
 /// What lengths resolve against.
@@ -101,6 +103,8 @@ impl Layout {
             nodes: HashMap::new(),
             generation: 0,
             touched: 0,
+            #[cfg(feature = "inspect")]
+            inspected: None,
         }
     }
 
@@ -130,6 +134,10 @@ impl Layout {
             width: AvailableSpace::Definite(size.0),
             height: AvailableSpace::Definite(size.1),
         };
+        #[cfg(feature = "inspect")]
+        if let Some(inspected) = &mut self.inspected {
+            inspected.extend(order.iter().filter_map(|(id,node)| self.taffy.dirty(*node).unwrap_or(false).then_some(*id)));
+        }
         let measured = self
             .taffy
             .compute_layout_with_measure(node, available, |inputs, _, measure, style| {

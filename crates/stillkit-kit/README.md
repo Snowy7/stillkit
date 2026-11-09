@@ -488,3 +488,7 @@ without `on_open`; Enter/Space still toggle branches.
 
 Run `cargo run -p stillkit-kit --example data_grid` for a 100,000-row table alongside
 a file-like tree, with resizing, sorting, reveal and filtering.
+
+## Component stories
+
+The optional [playground](../../docs/guide/playground.md) includes each supported component and all button kinds. Run `cargo run -p stillkit-playground --example stories`; `--goldens DIR` renders every story across looks and schemes.

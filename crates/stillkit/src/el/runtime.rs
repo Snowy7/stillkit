@@ -36,6 +36,9 @@ use accesskit::Role;
 use anyhow::Result;
 
 mod layer;
+#[cfg(feature = "inspect")]
+#[path = "inspect.rs"]
+pub mod inspect;
 #[cfg(windows)]
 mod native;
 mod text;
@@ -198,6 +201,10 @@ struct Bar {
 /// A view, its state and everything retained between frames. Headless as is; [`super::run`]
 /// hosts one in a window.
 pub struct Runtime<S> {
+    #[cfg(feature = "inspect")]
+    inspector: Option<inspect::Inspector>,
+    #[cfg(feature = "inspect")]
+    look_watch: Option<inspect::ThemeWatch>,
     state: S,
     view: View<S>,
     theme: Theme,
@@ -328,6 +335,10 @@ impl<S: 'static> Runtime<S> {
         scale: f32,
     ) -> Result<Self> {
         let mut runtime = Self {
+            #[cfg(feature = "inspect")]
+            inspector: None,
+            #[cfg(feature = "inspect")]
+            look_watch: None,
             state,
             view: Box::new(view),
             theme,
@@ -411,6 +422,14 @@ impl<S> Runtime<S> {
     /// changed, advances the animation, and repaints if anything it draws changed. Returns
     /// whether a new list was painted ([`damage`](Self::damage) says what it changed).
     pub fn frame(&mut self, dt: Duration) -> bool {
+        #[cfg(feature = "inspect")]
+        if self.inspector.is_some() || self.look_watch.is_some() {
+            return self.tools_frame(dt);
+        }
+        self.frame_inner(dt)
+    }
+
+    fn frame_inner(&mut self, dt: Duration) -> bool {
         self.clock += dt;
         self.anim.t += dt.as_secs_f64() * f64::from(self.time_scale);
         self.fire_timers();
@@ -665,6 +684,26 @@ impl<S> Runtime<S> {
         }
         if let Some(theme) = tx.theme {
             self.set_theme(theme);
+        }
+        if let Some(scale) = tx.scale {
+            self.set_scale(scale);
+        }
+        if let Some(reduced) = tx.reduced {
+            self.set_reduced_motion(reduced);
+        }
+        #[cfg(feature = "inspect")]
+        if let Some((key, state)) = tx.preview
+            && let Some(i) = self.index_of_key(&key)
+        {
+            let root = self.laid[i].rect;
+            let hit = self.list.hits.iter()
+                .find(|h| h.actionable && root.contains(h.rect.center()))
+                .map_or(self.laid[i].hit, |h| h.id);
+            self.ix.hover = matches!(state, inspect::PreviewState::Hover | inspect::PreviewState::Pressed).then_some(hit);
+            self.ix.pressed = (state == inspect::PreviewState::Pressed).then_some(hit);
+            self.ix.focus = (state == inspect::PreviewState::Focus).then_some(hit);
+            self.ix.focus_visible = state == inspect::PreviewState::Focus;
+            self.stale_paint = true;
         }
         self.reveal.extend(tx.reveal);
         if let Some(to) = tx.focus {
@@ -1025,6 +1064,22 @@ impl<S> Runtime<S> {
     /// Feeds one input event. Hover, press and focus changes repaint at the next frame
     /// without running the view; activations queue their handlers.
     pub fn handle(&mut self, event: &Event) {
+        #[cfg(feature = "inspect")]
+        if matches!(event, Event::Key(0x7B)) {
+            self.set_inspector(self.inspector.is_none());
+            return;
+        }
+        #[cfg(feature = "inspect")]
+        if let Some(inspector) = self.inspector.as_mut()
+            && inspector.input(event)
+        {
+            self.stale_paint = true;
+            return;
+        }
+        #[cfg(feature = "inspect")]
+        if self.inspector.is_some() && matches!(event, Event::Move(_)) {
+            self.stale_paint = true;
+        }
         self.input(event);
         self.follow_tip();
     }

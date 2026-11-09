@@ -5,6 +5,8 @@
 - Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
 
 ### Added
+- Component story browser (including ColorPicker), headless story baselines and a runnable ten-minute settings guide.
+- Opt-in F12 element inspector and native look-file reloads, with no inspection code in ordinary builds.
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - Stable-id editor TabStrip with reorder, overflow, close and tear-out intents; composable PopupList listbox.
