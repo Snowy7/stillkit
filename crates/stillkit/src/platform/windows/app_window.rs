@@ -252,15 +252,16 @@ pub fn corner_radius(hwnd: HWND) -> f32 {
     crate::tokens::WINDOW_CORNER_RADIUS * scale_of(hwnd)
 }
 
-fn sync_corners(app: &AppShared, hwnd: HWND) {
+fn sync_corners(app: &AppShared, hwnd: HWND) -> bool {
     let square = corner_radius(hwnd) == 0.0;
-    if app.square.get() == Some(square) { return; }
+    if app.square.get() == Some(square) { return false; }
     let preference = if square { DWMWCP_DONOTROUND } else { DWMWCP_ROUND };
     // SAFETY: one correctly sized DWM attribute on this app's own window.
     if unsafe { DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
         (&raw const preference).cast(), size_of_val(&preference) as u32) }.is_ok() {
         app.square.set(Some(square));
     }
+    true
 }
 
 fn client_point(hwnd: HWND, lparam: LPARAM) -> Point {
@@ -330,8 +331,13 @@ pub(crate) fn message(
 ) -> Option<LRESULT> {
     match msg {
         WM_WINDOWPOSCHANGED => {
-            sync_corners(app, hwnd);
-            push(id, Event::SettingChanged);
+            if sync_corners(app, hwnd) {
+                let mut rect = RECT::default();
+                // SAFETY: query our own client size; a move can change just the contour.
+                if unsafe { GetClientRect(hwnd, &mut rect) }.is_ok() {
+                    push(id, Event::Resized(rect.right as u32, rect.bottom as u32));
+                }
+            }
             None
         }
         WM_NCCALCSIZE if wparam.0 != 0 => {
