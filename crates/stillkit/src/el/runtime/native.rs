@@ -116,7 +116,7 @@ impl<S> Runtime<S> {
         match hit.filter(|_| takes) {
             Some(hit) => self.queue.push(Action::Input(hit, text)),
             // A value with nothing to take edits keeps it (sync_rich_edit puts it back).
-            None if f.value.is_some() => {
+            None if f.value.is_some() && !f.commits => {
                 if let Some(mark) = f.taken.clone() {
                     f.ed.back(mark);
                 }
