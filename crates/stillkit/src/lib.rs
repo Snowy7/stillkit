@@ -73,6 +73,7 @@ pub use scroll::Scroll;
 pub use surface::AnimationFrames;
 pub use surface::{Button, Event, Kind, Pointer, Surface, SurfaceId, next_event, queue_event, take_dropped_files};
 pub use platform::NativeHandle;
+pub use platform::Caption;
 pub use text::{Text, TextStyle, VARIABLE};
 pub use text_field::TextField;
 pub use theme::{Palette, Scheme, ShadowLevel, SoftShadow, Style, TextRole, Theme};

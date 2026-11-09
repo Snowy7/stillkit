@@ -276,3 +276,14 @@ pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
 pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
     DROPPED.with_borrow_mut(|d| *d = paths);
 }
+
+impl Surface {
+    /// The title area's height where the system draws window controls: only macOS does, so
+    /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
+    pub fn set_caption(&self, _: crate::Caption) {}
+
+    /// Where the system draws the window controls: nowhere here (apps draw their own).
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        None
+    }
+}

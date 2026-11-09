@@ -164,3 +164,15 @@ pub enum NativeHandle {
     /// A child `HWND` (Windows) covering the placed rect: a swapchain for its client area.
     Hwnd(isize),
 }
+
+/// How tall an app window's title area is where the system draws the window controls
+/// ([`Surface::set_caption`](crate::Surface::set_caption); macOS: the traffic lights).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Caption {
+    /// The system's standard title bar (32 design px on macOS 26+).
+    #[default]
+    Standard,
+    /// A taller, compact-toolbar title area (40 design px on macOS 26+), with the controls
+    /// centred in it: for an app's own title bar holding menus and tabs.
+    Compact,
+}
