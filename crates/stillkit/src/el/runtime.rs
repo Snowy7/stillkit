@@ -2653,13 +2653,15 @@ fn paint_el<S>(
     }
     // Paint and hits share one affine scope; layout stays upright.
     let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
-    let [x,y,sx,sy,ox,oy] = pose.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]);
-    let origin = Point::new(rect.left + rect.width()*ox, rect.top + rect.height()*oy);
-    let transform = crate::Transform::new(origin,angle,(sx,sy),(x*f.s*pose.xf.s,y*f.s*pose.xf.s));
-    if transform != crate::Transform::IDENTITY {
-        let drawn = f.list.ops.split_off(start);
-        f.push(Op::Transformed { transform, ops:drawn.into() });
-        for h in &mut f.list.hits[hits..] { h.transform(transform); }
+    if angle != 0.0 || pose.transform.is_some() {
+        let [x,y,sx,sy,ox,oy] = pose.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]);
+        let origin = Point::new(rect.left + rect.width()*ox, rect.top + rect.height()*oy);
+        let transform = crate::Transform::new(origin,angle,(sx,sy),(x*f.s*pose.xf.s,y*f.s*pose.xf.s));
+        if transform != crate::Transform::IDENTITY {
+            let drawn = f.list.ops.split_off(start);
+            f.push(Op::Transformed { transform, ops:drawn.into() });
+            for h in &mut f.list.hits[hits..] { h.transform(transform); }
+        }
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
