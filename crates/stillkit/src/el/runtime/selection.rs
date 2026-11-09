@@ -420,7 +420,7 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
             if bounds.width() <= 0.0 || bounds.height() <= 0.0 { continue; }
             f.list.hits.push(crate::Hit { id: link_id(d.id, fragment.source),
                 rect: bounds, role: crate::Role::Link,
-                label: fragment.label.clone(), enabled: true, actionable: true, checked: None });
+                label: fragment.label.clone(), enabled: true, actionable: true, checked: None, shape: None });
         }
     }
     f.push(Op::Clipped {
