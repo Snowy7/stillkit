@@ -765,8 +765,10 @@ impl Painter {
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
         // D2D axis clips expand rotated rectangles to their bounding boxes. Preserve
         // marker clips as geometry scopes when an affine turn is active.
+        // SAFETY: the caller owns the active draw scope; recursive scopes balance their layers.
+        unsafe {
         let mut xf=windows_numerics::Matrix3x2::identity();
-        unsafe { self.target.GetTransform(&mut xf); }
+        self.target.GetTransform(&mut xf);
         if (xf.M12 != 0.0 || xf.M21 != 0.0) && ops.iter().any(|op|matches!(op,Op::Clip{..})) {
             let mut i=0;
             while i<ops.len() {
@@ -778,14 +780,15 @@ impl Painter {
                         end+=1;
                     }
                     let group=Op::RoundedClipped{rect:*rect,radius:0.0,ops:ops[i+1..end].to_vec().into()};
-                    unsafe { self.op(text,&group,damage); }
+                    self.op(text,&group,damage);
                     i=(end+1).min(ops.len());
                 } else {
-                    if !matches!(ops[i],Op::Unclip) && touches(&ops[i],damage) { unsafe {self.op(text,&ops[i],damage);} }
+                    if !matches!(ops[i],Op::Unclip) && touches(&ops[i],damage) { self.op(text,&ops[i],damage); }
                     i+=1;
                 }
             }
             return;
+        }
         }
         let mut pushed = 0;
         // SAFETY: the caller owns this draw scope; each pushed clip is balanced below.
