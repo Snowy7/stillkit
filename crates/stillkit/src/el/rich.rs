@@ -174,10 +174,19 @@ pub(crate) fn layout(
     scale: f32,
     width: f32,
 ) -> Layout {
-    let line = runs
-        .iter()
-        .map(|r| r.style(base, scale).size * 1.5)
-        .fold(line, f32::max);
+    let (mut ascent, mut descent) = (0f32, 0f32);
+    for run in runs {
+        let (_, height, baseline, _) = crate::platform::current::caret::attributed(
+            text,
+            "Ag",
+            &run.style(base, scale),
+            run.italic,
+        );
+        ascent = ascent.max(baseline);
+        descent = descent.max(height - baseline);
+    }
+    let line = line.max(ascent + descent);
+    let baseline = (line - ascent - descent) / 2.0 + ascent;
     let mut out = Layout {
         shape: Shape {
             lines: Vec::new(),
@@ -218,7 +227,7 @@ pub(crate) fn layout(
                 vec![piece]
             };
             for part in pieces {
-                let (w, h, xs) =
+                let (w, h, run_baseline, xs) =
                     crate::platform::current::caret::attributed(text, part, &style, run.italic);
                 if x > 0.0 && x + w > width && !part.chars().all(char::is_whitespace) {
                     out.shape.lines.push(Line {
@@ -241,7 +250,7 @@ pub(crate) fn layout(
                     run: fragment,
                     line: (y / line) as usize,
                     style: style.clone(),
-                    rect: Rect::new(x, y + (line - h) / 2.0, w, h),
+                    rect: Rect::new(x, y + baseline - run_baseline, w, h),
                 });
                 offset += part.len();
                 x += w;

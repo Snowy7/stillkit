@@ -22,7 +22,11 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
         let mut hit = DWRITE_HIT_TEST_METRICS::default();
         // SAFETY: a documented query on a live layout; the out pointers are locals.
         let ok = unsafe { layout.HitTestTextPosition(at, false, &mut x, &mut y, &mut hit) }.is_ok();
-        out.push(if ok { x } else { out.last().copied().unwrap_or(0.0) });
+        out.push(if ok {
+            x
+        } else {
+            out.last().copied().unwrap_or(0.0)
+        });
         at += c.len_utf16() as u32;
     }
     out.push(width);
@@ -30,25 +34,54 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
 }
 
 /// The metrics and stops of the same slanted face used for drawing.
-pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, italic: bool) -> (f32, f32, Vec<f32>) {
-    use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_TEXT_RANGE, DWRITE_TEXT_METRICS};
-    let Some(layout) = text.layout(line, style) else { return (0.0, 0.0, vec![0.0]); };
-    let range = DWRITE_TEXT_RANGE { startPosition: 0, length: line.encode_utf16().count() as u32 };
+pub(crate) fn attributed(
+    text: &mut Text,
+    line: &str,
+    style: &TextStyle,
+    italic: bool,
+) -> (f32, f32, f32, Vec<f32>) {
+    use windows::Win32::Graphics::DirectWrite::{
+        DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_LINE_METRICS,
+        DWRITE_TEXT_METRICS, DWRITE_TEXT_RANGE,
+    };
+    let Some(layout) = text.layout(line, style) else {
+        return (0.0, 0.0, 0.0, vec![0.0]);
+    };
+    let range = DWRITE_TEXT_RANGE {
+        startPosition: 0,
+        length: line.encode_utf16().count() as u32,
+    };
     let mut metrics = DWRITE_TEXT_METRICS::default();
     let mut out = Vec::new();
+    let mut lines = [DWRITE_LINE_METRICS::default()];
+    let mut count = 0;
     // SAFETY: the cached layout is live; all output pointers refer to locals. Restore its shared face before returning.
     unsafe {
-        let _ = layout.SetFontStyle(if italic { DWRITE_FONT_STYLE_ITALIC } else { DWRITE_FONT_STYLE_NORMAL }, range);
+        let _ = layout.SetFontStyle(
+            if italic {
+                DWRITE_FONT_STYLE_ITALIC
+            } else {
+                DWRITE_FONT_STYLE_NORMAL
+            },
+            range,
+        );
         let _ = layout.GetMetrics(&mut metrics);
+        let _ = layout.GetLineMetrics(Some(&mut lines), &mut count);
         let mut at = 0;
         for c in line.chars() {
             let (mut x, mut y) = (0.0, 0.0);
             let mut hit = DWRITE_HIT_TEST_METRICS::default();
             let _ = layout.HitTestTextPosition(at, false, &mut x, &mut y, &mut hit);
-            out.push(x); at += c.len_utf16() as u32;
+            out.push(x);
+            at += c.len_utf16() as u32;
         }
         let _ = layout.SetFontStyle(DWRITE_FONT_STYLE_NORMAL, range);
     }
     out.push(metrics.widthIncludingTrailingWhitespace);
-    (metrics.widthIncludingTrailingWhitespace, metrics.height, out)
+    (
+        metrics.widthIncludingTrailingWhitespace,
+        metrics.height,
+        lines[0].baseline,
+        out,
+    )
 }

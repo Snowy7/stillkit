@@ -7,7 +7,9 @@ use crate::TextStyle;
 /// entry per char, plus the end.
 pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> {
     let layout = text.shape(line, style, false);
-    let Some((ct, width)) = layout.lines.first() else { return vec![0.0] };
+    let Some((ct, width)) = layout.lines.first() else {
+        return vec![0.0];
+    };
     let mut out = Vec::with_capacity(line.len() + 1);
     let mut utf16 = 0;
     for c in line.chars() {
@@ -19,7 +21,12 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
     out
 }
 
-pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, italic: bool) -> (f32, f32, Vec<f32>) {
+pub(crate) fn attributed(
+    text: &mut Text,
+    line: &str,
+    style: &TextStyle,
+    italic: bool,
+) -> (f32, f32, f32, Vec<f32>) {
     let layout = text.shape(line, style, italic);
     let mut out = Vec::new();
     if let Some((ct, width)) = layout.lines.first() {
@@ -31,5 +38,5 @@ pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, italic:
         }
         out.push(*width as f32);
     }
-    (layout.width, layout.height(), out)
+    (layout.width, layout.height(), layout.ascent as f32, out)
 }
