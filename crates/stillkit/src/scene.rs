@@ -440,9 +440,17 @@ fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect
                 j += 1;
             }
             (Some(a), Some(b)) => {
-                // Ops inserted (or removed) here: the lists line up again a few ops on.
-                let inserted = (1..=RESYNC).find(|k| new.get(j + k) == Some(a));
-                let removed = (1..=RESYNC).find(|k| old.get(i + k) == Some(b));
+                // Ops inserted (or removed) here: the lists line up again a few ops on. A run
+                // never skips a clip boundary: ops past a moved Clip/Unclip draw under another
+                // clip even when they are equal, and Unclip has no bounds to damage.
+                let clean = |run: &[Op]| !run.iter().any(is_clip_boundary);
+                let inserted = (1..=RESYNC).find(|&k| new.get(j + k) == Some(a) && clean(&new[j..j + k]));
+                let removed = (1..=RESYNC).find(|&k| old.get(i + k) == Some(b) && clean(&old[i..i + k]));
+                if inserted.is_none() && removed.is_none() && (is_clip_boundary(a) || is_clip_boundary(b)) {
+                    // A clip boundary changed: everything after it may draw under a new clip.
+                    old[i..].iter().chain(&new[j..]).for_each(|op| push(out, clip, op.bounds()));
+                    break;
+                }
                 match (inserted, removed) {
                     (Some(k), r) if r.is_none_or(|r| k <= r) => {
                         new[j..j + k].iter().for_each(|op| push(out, clip, op.bounds()));
@@ -477,6 +485,11 @@ fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect
             (None, None) => break,
         }
     }
+}
+
+/// Whether `op` opens or closes a clip that later ops draw under.
+fn is_clip_boundary(op: &Op) -> bool {
+    matches!(op, Op::Clip { .. } | Op::Unclip)
 }
 
 /// Fixed tenth-turn prefixes keep unchanged pixels stable. The final partial segment can
@@ -593,6 +606,22 @@ mod tests {
         let only = fill(500.0).bounds();
         assert_eq!(new.damage(&old), Some(only));
         assert_eq!(new.damage_regions(&old), vec![only]);
+    }
+
+    #[test]
+    fn an_equal_op_that_leaves_a_clip_is_still_damaged() {
+        // B is the same op in both lists, but only the old one draws inside the clip: the
+        // part of it outside the clip appears, so it must be repainted.
+        let clip = Op::Clip { rect: Rect::new(0.0, 0.0, 15.0, 10.0) };
+        let (a, b) = (fill(0.0), fill(10.0));
+        let old = list(vec![clip.clone(), a.clone(), b.clone(), Op::Unclip]);
+        let new = list(vec![clip, a, Op::Unclip, b.clone()]);
+        for (after, before) in [(&new, &old), (&old, &new)] {
+            let damage = after.damage(before).expect("damage");
+            assert_eq!(damage.union(b.bounds()), damage, "B's bounds repaint");
+            let regions = after.damage_regions(before);
+            assert!(regions.iter().any(|r| r.union(b.bounds()) == *r), "{regions:?}");
+        }
     }
 
     #[test]
