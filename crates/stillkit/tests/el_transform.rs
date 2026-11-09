@@ -190,3 +190,26 @@ fn selection_uses_the_transformed_text_coordinates() {
     rt.frame(Duration::ZERO);
     assert_eq!(rt.presented("label").unwrap().selection, Some((0, 5)));
 }
+
+#[test]
+fn keyed_click_follows_the_translated_control() {
+    let mut rt = Runtime::new(
+        0,
+        |_| {
+            el::el().pad(20.0).child(
+                el::el()
+                    .key("button")
+                    .size(30.0)
+                    .translate(150.0, 0.0)
+                    .on_press(|n: &mut i32| *n += 1),
+            )
+        },
+        theme(),
+        (300, 180),
+        1.0,
+    )
+    .unwrap();
+    assert!(rt.click("button"));
+    rt.frame(Duration::ZERO);
+    assert_eq!(*rt.state(), 1);
+}

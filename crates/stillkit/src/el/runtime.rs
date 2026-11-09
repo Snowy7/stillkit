@@ -2000,7 +2000,8 @@ impl<S> Runtime<S> {
     /// Presses and releases the pointer at the centre of the element keyed `key`, where it is
     /// drawn now; `false` if there is none.
     pub fn click(&mut self, key: &str) -> bool {
-        let Some(at) = self.presented(key).map(|s| s.rect.center()) else {
+        let hit = self.index_of_key(key).and_then(|i| self.list.hits.iter().find(|h| h.id == self.laid[i].hit));
+        let Some(at) = hit.map(|h| h.rect.center()).or_else(|| self.presented(key).map(|s| s.rect.center())) else {
             return false;
         };
         self.pointer_down(at.x, at.y);
