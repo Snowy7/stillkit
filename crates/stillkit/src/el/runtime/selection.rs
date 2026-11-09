@@ -181,12 +181,20 @@ impl<S> Runtime<S> {
         false
     }
 
-    fn display_at(&self, p: Point, doc: Option<u64>) -> Option<(u64, usize)> {
+    fn display_at(
+        &self,
+        p: Point,
+        doc: Option<u64>,
+        hit: Option<crate::HitId>,
+    ) -> Option<(u64, usize)> {
         self.laid
             .iter()
             .enumerate()
             .filter_map(|(i, l)| {
                 let d = self.display.get(&l.id)?;
+                if hit.is_some_and(|h| h != l.hit) {
+                    return None;
+                }
                 if doc.is_some_and(|id| id != d.doc) {
                     return None;
                 }
@@ -239,7 +247,7 @@ impl<S> Runtime<S> {
                     .and_then(|hit| self.laid.iter().find(|l| l.hit == hit))
                     .and_then(|l| self.display.get(&l.id))
                     .map(|d| d.doc);
-                let Some((doc, at)) = self.display_at(p.at, pressed) else {
+                let Some((doc, at)) = self.display_at(p.at, pressed, self.ix.pressed) else {
                     self.display_drag = None;
                     return;
                 };
@@ -281,7 +289,7 @@ impl<S> Runtime<S> {
                 let Some(drag) = self.display_drag.clone() else {
                     return;
                 };
-                let Some((_, at)) = self.display_at(p.at, Some(drag.doc)) else {
+                let Some((_, at)) = self.display_at(p.at, Some(drag.doc), None) else {
                     return;
                 };
                 let Some(ed) = self.documents.get_mut(&drag.doc) else {
