@@ -1003,19 +1003,23 @@ impl Surface {
             Ok(())
         });
     }
-    /// Minimize.
-    pub fn minimize(&self) -> Result<()> {
-        runtime(|r| {
+    /// Minimize. Like the other platforms it returns nothing: a request the compositor can't
+    /// take is logged.
+    pub fn minimize(&self) {
+        let done = runtime(|r| {
             if let Shell::Top(_, t) = &r.state.windows[&self.id].shell {
                 t.set_minimized();
             }
             r.conn.flush()?;
             Ok(())
-        })
+        });
+        if let Err(e) = done {
+            log::warn!("minimize: {e:#}");
+        }
     }
-    /// Toggle maximize.
-    pub fn toggle_maximize(&self) -> Result<()> {
-        runtime(|r| {
+    /// Toggle maximize (failures are logged, as for [`minimize`](Self::minimize)).
+    pub fn toggle_maximize(&self) {
+        let done = runtime(|r| {
             let n = r
                 .state
                 .windows
@@ -1030,7 +1034,10 @@ impl Surface {
             }
             r.conn.flush()?;
             Ok(())
-        })
+        });
+        if let Err(e) = done {
+            log::warn!("maximize: {e:#}");
+        }
     }
     /// Starts compositor-managed dragging after a real pointer press.
     pub fn start_move(&self) -> Result<()> {
