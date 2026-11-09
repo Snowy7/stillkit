@@ -46,6 +46,7 @@ pub(crate) struct Target {
     pub value: f32,
     /// Its turn about its origin, radians ([`super::El::rotate`]).
     pub angle: f32,
+    /// Translation, axis scales and fractional origin: `[x, y, sx, sy, ox, oy]`.
     pub transform: Option<std::sync::Arc<[f32; 6]>>,
     /// Its own or an ancestor's spring; `None` lands at once.
     pub motion: Option<Spring>,
@@ -111,6 +112,7 @@ pub(crate) struct Pose {
     pub value: f32,
     /// Its turn about its origin now, radians.
     pub angle: f32,
+    /// Translation, axis scales and fractional origin: `[x, y, sx, sy, ox, oy]`.
     pub transform: Option<std::sync::Arc<[f32; 6]>>,
 }
 

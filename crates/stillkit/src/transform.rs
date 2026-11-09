@@ -2,7 +2,10 @@
 use crate::{Point, Rect};
 /// Maps a point to `(a*x + c*y + tx, b*x + d*y + ty)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Transform(pub [f32; 6]);
+pub struct Transform(
+    /// Coefficients in the order `a, b, c, d, tx, ty`.
+    pub [f32; 6],
+);
 impl Transform {
     /// The unchanged coordinate system.
     pub const IDENTITY: Self = Self([1., 0., 0., 1., 0., 0.]);

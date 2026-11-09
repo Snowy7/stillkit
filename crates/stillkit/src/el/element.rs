@@ -727,6 +727,7 @@ pub(crate) struct Anim {
     pub transition: Option<Transition>,
     /// Radians clockwise about its origin, at draw time ([`El::rotate`]).
     pub rotate: f32,
+    /// Translation, axis scales and fractional origin: `[x, y, sx, sy, ox, oy]`.
     pub transform: Option<Arc<[f32; 6]>>,
     /// One turn every this long while it is visible ([`El::spin`]).
     pub spin: Option<Duration>,

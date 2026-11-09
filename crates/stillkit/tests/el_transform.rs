@@ -130,8 +130,63 @@ fn rotated_text_image_and_box_pixels() {
 #[test]
 #[cfg(windows)]
 fn a_rotated_marker_clip_preserves_its_shape() {
- let mut ui=stillkit::Ui::new().unwrap();
- let list=stillkit::DisplayList {ops:vec![Op::Transformed{transform:Transform::new(Point::new(40.,40.),std::f32::consts::FRAC_PI_4,(1.,1.),(0.,0.)),ops:vec![Op::Clip{rect:Rect::new(30.,30.,20.,20.)},Op::Fill{rect:Rect::new(0.,0.,80.,80.),radius:0.,color:Rgba::HIT},Op::Unclip].into()}],..Default::default()};
- let image=stillkit::render(&mut ui,&list,80,80).unwrap();
- assert_eq!(image.pixel(27,27)[3],0);assert!(image.pixel(40,40)[3]>0);
+    let mut ui = stillkit::Ui::new().unwrap();
+    let list = stillkit::DisplayList {
+        ops: vec![Op::Transformed {
+            transform: Transform::new(
+                Point::new(40., 40.),
+                std::f32::consts::FRAC_PI_4,
+                (1., 1.),
+                (0., 0.),
+            ),
+            ops: vec![
+                Op::Clip {
+                    rect: Rect::new(30., 30., 20., 20.),
+                },
+                Op::Fill {
+                    rect: Rect::new(0., 0., 80., 80.),
+                    radius: 0.,
+                    color: Rgba::HIT,
+                },
+                Op::Unclip,
+            ]
+            .into(),
+        }],
+        ..Default::default()
+    };
+    let image = stillkit::render(&mut ui, &list, 80, 80).unwrap();
+    assert_eq!(image.pixel(27, 27)[3], 0);
+    assert!(image.pixel(40, 40)[3] > 0);
+}
+
+#[test]
+fn selection_uses_the_transformed_text_coordinates() {
+    let mut rt = Runtime::new(
+        (),
+        |_| {
+            el::el().pad(60.0).child(
+                el::text("hello world")
+                    .key("label")
+                    .w(180.0)
+                    .h(30.0)
+                    .selectable()
+                    .rotate(0.63)
+                    .scale(1.2)
+                    .translate(35.0, 20.0),
+            )
+        },
+        theme(),
+        (320, 240),
+        1.0,
+    )
+    .unwrap();
+    let rect = rt.find("label").unwrap();
+    let xf = Transform::new(rect.center(), 0.63, (1.2, 1.2), (35.0, 20.0));
+    let at = xf.point(Point::new(rect.left + 2.0, rect.top + 3.0));
+    for _ in 0..2 {
+        rt.pointer_down(at.x, at.y);
+        rt.pointer_up(at.x, at.y);
+    }
+    rt.frame(Duration::ZERO);
+    assert_eq!(rt.presented("label").unwrap().selection, Some((0, 5)));
 }
