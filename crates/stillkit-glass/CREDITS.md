@@ -14,8 +14,8 @@ springs) is upstream's work. Thank you, al1h3n.
 
 ## Changes since upstream
 
-The copy first lived in mypaper (`crates/liquid-rust`), which changed it for its engine: shared
+The copy first lived in Glaze (`crates/liquid-rust`), which changed it for its engine: shared
 pipelines (`Renderer::fork`), per-glass appearance, partial pyramid rebuilds, cheaper shader math,
 lenses scaled for thin glass, an inner shadow, optional GPU timestamps. Those changes are marked
-`mypaper:` in the source and listed in `UPSTREAM-CHANGES.md`. Changes made in stillkit are marked
+`Glaze:` in the source and listed in `UPSTREAM-CHANGES.md`. Changes made in stillkit are marked
 `stillkit:`.

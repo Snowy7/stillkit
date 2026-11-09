@@ -1,12 +1,12 @@
-# Native UI: `crates/ui` and `mypaper-shell`
+# Native UI: `crates/ui` and `glaze-shell`
 
-> Written inside mypaper, where this crate was `crates/ui`. The parts on `mypaper-shell` (bars,
-> flyouts, the desktop menu, shell measurements) describe how mypaper uses the library; they move
-> to mypaper when the docs are split by layer.
+> Written inside Glaze, where this crate was `crates/ui`. The parts on `glaze-shell` (bars,
+> flyouts, the desktop menu, shell measurements) describe how Glaze uses the library; they move
+> to Glaze when the docs are split by layer.
 
 The native rebuild (`plans/council/native-plan.md`) draws every shell surface (menus, the top
-bar, dock, flyouts and widgets) with one small UI layer, `crates/ui` (`mypaper-ui`), hosted by
-one process, `mypaper-shell`. This page is how both work, and what they measured. The flyouts
+bar, dock, flyouts and widgets) with one small UI layer, `crates/ui` (`glaze-ui`), hosted by
+one process, `glaze-shell`. This page is how both work, and what they measured. The flyouts
 themselves are in [bars.md](bars.md#flyouts-n3).
 
 ## Rules it follows
@@ -65,12 +65,12 @@ Surface::present(ui, origin, size, list)
 ## The kit
 
 Every surface (bars, flyouts, menus, widgets, Studio) is being rebuilt on one kit:
-`mypaper_ui::{theme, kit, layout, scroll, icons}`. A view makes a [`Theme`](#theme), builds its
+`glaze_ui::{theme, kit, layout, scroll, icons}`. A view makes a [`Theme`](#theme), builds its
 list with a [`Frame`](#frame-and-components), places things with [layout](#layout), and scrolls
 lists with a [`Scroll`](#scroll-view). The gallery renders every component in every style:
 
 ```text
-cargo run --release -p mypaper-ui --example gallery     # writes docs/media/native/kit-*.png
+cargo run --release -p glaze-ui --example gallery     # writes docs/media/native/kit-*.png
 ```
 
 `kit-<style>-<scheme>.png` (liquid, oneui, solid, fluent, mono × dark, light) shows Control
@@ -262,7 +262,7 @@ in calls are **device px** (`f.px(design)` converts); `f.font(role)`, `f.line(ro
    `Rgba` constants, no `Op::Stroke` around anything, no raw glyph code points.
 6. **Lists** that can outgrow their room go in a `Scroll` (see above); route `wheel`, Page
    Up/Down and `tick` to it.
-7. **Goldens:** re-bless your surface's images (`MYPAPER_BLESS=1`) and look at them.
+7. **Goldens:** re-bless your surface's images (`GLAZE_BLESS=1`) and look at them.
 
 The notification center (`crates/shell/src/flyouts/notifications.rs`) is the reference port: a
 fixed header, the cards in a scroll view, the month below; its test
@@ -322,7 +322,7 @@ be excluded from the desktop glass overlay capture; the engine's order is widget
 See [engine-notes.md](engine-notes.md#glass-overlays).
 
 `Surface::keep_above_desktop() -> Result<bool>` repairs the bottom band when necessary and
-preserves directly underlying `mypaper.wallpaper.glass` overlays. `desktop_order_valid() -> bool`
+preserves directly underlying `glaze.wallpaper.glass` overlays. `desktop_order_valid() -> bool`
 is a read-only harness probe. `raise_in_desktop_band() -> Result<()>` lifts the edit palette above
 other widgets while keeping ordinary apps above it. `WM_WINDOWPOSCHANGING` suppresses automatic
 activation raises; explicit repairs use a guarded move. No periodic z-order timer runs. The host
@@ -376,7 +376,7 @@ filters, as in the launcher); Escape and Enter work as before.
 
 ### Glass under a surface (N3)
 
-`mypaper_ui::glass` puts the engine's Liquid Glass under a surface. The UI layer only says where;
+`glaze_ui::glass` puts the engine's Liquid Glass under a surface. The UI layer only says where;
 the shell installs the thread's `Backdrop` (`crates/shell/src/overlay_client.rs`), which sends
 the engine one request per change (docs/engine-notes.md, "Glass overlays"):
 
@@ -531,7 +531,7 @@ Studio ([studio-ux.md](studio-ux.md)) is the one ordinary app window. What it ad
   `Menu::handle` and applies `Outcome::Chosen` with `App::chose`. The menu's two windows are
   made on first use, so they cost nothing at startup.
 
-## `mypaper-shell`
+## `glaze-shell`
 
 One UI thread, plus the desktop menu's mouse-hook thread (a low-level hook must answer in
 microseconds, whatever the UI is doing). Core starts it as a supervised child (restart policy as
@@ -539,7 +539,7 @@ for the other hosts).
 
 - **The loop** waits on its parent process and the message queue; it dispatches, then drains the
   inbox and the UI events in order.
-- **The inbox** is a message-only window (class `mypaper.shell.inbox`) that only queues: the hook,
+- **The inbox** is a message-only window (class `glaze.shell.inbox`) that only queues: the hook,
   the `config.json` and `palette.json` watchers post to it from their threads. `WM_CLOSE` to it
   quits the shell.
 - **Lifetime:** one shell at a time (a named mutex; a second one exits at once); it exits when the
@@ -550,13 +550,13 @@ for the other hosts).
 
 ## Tests
 
-- `cargo test -p mypaper-ui`: damage, clipping and premultiplied output on the software target,
+- `cargo test -p glaze-ui`: damage, clipping and premultiplied output on the software target,
   springs and the ticker, focus stepping, menu layout and placement (0 gap), the accessibility
   tree, and the GPU-driver check (an integration test: a process of its own).
-- `cargo test -p mypaper-shell`: the desktop menu's items, the theme look, and **golden PNGs** of
+- `cargo test -p glaze-shell`: the desktop menu's items, the theme look, and **golden PNGs** of
   the default menu and its View submenu (`crates/shell/tests/golden/`), rendered headless through
-  the same software target the screen gets. `MYPAPER_BLESS=1` rewrites them; a mismatch saves the
-  actual image to `%TEMP%\mypaper-golden`.
+  the same software target the screen gets. `GLAZE_BLESS=1` rewrites them; a mismatch saves the
+  actual image to `%TEMP%\glaze-golden`.
 
 ## Measured
 
@@ -565,7 +565,7 @@ rain-city. CPU is a percentage of one core; RAM is private MB.
 
 ### N0.1: a 3840×36 bar surface
 
-`cargo run --release -p mypaper-ui --example mypaper-bar-spike -- --x -2560 --y 9` (the bar spans
+`cargo run --release -p glaze-ui --example glaze-bar-spike -- --x -2560 --y 9` (the bar spans
 both monitors), self-measured, with `measure.ps1` alongside for 60 s.
 
 | | Measured | Gate |
@@ -597,9 +597,9 @@ ole32 oleaut32 powrprof psapi rpcrt4 sechost sxs textshaping ucrtbase uiautomati
 uxtheme vcruntime140 win32u windowscodecs. No `nv*umx`, `nvgpucomp64`, `amdxc64` or `atidx*`; the
 shell's own list (with the menu open) has none either.
 
-### N1: `mypaper-shell` with the desktop menu
+### N1: `glaze-shell` with the desktop menu
 
-This branch's core, wallpaper and shell, in place of the user's mypaper (no bars or widgets);
+This branch's core, wallpaper and shell, in place of the user's Glaze (no bars or widgets);
 `crates/shell/examples/menu_live.rs` injecting right-clicks at the left monitor's centre.
 
 | | Measured | Gate |
@@ -638,7 +638,7 @@ This branch's core, wallpaper and shell, in place of the user's mypaper (no bars
   in the bars service library, separate from visible window geometry. Slides use `move_to` only.
 - The shell loop also waits on the bars' disarmed-at-rest `Ticker` and virtual-desktop event. Its
   timeout is the earliest active provider/config/auto-hide deadline; no periodic message pump was
-  introduced. Bar data/actions are Rust calls into `mypaper-bars` rather than a web bridge.
+  introduced. Bar data/actions are Rust calls into `glaze-bars` rather than a web bridge.
 
 See [bars.md](bars.md) for configuration, recovery ownership and the N3 flyout/plate seams.
 
@@ -706,7 +706,7 @@ stillkit::platform::windows::gpu::set_power(gpu::Power::High); // default Low: t
 - **Where the choice lives.** A thread default (`set_render`, else `STILLKIT_RENDER=cpu|gpu|auto`,
   else `Cpu`) plus a per-surface override (`Surface::with_render`). Thread-level, like the glass
   backdrop, because `Surface::new` takes no `Ui` and `el::run` makes its surface from an `App`
-  with no render field: an app picks GPU with one call before `run`, and mypaper's ~1,000 call
+  with no render field: an app picks GPU with one call before `run`, and Glaze's ~1,000 call
   sites stay as they are. Per surface, so CPU bars and widgets can sit beside one GPU panel.
 - **`Auto`** resolves when the surface is made: `Cpu` unless glass is wanted
   (`glass::set_style(Some(..))`, see `glass::wanted`) and no backdrop draws it in full on the
@@ -828,7 +828,7 @@ both, clock-only 0.14–0.19 ms both, 1 idle wakeup in 60 s both, private after 
 driver. The gallery is byte-identical with and without the feature.
 
 **`Auto`, from these numbers:** CPU when no glass is wanted; when glass is wanted, the external
-backdrop if one is installed (mypaper's engine: its device is already paid for, and one serves
+backdrop if one is installed (Glaze's engine: its device is already paid for, and one serves
 every app); then the system backdrop on Windows when the material is frost without a lens (it
 costs about nothing, [System backdrop](#system-backdrop)); otherwise GPU, with small glass-less
 surfaces made `Render::Cpu` beside it. A glass process would win only if it could exit while no
@@ -862,8 +862,8 @@ closes it on `hide` and drop; the surface's `WM_WINDOWPOSCHANGED` puts the frost
 when its z-order changes. Nothing is opened until a surface opens glass; the windows, visuals and
 compositor all go when the last one closes (the thread's `DispatcherQueue` stays: a few KB).
 
-**Which backdrop.** `glass::install`ed (mypaper's engine) **always** wins, available or not, so
-mypaper, which installs its overlay client in the shell and Files before any surface, is
+**Which backdrop.** `glass::install`ed (Glaze's engine) **always** wins, available or not, so
+Glaze, which installs its overlay client in the shell and Files before any surface, is
 unchanged (`tests/backdrop_system.rs`). Without one, Windows uses the system backdrop; other
 platforms have none. `glass::available()` is true while it is: Windows 11, Settings'
 "Transparency effects" on (read per call, one registry value), and this thread able to make

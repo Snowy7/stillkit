@@ -1,6 +1,6 @@
 # Platform notes
 
-Windows has the full backend: CPU/GPU surfaces, native editing and UI Automation through AccessKit. Set Identity once before any window if other processes discover your windows by class name. Use your own prefix; do not copy mypaper class names. Surface windows use the class <prefix>, app windows <prefix>.app, and desktop-band surfaces carry the <prefix>.desktop window property. desktop_classes lists other window classes that share the desktop band; surfaces keep their order relative to them.
+Windows has the full backend: CPU/GPU surfaces, native editing and UI Automation through AccessKit. Set Identity once before any window if other processes discover your windows by class name. Use your own prefix; do not copy Glaze class names. Surface windows use the class <prefix>, app windows <prefix>.app, and desktop-band surfaces carry the <prefix>.desktop window property. desktop_classes lists other window classes that share the desktop band; surfaces keep their order relative to them.
 
 Linux supports Wayland CPU and GPU; no X11 backend. AT-SPI uses the same AccessKit tree as Windows and turns itself on when a screen reader runs (compile-checked; not compositor-tested here). Normal windows use xdg-shell. Bars need wlr-layer-shell (KDE/wlroots). GNOME has no layer-shell: a real bar there requires a Shell extension. Headless CPU tests need fonts/fontconfig, not a compositor. Clipboard and IME are implemented but need broader live compositor testing.
 
