@@ -2330,6 +2330,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stillkit-playground"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "png",
+ "stillkit",
+ "stillkit-kit",
+]
+
+[[package]]
 name = "string_cache"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

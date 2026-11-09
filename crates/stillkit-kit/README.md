@@ -407,3 +407,7 @@ No changes were made under `crates/stillkit`, and no branch was pushed or merged
 
 Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
 reuses the text gallery's overlay module to avoid duplicate module loading.
+
+## Component stories
+
+The optional [playground](../../docs/guide/playground.md) includes each supported component and all button kinds. Run `cargo run -p stillkit-playground --example stories`; `--goldens DIR` renders every story across looks and schemes.

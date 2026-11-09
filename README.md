@@ -76,6 +76,10 @@ A Liquid material is a themed fill in el; actual lenses use Surface hooks. [Rend
 
 ## Guides
 
+- [stillkit in 10 minutes](docs/guide/ten-minutes.md)
+- [component playground and inspector](docs/guide/playground.md)
+- [fast iteration and live looks](docs/guide/fast-iteration.md)
+
 - [getting started](docs/guide/getting-started.md)
 - [elements and layout](docs/guide/elements-and-layout.md)
 - [state and events](docs/guide/state-and-events.md)
