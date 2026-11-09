@@ -196,6 +196,7 @@ impl<'a> Frame<'a> {
             return;
         }
         self.list.hits.push(Hit {
+            shape: None,
             id,
             rect,
             role,
@@ -840,6 +841,7 @@ impl<'a> Frame<'a> {
         };
         // The row's hit goes first, so an accessory button inside it wins.
         let hit = Hit {
+            shape: None,
             id: row.id,
             rect,
             role,

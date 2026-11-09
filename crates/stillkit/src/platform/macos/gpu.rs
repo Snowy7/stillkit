@@ -95,7 +95,7 @@ impl Canvas {
         scene.set_transform(Affine::translate((-(area.x as f64), -(area.y as f64))));
         let mut uploads = self.gpu.device.create_command_encoder(&Default::default());
         let mut images = Vec::new();
-        super::gpu_scene::draw_ops(&mut scene, &mut self.resources, &mut ui.text, &list.ops, &mut |resources, pix| {
+        super::gpu_scene::draw_ops(&mut scene, &mut self.resources, &mut ui.text, &list.ops, Affine::translate((-(area.x as f64), -(area.y as f64))), &mut |resources, pix| {
             let id = self.renderer.upload_image(resources, &self.gpu.device, &self.gpu.queue, &mut uploads, &pix);
             images.push(id);
             vello_hybrid::ImageSource::opaque_id(id)

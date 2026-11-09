@@ -45,6 +45,8 @@ pub(crate) mod edit;
 mod element;
 mod feedback;
 mod field;
+mod rich;
+pub use rich::{Run, rich_text};
 mod host;
 mod json;
 mod layout;
@@ -55,7 +57,6 @@ pub use virtualize::{virtual_list, variable_list, VirtualRows};
 mod runtime;
 #[cfg(feature = "inspect")]
 pub use runtime::inspect;
-mod rotate;
 mod scroll;
 pub mod token;
 

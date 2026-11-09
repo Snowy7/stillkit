@@ -2,12 +2,16 @@
 
 ## [Unreleased]
 
+- Optional kit Markdown view with document selection, themed blocks, tables, links and fenced-code copying.
 - Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
 
 ### Added
+- Matched element flights across parents carry geometry, radius, fill and opacity with interruptible springs and reduced motion.
 - Component story browser (including ColorPicker), headless story baselines and a runnable ten-minute settings guide.
 - Opt-in F12 element inspector and native look-file reloads, with no inspection code in ordinary builds.
+- Draw-time translation, scaling and transform origins; native arbitrary rotations of text, images and boxes, with precise transformed hits.
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
+- Attributed display runs with native shaping, code faces, decorations, links and plain-text selection.
 - Display text and containers can opt into document selection, keyboard copy and accessible text ranges.
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - Linux folder/file/save pickers through the XDG FileChooser portal with local URI decoding.

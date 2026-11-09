@@ -158,6 +158,13 @@ fn ops(ctx: &CGContext, text: &mut Text, images: &mut Images, ops_: &[Op], damag
 fn op(ctx: &CGContext, text: &mut Text, images: &mut Images, op: &Op, damage: Rect) {
     let c = Some(ctx);
     match op {
+        Op::Transformed { transform, ops: inner } => {
+            let [a,b,d,e,tx,ty] = transform.0.map(f64::from);
+            CGContext::save_g_state(c);
+            CGContext::concat_ctm(c,CGAffineTransform {a,b,c:d,d:e,tx,ty});
+            if let Some(inverse) = transform.inverse() { ops(ctx,text,images,inner,inverse.bounds(damage).inflate(1.0)); }
+            CGContext::restore_g_state(c);
+        }
         Op::Clipped { rect, ops: inner } => {
             CGContext::save_g_state(c);
             CGContext::clip_to_rect(c, cg(*rect));

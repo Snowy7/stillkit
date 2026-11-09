@@ -176,6 +176,7 @@ mod tests {
 
     fn list() -> DisplayList {
         let hit = |id, x, enabled| Hit {
+            shape: None,
             id,
             rect: Rect::new(x, 0.0, 10.0, 10.0),
             role: accesskit::Role::Button,

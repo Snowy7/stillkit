@@ -276,7 +276,7 @@ impl<S> Runtime<S> {
         if k < self.root.children.len() {
             let el = self.root.children.remove(k);
             if let Some(start) = self.laid.iter().position(|l| l.id == layer.id) {
-                self.exit(start, k, el);
+                self.exit(start, k, el, &[]);
             }
         }
         self.stale_layout = true;

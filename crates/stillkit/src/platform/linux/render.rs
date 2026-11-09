@@ -120,6 +120,7 @@ impl Canvas {
             &mut s.resources,
             text,
             &list.ops,
+            Affine::translate((-(area.x as f64), -(area.y as f64))),
             &mut |_, pix| vello_cpu::ImageSource::Pixmap(pix),
         )?;
         ctx.flush();

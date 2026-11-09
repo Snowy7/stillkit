@@ -1,6 +1,6 @@
 # stillkit-kit
 
-Declarative components for `stillkit::el`. The crate depends only on stillkit;
+Declarative components for `stillkit::el`. The default crate depends only on stillkit;
 there are no look-name branches. Charts use public chart drawing inside el paint nodes;
 all other components use el primitives.
 
@@ -528,3 +528,38 @@ a file-like tree, with resizing, sorting, reveal and filtering.
 ## Component stories
 
 The optional [playground](../../docs/guide/playground.md) includes each supported component and all button kinds. Run `cargo run -p stillkit-playground --example stories`; `--goldens DIR` renders every story across looks and schemes.
+
+## Markdown (`markdown` feature)
+
+`Markdown::new(source).on_link(|state, url| ..).build()` renders headings,
+paragraphs, nested ordered/unordered lists, quotes, rules and equal-width GFM tables
+(including column alignment). Inline bold, italic, strike, code and links use native
+rich runs. Fenced code uses a monospace face and a Copy code button. Copy preserves
+the fence contents; `.on_copy(..)` lets an app supply its own clipboard handler.
+Without it the button writes to the system clipboard on activation.
+
+The whole view is one selectable document in reading order. Ctrl+A/C and drag selection
+cross blocks; copy buttons keep their input and their labels are excluded. Layout,
+typography, spacing and paint follow the current theme. Give the built element a
+stable `.key(..)` and compose it inside a bounded scroll view for long documents.
+
+Enable `stillkit-kit = { ..., features = ["markdown"] }`. This opts into
+pulldown-cmark with default features disabled. Parsing happens only when `build`
+runs; retained hover/selection does not parse, and there are no timers, workers or
+network requests. Image markup shows alt text only. Raw HTML is ignored; applications
+can compose their own supplied image elements outside the Markdown view. There is
+no syntax highlighting, HTML renderer or streaming parse cache.
+
+Run `cargo run -p stillkit-kit --features markdown --example markdown_viewer`.
+Without the feature, this example renders the source as selectable plain text, for
+comparing the optional parser/renderer's executable cost.
+
+Measured on Windows x64, 2026-11-10, with the repository release profile (LLVM,
+thin LTO, stripped): `markdown_viewer` is 1,615,360 bytes without the feature and
+1,905,152 bytes with it, an increase of **289,792 bytes (283 KiB)**. This compares
+the example's plain-source path with the complete Markdown parser, renderer and
+copy controls; it is not a parser-only measurement. Reproduce with
+`cargo build --release -p stillkit-kit --example markdown_viewer`, then repeat
+with `--features markdown` and compare the executable sizes. Both viewer import
+tables match, and the bar-spike release imports still match main. The dependency
+graph adds only pulldown-cmark and unicase; bitflags and memchr were already present.

@@ -549,6 +549,7 @@ pub fn view_animated<C>(
             ));
         }
         hits.push(Hit {
+            shape: None,
             id: index as HitId,
             rect: Rect::new(body.left, top, body.width(), row.height),
             role: if checked.is_some() {
@@ -1045,6 +1046,7 @@ impl<C: Clone> Menu<C> {
                     .iter()
                     .enumerate()
                     .map(|(i, item)| Hit {
+                        shape: None,
                         id: i as HitId,
                         rect: Rect::default(),
                         role: Role::MenuItem,

@@ -17,6 +17,13 @@ pub type HitId = u32;
 /// One paint operation, in the surface's device pixels, drawn in list order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
+    /// Draws a subtree in an affine coordinate system, including clips and text.
+    Transformed {
+        /// Local coordinates to the enclosing coordinate system.
+        transform: crate::Transform,
+        /// Local operations.
+        ops: Arc<[Op]>,
+    },
     /// A native gradient on a rounded rectangle; zero width fills, positive width strokes.
     Gradient {
         /// Bounds in device pixels.
@@ -45,7 +52,7 @@ pub enum Op {
     Clipped { #[doc = "Bounds in device pixels."] rect: Rect, #[doc = "Ops."] ops: Arc<[Op]> },
     /// An antialiased rounded clip for a composed card (picture, content and overlays).
     RoundedClipped { #[doc = "Bounds in device pixels."] rect: Rect, #[doc = "Radius."] radius: f32, #[doc = "Ops."] ops: Arc<[Op]> },
-    /// Markdown emphasis without changing the shared text style contract.
+    /// Italic or struck-through text, used by attributed display runs.
     Emphasis {
         /// Bounds in device pixels.
         rect: Rect,
@@ -220,6 +227,7 @@ impl Op {
     /// variant, so a new op never breaks them.
     pub fn translate(&mut self, dx: f32, dy: f32) {
         match self {
+            Op::Transformed { transform, .. } => *transform = crate::Transform::new(Point::new(0.,0.),0.,(1.,1.),(dx,dy)).compose(*transform),
             Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
                 *rect = rect.offset(dx, dy);
                 for op in Arc::make_mut(ops) {
@@ -269,6 +277,7 @@ impl Op {
             p.y *= by;
         };
         match self {
+            Op::Transformed { transform, .. } => *transform = crate::Transform::new(Point::new(0.,0.),0.,(by,by),(0.,0.)).compose(*transform),
             Op::Image { rect: r, .. } | Op::Clip { rect: r } | Op::Hole { rect: r } | Op::TextField { rect: r, .. } => rect(r),
             Op::RoundedImage { rect: r, radius, .. } | Op::Fill { rect: r, radius, .. } => {
                 rect(r);
@@ -334,6 +343,7 @@ impl Op {
     /// Every pixel this operation may touch, antialiasing included.
     pub fn bounds(&self) -> Rect {
         match self {
+            Self::Transformed { transform, ops } => ops.iter().map(Op::bounds).reduce(|a,b|a.union(b)).map(|r|transform.bounds(r).inflate(1.0)).unwrap_or_default(),
             Self::Gradient { rect, width, .. } | Self::Continuous { rect, width, .. } => rect.inflate(width * 0.5 + 1.0),
             Self::Clipped { rect, .. } => *rect,
             Self::RoundedClipped { rect, ops, .. } => ops.iter()
@@ -397,6 +407,8 @@ impl Op {
 /// Something the pointer, the keyboard and assistive technology can land on.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hit {
+    /// Precise transformed geometry; absent for ordinary rectangular hits.
+    pub shape: Option<Box<HitShape>>,
     /// Stable identity used to match this item across frames.
     pub id: HitId,
     /// Bounds in device pixels.
@@ -415,9 +427,36 @@ pub struct Hit {
     pub checked: Option<bool>,
 }
 
+/// A transformed hit region, retaining clips at each enclosing scope.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HitShape {
+    rect: Rect,
+    transform: crate::Transform,
+    inner: Option<Box<HitShape>>,
+}
+impl HitShape {
+    fn unmap(&self,p:Point)->Point {
+        let p=self.transform.inverse().map_or(p,|xf|xf.point(p));
+        self.inner.as_ref().map_or(p,|s|s.unmap(p))
+    }
+    fn contains(&self,p:Point)->bool {
+        self.transform.inverse().is_some_and(|xf| { let p=xf.point(p); self.rect.contains(p) && self.inner.as_ref().is_none_or(|s|s.contains(p)) })
+    }
+}
 impl Hit {
+    /// Applies a draw-time transform, retaining the original hit region.
+    pub fn transform(&mut self, transform: crate::Transform) {
+        self.shape = Some(Box::new(HitShape { rect:self.rect,transform,inner:self.shape.take() }));
+        self.rect = transform.bounds(self.rect);
+    }
+    /// Maps a surface point back through the element's draw-time transforms.
+    pub fn unmap(&self,p:Point)->Point { self.shape.as_ref().map_or(p,|s|s.unmap(p)) }
+    /// Tests the painted region, including enclosing clips and transforms.
+    pub fn contains(&self,p:Point)->bool { self.rect.contains(p) && self.shape.as_ref().is_none_or(|s|s.contains(p)) }
+
     /// A hit item that is actionable exactly when it is enabled (every control). Set
-    /// `actionable: false` on an enabled one for plain announced content.
+    /// `actionable: false` on an enabled one for plain announced content. Hosts build hits
+    /// with this rather than a struct literal, so a new field never breaks them.
     pub fn new(
         id: HitId,
         rect: Rect,
@@ -427,6 +466,7 @@ impl Hit {
         checked: Option<bool>,
     ) -> Self {
         Self {
+            shape: None,
             id,
             rect,
             role,
@@ -457,14 +497,15 @@ impl DisplayList {
             op.translate(dx, dy);
         }
         for hit in &mut list.hits {
-            hit.rect = hit.rect.offset(dx, dy);
+            if hit.shape.is_some() { hit.transform(crate::Transform::new(Point::new(0.,0.),0.,(1.,1.),(dx,dy))); }
+            else { hit.rect = hit.rect.offset(dx, dy); }
         }
         list
     }
 
     /// The topmost hit item under `p`.
     pub fn hit_at(&self, p: Point) -> Option<&Hit> {
-        self.hits.iter().rev().find(|h| h.rect.contains(p))
+        self.hits.iter().rev().find(|h| h.contains(p))
     }
 
     /// What has to be redrawn to go from `old` to this list: the bounds of every operation that

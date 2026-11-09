@@ -386,6 +386,7 @@ mod tests {
     #[test]
     fn a_field_reads_as_text_runs_with_its_selection() {
         let hit = Hit {
+            shape: None,
             id: 7,
             rect: Rect::new(0.0, 0.0, 100.0, 40.0),
             role: Role::MultilineTextInput,

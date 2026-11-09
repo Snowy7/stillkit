@@ -76,6 +76,7 @@ struct Capture {
 
 enum Action<S> {
     Press(HitId, Modifiers),
+    Link(HitId, Arc<str>),
     Drag(HitId, f32, f32),
     /// The pointer's story on an element with `on_pointer`.
     Pointer(HitId, super::element::PointerEvent),
@@ -525,6 +526,7 @@ impl<S> Runtime<S> {
     /// a press that began on it) that sets one ([`El::cursor`]; text fields show an I-beam),
     /// else the arrow. Hosts apply it after input ([`run`](super::run) does).
     pub fn cursor(&self) -> crate::Cursor {
+        if self.pointer.is_some_and(|p| self.display_link(p.at).is_some()) { return crate::Cursor::Hand; }
         let mut at = self.ix.pressed.or(self.ix.hover).and_then(|hit| self.index_of_hit(hit));
         while let Some(i) = at.filter(|&i| i < self.laid.len()) {
             let id = self.laid[i].id;
@@ -602,6 +604,15 @@ impl<S> Runtime<S> {
     fn run_handlers(&mut self) {
         let mut tx = Tx::default();
         for action in std::mem::take(&mut self.queue) {
+            let action = match action {
+                Action::Press(hit, _) if self.display_link_hit(hit).is_some() => {
+                    let (parent, url) = self.display_link_hit(hit).expect("rich link");
+                    let selected = self.index_of_hit(parent).and_then(|i| self.display.get(&self.laid[i].id)).is_some_and(|d| !d.field.ed.selection().is_empty());
+                    if selected { continue; }
+                    Action::Link(parent, url)
+                }
+                action => action,
+            };
             let hit = match &action {
                 Action::Dismiss(handler) => {
                     handler(&mut self.state);
@@ -609,6 +620,7 @@ impl<S> Runtime<S> {
                     continue;
                 }
                 Action::Press(hit, _)
+                | Action::Link(hit, _)
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
@@ -630,6 +642,7 @@ impl<S> Runtime<S> {
             };
             let state = &mut self.state;
             match action {
+                Action::Link(_, url) => match &el.on_link { Some(handler) => handler(state, &url), None => continue },
                 Action::Press(_, _) => match &el.on_press {
                     Some(handler) => handler(state, &mut tx),
                     None => continue,
@@ -782,11 +795,12 @@ impl<S> Runtime<S> {
             }
         });
         let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.states_on);
+        let matched = self.anim.match_flights((&self.laid, &self.targets, &self.poses), &laid, &targets, mode);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
             && mode == Mode::Animate
         {
-            self.leave(old, &ids);
+            self.leave(old, &ids, &matched);
         }
         // Ghosts go when their parent does, or when they come back.
         self.ghosts.retain(|g| ids.contains(&g.parent) && !ids.contains(&g.id));
@@ -854,7 +868,7 @@ impl<S> Runtime<S> {
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
-    fn leave(&mut self, mut old: El<S>, ids: &HashSet<u64>) {
+    fn leave(&mut self, mut old: El<S>, ids: &HashSet<u64>, matched: &[u64]) {
         let leaving: HashSet<u64> = self
             .laid
             .iter()
@@ -872,13 +886,13 @@ impl<S> Runtime<S> {
         let mut taken = Vec::new();
         take(&mut old, &self.laid, &mut 0, &leaving, &mut taken);
         for (start, index, el) in taken {
-            self.exit(start, index, el);
+            self.exit(start, index, el, matched);
         }
     }
 
     /// Keeps `el`, which left from place `index` among its parent's children and was laid out
     /// at `start`, drawn as a ghost until its exit settles (if it has a transition).
-    fn exit(&mut self, start: usize, index: usize, el: El<S>) {
+    fn exit(&mut self, start: usize, index: usize, el: El<S>, matched: &[u64]) {
         let len = count(&el);
         let me = self.laid[start];
         let (Some(parent), Some(shown)) = (me.parent, self.poses.get(start..start + len)) else {
@@ -895,6 +909,10 @@ impl<S> Runtime<S> {
                 ..p.clone()
             })
             .collect();
+        // Matched descendants now belong to their destination, even while a parent exits.
+        for (pose, laid) in frozen.iter_mut().zip(&self.laid[start..start + len]) {
+            if matched.contains(&laid.id) { pose.opacity = 0.0; }
+        }
         // It leaves from its own opacity, not from wherever its entrance was.
         frozen[0].opacity = self.targets[start].opacity;
         self.ghosts.push(Ghost {
@@ -1311,7 +1329,7 @@ impl<S> Runtime<S> {
         let flat = flatten(&self.root);
         (0..self.laid.len().min(flat.len()))
             .rev()
-            .find(|&i| flat[i].on_files.is_some() && self.poses.get(i).is_some_and(|pose| pose.rect.contains(p)))
+            .find(|&i| flat[i].on_files.is_some() && self.list.hits.iter().any(|h|h.id==self.laid[i].hit && h.contains(p)))
     }
 
     /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
@@ -1392,8 +1410,12 @@ impl<S> Runtime<S> {
             phase,
             button,
             at: design(at),
-            local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
-            delta: Point::new((at.x - last.x) / s, (at.y - last.y) / s),
+            local: { let p=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at)); Point::new((p.x-rect.left)/s,(p.y-rect.top)/s) },
+            delta: {
+                let shape=self.list.hits.iter().find(|h|h.id==hit);
+                let a=shape.map_or(at,|h|h.unmap(at));let b=shape.map_or(last,|h|h.unmap(last));
+                Point::new((a.x-b.x)/s,(a.y-b.y)/s)
+            },
             origin: design(origin),
             size: (rect.width() / s, rect.height() / s),
             mods: self.held,
@@ -1421,7 +1443,7 @@ impl<S> Runtime<S> {
                 let rect = self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect);
                 let event = super::element::WheelEvent {
                     at: Point::new(at.x / s, at.y / s),
-                    local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+                    local: {let p=self.list.hits.iter().find(|h|h.id==self.laid[i].hit).map_or(at,|h|h.unmap(at));Point::new((p.x-rect.left)/s,(p.y-rect.top)/s)},
                     delta: f32::from(delta) / 120.0,
                     mods: self.held,
                 };
@@ -1444,6 +1466,7 @@ impl<S> Runtime<S> {
         else {
             return;
         };
+        let at=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at));
         let along = |v: f32, start: f32, len: f32| ((v - start) / len.max(1.0)).clamp(0.0, 1.0);
         let (x, y) = (
             along(at.x, rect.left, rect.width()),
@@ -1697,7 +1720,7 @@ impl<S> Runtime<S> {
             .iter()
             .enumerate()
             .filter(|(i, l)| {
-                self.scrolls.contains_key(&l.id) && self.poses.get(*i).is_some_and(|p| p.rect.contains(at))
+                self.scrolls.contains_key(&l.id) && self.list.hits.iter().any(|h|h.id==self.laid[*i].hit && h.contains(at))
             })
             .map(|(_, l)| l.id)
             .collect();
@@ -1858,6 +1881,7 @@ impl<S> Runtime<S> {
     pub fn set_reduced_motion(&mut self, reduced: bool) {
         if reduced != self.anim.reduced {
             self.anim.reduced = reduced;
+            if reduced { self.anim.land_spatial(); }
             // Spinners stop or start.
             self.stale_paint = true;
         }
@@ -1995,7 +2019,8 @@ impl<S> Runtime<S> {
     /// Presses and releases the pointer at the centre of the element keyed `key`, where it is
     /// drawn now; `false` if there is none.
     pub fn click(&mut self, key: &str) -> bool {
-        let Some(at) = self.presented(key).map(|s| s.rect.center()) else {
+        let hit = self.index_of_key(key).and_then(|i| self.list.hits.iter().find(|h| h.id == self.laid[i].hit));
+        let Some(at) = hit.map(|h| h.rect.center()).or_else(|| self.presented(key).map(|s| s.rect.center())) else {
             return false;
         };
         self.pointer_down(at.x, at.y);
@@ -2219,6 +2244,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
         let passed = (el.cascade || inherited.is_some()).then_some(ink);
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
+            flight: el.flight.clone(),
             fill: look.fill.map(|p| p.resolve(theme)),
             fill_gradient: look.fill.and_then(|p| p.gradient()).map(Arc::new),
             border_gradient: look.border.and_then(|b| b.paint.gradient()).map(Arc::new),
@@ -2235,7 +2261,8 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             shadow: if look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
             angle: el.anim.rotate,
-            motion,
+            transform: el.anim.transform.clone(),
+            motion: motion.or_else(|| (el.flight.is_some() && !instant).then_some(theme.motion.layout)),
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
                 slide: (t.slide.0 * s, t.slide.1 * s),
@@ -2264,7 +2291,7 @@ fn role_of<S>(el: &El<S>) -> Role {
         Role::ScrollView
     } else if el.interactive() && el.sem.checked.is_some() {
         Role::Switch
-    } else if el.selectable && matches!(el.what, What::Text { .. }) {
+    } else if (el.selectable || el.on_link.is_some()) && matches!(el.what, What::Text { .. }) {
         Role::Label
     } else if el.interactive() {
         Role::Button
@@ -2422,6 +2449,10 @@ fn paint_el<S>(
     group: Option<usize>,
 ) {
     let (Some(&me), Some(pose)) = (laid.get(*i), poses.get(*i)) else { return };
+    if !live && pose.opacity <= 0.0 {
+        *i += count(el);
+        return;
+    }
     let index = *i;
     *i += 1;
     let (theme, s, rect) = (f.theme, f.s, pose.rect);
@@ -2541,7 +2572,7 @@ fn paint_el<S>(
                 }
             }
         }
-        What::Text { text, face, wrap: None } => {
+        What::Text { text, face, wrap: None, .. } => {
             let style = face.style(theme, s);
             let fitted = f.text.fit(text, &style, width);
             let (w, h) = f.text.measure(&fitted, &style);
@@ -2554,7 +2585,7 @@ fn paint_el<S>(
                 color: ink,
             });
         }
-        What::Text { text, face, wrap: Some(lines) } => paragraph(f, rect, text, face, ink, *lines),
+        What::Text { text, face, wrap: Some(lines), .. } => paragraph(f, rect, text, face, ink, *lines),
         What::Icon(icon) => f.icon(rect, *icon, rect.width().min(rect.height()) / s, ink),
         What::Image(image) if radius > 0.0 => f.push(Op::RoundedImage {
             rect,
@@ -2579,7 +2610,9 @@ fn paint_el<S>(
     }
     if live {
         let selected = el.sem.selected == Some(true) || el.sem.checked == Some(true);
+        let nav_start = w.nav.len();
         for h in f.list.hits[hits..].iter().filter(|h| h.actionable) {
+            if w.nav[nav_start..].iter().any(|stop| stop.hit == h.id) { continue; }
             w.nav.push(Stop {
                 hit: h.id,
                 index,
@@ -2645,17 +2678,16 @@ fn paint_el<S>(
     if controls && !el.quiet {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
     }
-    // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
+    // Paint and hits share one affine scope; layout stays upright.
     let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
-    if angle != 0.0 {
-        let c = rect.center();
-        let turn = super::rotate::Turn::new(Point::new(c.x.round(), c.y.round()), angle);
-        if !turn.none() {
+    if angle != 0.0 || pose.transform.is_some() {
+        let [x,y,sx,sy,ox,oy] = pose.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]);
+        let origin = Point::new(rect.left + rect.width()*ox, rect.top + rect.height()*oy);
+        let transform = crate::Transform::new(origin,angle,(sx,sy),(x*f.s*pose.xf.s,y*f.s*pose.xf.s));
+        if transform != crate::Transform::IDENTITY {
             let drawn = f.list.ops.split_off(start);
-            f.list.ops.extend(turn.ops(drawn));
-            for h in &mut f.list.hits[hits..] {
-                h.rect = turn.bounds(h.rect);
-            }
+            f.push(Op::Transformed { transform, ops:drawn.into() });
+            for h in &mut f.list.hits[hits..] { h.transform(transform); }
         }
     }
     if pose.opacity < 1.0 {
@@ -2813,7 +2845,7 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::Shadow { color, .. }
             | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
             Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
-            Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
+            Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
             Op::TextField { .. } | Op::Clip { .. } | Op::Hole { .. } | Op::Unclip => {}
         }
     }
@@ -2823,6 +2855,7 @@ fn fade(ops: &mut [Op], by: f32) {
 /// hover, press and focus, only when it has a handler or is `focusable`.
 fn hit<S>(el: &El<S>, id: HitId, rect: Rect) -> Hit {
     Hit {
+        shape: None,
         id,
         rect,
         role: role_of(el),

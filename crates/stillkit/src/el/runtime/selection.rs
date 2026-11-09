@@ -13,6 +13,9 @@ use std::time::Duration;
 
 pub(super) struct Display {
     pub field: Field,
+    id: u64,
+    rich: Option<super::super::rich::Layout>,
+    selectable: bool,
     doc: u64,
     start: usize,
     align: super::super::element::TextAlign,
@@ -44,7 +47,7 @@ pub(super) struct Drag {
 impl<S> Runtime<S> {
     pub(super) fn sync_display(&mut self) {
         fn enabled<S>(el: &super::super::El<S>) -> bool {
-            el.selectable || el.children.iter().any(enabled)
+            el.selectable || matches!(&el.what, What::Text { runs, .. } if !runs.is_empty()) || el.children.iter().any(enabled)
         }
         if self.display.is_empty() && !enabled(&self.root) {
             return;
@@ -55,9 +58,9 @@ impl<S> Runtime<S> {
         for (i, el) in flat
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.selectable && !e.sem.disabled)
+            .filter(|(_, e)| (e.selectable || matches!(&e.what, What::Text { runs, .. } if !runs.is_empty())) && !e.sem.disabled)
         {
-            let What::Text { text, face, wrap } = &el.what else {
+            let What::Text { text, face, wrap, runs } = &el.what else {
                 continue;
             };
             // Controls keep their input even when added after `selectable()`.
@@ -95,11 +98,15 @@ impl<S> Runtime<S> {
             seen.insert(l.id);
             let d = self.display.entry(l.id).or_insert_with(|| Display {
                 field: Field::new(text),
+                id: l.id,
+                rich: None,
+                selectable: el.selectable,
                 doc,
                 start,
                 align: face.align,
             });
             d.doc = doc;
+            d.selectable = el.selectable;
             d.start = start;
             d.align = face.align;
             d.field.ed.set_text(text);
@@ -120,6 +127,8 @@ impl<S> Runtime<S> {
                 d.field.look.as_ref().expect("display look"),
                 Some(l.rect.width()),
             );
+            d.rich = (!runs.is_empty()).then(|| super::super::rich::layout(&mut self.ui.text, runs, &style, line, self.scale, l.rect.width()));
+            if let Some(rich) = &d.rich { d.field.shape = rich.shape.clone(); d.field.look.as_mut().expect("rich look").line = rich.shape.line; }
             d.field.shape.lines.truncate(wrap.unwrap_or(usize::MAX));
         }
         self.display.retain(|id, _| seen.contains(id));
@@ -151,8 +160,9 @@ impl<S> Runtime<S> {
         let Some(id) = self
             .ix
             .focus
-            .and_then(|h| self.laid.iter().find(|l| l.hit == h))
+            .and_then(|h| self.index_of_hit(h).map(|i| &self.laid[i]))
             .and_then(|l| self.display.get(&l.id))
+            .filter(|d| d.selectable)
             .map(|d| d.doc)
         else {
             return false;
@@ -216,13 +226,14 @@ impl<S> Runtime<S> {
             .enumerate()
             .filter_map(|(i, l)| {
                 let d = self.display.get(&l.id)?;
-                if hit.is_some_and(|h| h != l.hit) {
+                if hit.is_some_and(|h| self.index_of_hit(h) != Some(i)) {
                     return None;
                 }
                 if doc.is_some_and(|id| id != d.doc) {
                     return None;
                 }
                 let rect = self.poses.get(i)?.rect;
+                let p = self.list.hits.iter().find(|h| h.id == l.hit).map_or(p, |h| h.unmap(p));
                 if doc.is_none()
                     && !(p.x >= rect.left
                         && p.x <= rect.right
@@ -251,6 +262,32 @@ impl<S> Runtime<S> {
             .map(|(_, doc, at)| (doc, at))
     }
 
+    pub(super) fn display_link_hit(&self, hit: crate::HitId) -> Option<(crate::HitId, std::sync::Arc<str>)> {
+        for l in &self.laid {
+            let Some(d) = self.display.get(&l.id) else { continue };
+            let Some(rich) = &d.rich else { continue };
+            for fragment in &rich.fragments {
+                if link_id(d.id, fragment.source) == hit && let Some(url) = &fragment.run.link {
+                    return Some((l.hit, url.clone()));
+                }
+            }
+        }
+        None
+    }
+    pub(super) fn display_link(&self, p: Point) -> Option<(crate::HitId, std::sync::Arc<str>)> {
+        let hovered = self.ix.hover.and_then(|hit| self.index_of_hit(hit))?;
+        let laid = self.laid.get(hovered)?;
+        let display = self.display.get(&laid.id)?;
+        let rich = display.rich.as_ref()?;
+        let rect = self.poses.get(hovered)?.rect;
+        if p.x < rect.left || p.x > rect.right || p.y < rect.top || p.y > rect.bottom { return None; }
+        rich.fragments.iter().find_map(|fragment| {
+            let url = fragment.run.link.as_ref()?;
+            let bounds = super::super::rich::bounds(rich, fragment, rect, display.align);
+            (p.x >= bounds.left && p.x <= bounds.right && p.y >= bounds.top && p.y <= bounds.bottom)
+                .then(|| (laid.hit, url.clone()))
+        })
+    }
     pub(super) fn display_pointer(&mut self, event: &Event) {
         if self.display.is_empty() {
             return;
@@ -258,9 +295,7 @@ impl<S> Runtime<S> {
         match *event {
             Event::Press(p, Button::Left) | Event::DoubleClick(p, Button::Left) => {
                 if !self.ix.pressed.is_some_and(|hit| {
-                    self.laid
-                        .iter()
-                        .any(|l| l.hit == hit && self.display.contains_key(&l.id))
+                    self.index_of_hit(hit).is_some_and(|i| self.display.get(&self.laid[i].id).is_some_and(|d| d.selectable))
                 }) {
                     self.display_drag = None;
                     return;
@@ -268,7 +303,7 @@ impl<S> Runtime<S> {
                 let pressed = self
                     .ix
                     .pressed
-                    .and_then(|hit| self.laid.iter().find(|l| l.hit == hit))
+                    .and_then(|hit| self.index_of_hit(hit).map(|i| &self.laid[i]))
                     .and_then(|l| self.display.get(&l.id))
                     .map(|d| d.doc);
                 let Some((doc, at)) = self.display_at(p.at, pressed, self.ix.pressed) else {
@@ -335,7 +370,7 @@ impl<S> Runtime<S> {
             | Event::Cancelled
             | Event::CaptureLost
             | Event::Leave
-            | Event::Deactivated => self.display_drag = None,
+            | Event::Deactivated => { self.display_drag = None;  },
             _ => {}
         }
     }
@@ -348,7 +383,7 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
     let (_, h) = f.text.measure("Ag", &look.style);
     let lead = ((look.line - h) / 2.0).round();
     for (n, line) in d.field.shape.lines.iter().enumerate() {
-        let top = rect.top + n as f32 * look.line;
+        let top = rect.top + n as f32 * d.field.shape.line;
         let width = line.stops.iter().map(|s| s.1).fold(0.0, f32::max);
         let left = super::align_x(rect, width, d.align);
         let a = range.start.max(line.start);
@@ -366,15 +401,32 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
                 color: token::SELECTION.resolve(f.theme),
             });
         }
-        ops.push(Op::Text {
+        if d.rich.is_none() { ops.push(Op::Text {
             rect: Rect::new(left, top + lead, rect.width(), h),
             text: line.drawn.clone(),
             style: look.style.clone(),
             color: ink,
-        });
+        }); }
+    }
+    if let Some(rich) = &d.rich {
+        for fragment in rich.fragments.iter().filter(|f| f.run.link.is_some()) {
+            let hot = f.input.hover == Some(link_id(d.id, fragment.source));
+            ops.push(Op::Fill { rect: super::super::rich::bounds(rich, fragment, rect, d.align), radius: 2.0,
+                color: if hot { f.theme.color.hover } else { Rgba::TRANSPARENT } });
+        }
+        ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme), d.align));
+        for fragment in rich.fragments.iter().filter(|f| f.run.link.is_some()) {
+            let bounds = super::super::rich::bounds(rich, fragment, rect, d.align).intersect(rect);
+            if bounds.width() <= 0.0 || bounds.height() <= 0.0 { continue; }
+            f.list.hits.push(crate::Hit { id: link_id(d.id, fragment.source),
+                rect: bounds, role: crate::Role::Link,
+                label: fragment.label.clone(), enabled: true, actionable: true, checked: None, shape: None });
+        }
     }
     f.push(Op::Clipped {
         rect,
         ops: ops.into(),
     });
 }
+
+fn link_id(id: u64, index: usize) -> crate::HitId { (id as u32).wrapping_add(0x80000000).wrapping_add(index as u32) }

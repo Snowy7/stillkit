@@ -577,7 +577,7 @@ impl Painter {
             for op in ops {
                 match op {
                     Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
-                    Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
+                    Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
                     _ => {}
                 }
             }
@@ -592,13 +592,7 @@ impl Painter {
         self.images.borrow_mut().clear();
     }
 
-    /// The translation icons draw on top of.
-    fn base(&self) -> (f32, f32) {
-        #[cfg(feature = "gpu")]
-        return self.base.get();
-        #[cfg(not(feature = "gpu"))]
-        (0.0, 0.0)
-    }
+
 }
 
 impl Canvas {
@@ -769,6 +763,33 @@ impl Painter {
     /// Runs between BeginDraw/EndDraw. Marker clips are scoped to this slice, including
     /// inside a retained clipped group, so an unmatched Unclip cannot pop a caller's clip.
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
+        // D2D axis clips expand rotated rectangles to their bounding boxes. Preserve
+        // marker clips as geometry scopes when an affine turn is active.
+        // SAFETY: the caller owns the active draw scope; recursive scopes balance their layers.
+        unsafe {
+        let mut xf=windows_numerics::Matrix3x2::identity();
+        self.target.GetTransform(&mut xf);
+        if (xf.M12 != 0.0 || xf.M21 != 0.0) && ops.iter().any(|op|matches!(op,Op::Clip{..})) {
+            let mut i=0;
+            while i<ops.len() {
+                if let Op::Clip { rect } = &ops[i] {
+                    let mut depth=1;let mut end=i+1;
+                    while end<ops.len() {
+                        match ops[end] { Op::Clip{..}=>depth+=1,Op::Unclip=>depth-=1,_=>{} }
+                        if depth==0 {break;}
+                        end+=1;
+                    }
+                    let group=Op::RoundedClipped{rect:*rect,radius:0.0,ops:ops[i+1..end].to_vec().into()};
+                    self.op(text,&group,damage);
+                    i=(end+1).min(ops.len());
+                } else {
+                    if !matches!(ops[i],Op::Unclip) && touches(&ops[i],damage) { self.op(text,&ops[i],damage); }
+                    i+=1;
+                }
+            }
+            return;
+        }
+        }
         let mut pushed = 0;
         // SAFETY: the caller owns this draw scope; each pushed clip is balanced below.
         unsafe {
@@ -801,6 +822,15 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
+                Op::Transformed { transform, ops } => {
+                    let mut saved = windows_numerics::Matrix3x2::identity();
+                    t.GetTransform(&mut saved);
+                    let [a,b,c,d,x,y] = transform.0;
+                    let local = windows_numerics::Matrix3x2 { M11:a,M12:b,M21:c,M22:d,M31:x,M32:y };
+                    t.SetTransform(&(local * saved));
+                    if let Some(inverse) = transform.inverse() { self.ops(text,ops,inverse.bounds(damage).inflate(1.0)); }
+                    t.SetTransform(&saved);
+                }
                 Op::Hole { rect } => {
                     // Clear ignores blending: the clip bounds it to the hole.
                     t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
@@ -890,6 +920,12 @@ impl Painter {
                     }
                 }
                 Op::Clipped { rect, ops } => {
+                    let mut xf=windows_numerics::Matrix3x2::identity();
+                    t.GetTransform(&mut xf);
+                    if xf.M12 != 0.0 || xf.M21 != 0.0 {
+                        self.op(text,&Op::RoundedClipped {rect:*rect,radius:0.0,ops:ops.clone()},damage);
+                        return;
+                    }
                     t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
                     let damage = Rect {
                         left: rect.left.max(damage.left),
@@ -1382,20 +1418,21 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             self.brush.SetColor(&color(c));
-            let (bx, by) = self.base();
-            t.SetTransform(&windows_numerics::Matrix3x2 {
+            let mut saved = windows_numerics::Matrix3x2::identity();
+            t.GetTransform(&mut saved);
+            t.SetTransform(&(windows_numerics::Matrix3x2 {
                 M11: scale,
                 M12: 0.0,
                 M21: 0.0,
                 M22: scale,
-                M31: rect.left + bx,
-                M32: rect.top + by,
-            });
+                M31: rect.left,
+                M32: rect.top,
+            } * saved));
             if icon.filled() {
                 t.FillGeometry(&*geometry, &self.brush, None);
             }
             t.DrawGeometry(&*geometry, &self.brush, weight / scale, &self.round);
-            t.SetTransform(&windows_numerics::Matrix3x2::translation(bx, by));
+            t.SetTransform(&saved);
         }
     }
 

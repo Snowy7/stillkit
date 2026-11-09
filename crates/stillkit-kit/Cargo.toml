@@ -17,8 +17,13 @@ rust-version = "1.96"
 toolchain = "nightly"
 verified-rustc-commit-date = "2026-11-02"
 
+[features]
+default = []
+markdown = ["dep:pulldown-cmark"]
+
 [dependencies]
 stillkit = { path = "../stillkit" }
+pulldown-cmark = { version = "0.13", default-features = false, optional = true }
 
 [dev-dependencies]
 stillkit = { path = "../stillkit", features = ["golden"] }
