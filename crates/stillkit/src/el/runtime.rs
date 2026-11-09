@@ -76,6 +76,7 @@ struct Capture {
 
 enum Action<S> {
     Press(HitId, Modifiers),
+    Link(HitId, Arc<str>),
     Drag(HitId, f32, f32),
     /// The pointer's story on an element with `on_pointer`.
     Pointer(HitId, super::element::PointerEvent),
@@ -525,6 +526,7 @@ impl<S> Runtime<S> {
     /// a press that began on it) that sets one ([`El::cursor`]; text fields show an I-beam),
     /// else the arrow. Hosts apply it after input ([`run`](super::run) does).
     pub fn cursor(&self) -> crate::Cursor {
+        if self.pointer.is_some_and(|p| self.display_link(p.at).is_some()) { return crate::Cursor::Hand; }
         let mut at = self.ix.pressed.or(self.ix.hover).and_then(|hit| self.index_of_hit(hit));
         while let Some(i) = at.filter(|&i| i < self.laid.len()) {
             let id = self.laid[i].id;
@@ -609,6 +611,7 @@ impl<S> Runtime<S> {
                     continue;
                 }
                 Action::Press(hit, _)
+                | Action::Link(hit, _)
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
@@ -630,6 +633,7 @@ impl<S> Runtime<S> {
             };
             let state = &mut self.state;
             match action {
+                Action::Link(_, url) => match &el.on_link { Some(handler) => handler(state, &url), None => continue },
                 Action::Press(_, _) => match &el.on_press {
                     Some(handler) => handler(state, &mut tx),
                     None => continue,
@@ -2258,6 +2262,8 @@ fn role_of<S>(el: &El<S>) -> Role {
             (_, true) => Role::MultilineTextInput,
             _ => Role::TextInput,
         }
+    } else if el.on_link.is_some() {
+        Role::Link
     } else if el.on_drag.is_some() || el.sem.range.is_some() {
         Role::Slider
     } else if el.scrolls().is_some() {
@@ -2541,7 +2547,7 @@ fn paint_el<S>(
                 }
             }
         }
-        What::Text { text, face, wrap: None } => {
+        What::Text { text, face, wrap: None, .. } => {
             let style = face.style(theme, s);
             let fitted = f.text.fit(text, &style, width);
             let (w, h) = f.text.measure(&fitted, &style);
@@ -2554,7 +2560,7 @@ fn paint_el<S>(
                 color: ink,
             });
         }
-        What::Text { text, face, wrap: Some(lines) } => paragraph(f, rect, text, face, ink, *lines),
+        What::Text { text, face, wrap: Some(lines), .. } => paragraph(f, rect, text, face, ink, *lines),
         What::Icon(icon) => f.icon(rect, *icon, rect.width().min(rect.height()) / s, ink),
         What::Image(image) if radius > 0.0 => f.push(Op::RoundedImage {
             rect,

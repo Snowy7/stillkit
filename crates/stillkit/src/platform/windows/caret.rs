@@ -28,3 +28,27 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
     out.push(width);
     out
 }
+
+/// The metrics and stops of the same slanted face used for drawing.
+pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, italic: bool) -> (f32, f32, Vec<f32>) {
+    use windows::Win32::Graphics::DirectWrite::{DWRITE_FONT_STYLE_ITALIC, DWRITE_FONT_STYLE_NORMAL, DWRITE_TEXT_RANGE, DWRITE_TEXT_METRICS};
+    let Some(layout) = text.layout(line, style) else { return (0.0, 0.0, vec![0.0]); };
+    let range = DWRITE_TEXT_RANGE { startPosition: 0, length: line.encode_utf16().count() as u32 };
+    let mut metrics = DWRITE_TEXT_METRICS::default();
+    let mut out = Vec::new();
+    // SAFETY: the cached layout is live; all output pointers refer to locals. Restore its shared face before returning.
+    unsafe {
+        let _ = layout.SetFontStyle(if italic { DWRITE_FONT_STYLE_ITALIC } else { DWRITE_FONT_STYLE_NORMAL }, range);
+        let _ = layout.GetMetrics(&mut metrics);
+        let mut at = 0;
+        for c in line.chars() {
+            let (mut x, mut y) = (0.0, 0.0);
+            let mut hit = DWRITE_HIT_TEST_METRICS::default();
+            let _ = layout.HitTestTextPosition(at, false, &mut x, &mut y, &mut hit);
+            out.push(x); at += c.len_utf16() as u32;
+        }
+        let _ = layout.SetFontStyle(DWRITE_FONT_STYLE_NORMAL, range);
+    }
+    out.push(metrics.widthIncludingTrailingWhitespace);
+    (metrics.widthIncludingTrailingWhitespace, metrics.height, out)
+}

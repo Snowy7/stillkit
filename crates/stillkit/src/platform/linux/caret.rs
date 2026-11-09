@@ -32,3 +32,21 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
     }
     out
 }
+
+pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, italic: bool) -> (f32, f32, Vec<f32>) {
+    let chars: Vec<_> = line.char_indices().map(|(i, _)| i).collect();
+    let mut out = vec![0.0; chars.len() + 1];
+    let (mut width, mut height) = (0f32, 0f32);
+    for run in text.shape_emphasis(line, style, italic).layout_runs() {
+        width = width.max(run.line_w); height = height.max(run.line_top + run.line_height);
+        for g in run.glyphs {
+            let inside: Vec<_> = (0..chars.len()).filter(|&k| chars[k] >= g.start && chars[k] < g.end).collect();
+            for (j, &k) in inside.iter().enumerate() {
+                let along = g.w * j as f32 / inside.len().max(1) as f32;
+                out[k] = if g.level.is_rtl() { g.x + g.w - along } else { g.x + along };
+            }
+        }
+    }
+    out[chars.len()] = width;
+    (width, height, out)
+}

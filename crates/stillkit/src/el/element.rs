@@ -596,6 +596,7 @@ pub(crate) enum What {
     Text {
         text: Arc<str>,
         face: Face,
+        runs: Arc<[super::rich::Run]>,
         /// Wrap into at most this many lines; `None` keeps one line (cut with an ellipsis).
         wrap: Option<usize>,
     },
@@ -805,6 +806,7 @@ pub struct El<S> {
     /// Draws no focus ring of its own ([`El::focus_ring`]).
     pub(crate) quiet: bool,
     pub(crate) selectable: bool,
+    pub(crate) on_link: Option<Arc<dyn Fn(&mut S, &str)>>,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -848,6 +850,7 @@ fn new<S>(what: What) -> El<S> {
         cascade: false,
         quiet: false,
         selectable: false,
+        on_link: None,
         children: Vec::new(),
     }
 }
@@ -876,6 +879,7 @@ pub fn grid<S>(columns: u16) -> El<S> {
 /// as tall as the role's line and may shrink, cut with an ellipsis.
 pub fn text<S>(text: impl Into<Arc<str>>) -> El<S> {
     new(What::Text {
+        runs: Arc::from([]),
         text: text.into(),
         face: Face::default(),
         wrap: None,
@@ -1783,6 +1787,7 @@ impl<S> El<S> {
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
         (self.selectable && matches!(self.what, What::Text { .. }))
+            || self.on_link.is_some()
             || self.on_press.is_some()
             || self.on_drag.is_some()
             || self.on_pointer.is_some()

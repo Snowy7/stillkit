@@ -18,3 +18,18 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
     out.push(*width as f32);
     out
 }
+
+pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, italic: bool) -> (f32, f32, Vec<f32>) {
+    let layout = text.shape(line, style, italic);
+    let mut out = Vec::new();
+    if let Some((ct, width)) = layout.lines.first() {
+        let mut at = 0;
+        for c in line.chars() {
+            // SAFETY: the line is live and the UTF-16 index is inside its string.
+            out.push(unsafe { ct.offset_for_string_index(at, std::ptr::null_mut()) } as f32);
+            at += c.len_utf16() as isize;
+        }
+        out.push(*width as f32);
+    }
+    (layout.width, layout.height(), out)
+}

@@ -45,6 +45,8 @@ pub(crate) mod edit;
 mod element;
 mod feedback;
 mod field;
+mod rich;
+pub use rich::{Run, rich_text};
 mod host;
 mod json;
 mod layout;

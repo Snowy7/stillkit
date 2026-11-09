@@ -13,6 +13,7 @@ use std::time::Duration;
 
 pub(super) struct Display {
     pub field: Field,
+    rich: Option<super::super::rich::Layout>,
     doc: u64,
     start: usize,
     align: super::super::element::TextAlign,
@@ -44,7 +45,7 @@ pub(super) struct Drag {
 impl<S> Runtime<S> {
     pub(super) fn sync_display(&mut self) {
         fn enabled<S>(el: &super::super::El<S>) -> bool {
-            el.selectable || el.children.iter().any(enabled)
+            el.selectable || matches!(&el.what, What::Text { runs, .. } if !runs.is_empty()) || el.children.iter().any(enabled)
         }
         if self.display.is_empty() && !enabled(&self.root) {
             return;
@@ -55,9 +56,9 @@ impl<S> Runtime<S> {
         for (i, el) in flat
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.selectable && !e.sem.disabled)
+            .filter(|(_, e)| (e.selectable || matches!(&e.what, What::Text { runs, .. } if !runs.is_empty())) && !e.sem.disabled)
         {
-            let What::Text { text, face, wrap } = &el.what else {
+            let What::Text { text, face, wrap, runs } = &el.what else {
                 continue;
             };
             // Controls keep their input even when added after `selectable()`.
@@ -95,6 +96,7 @@ impl<S> Runtime<S> {
             seen.insert(l.id);
             let d = self.display.entry(l.id).or_insert_with(|| Display {
                 field: Field::new(text),
+                rich: None,
                 doc,
                 start,
                 align: face.align,
@@ -120,6 +122,8 @@ impl<S> Runtime<S> {
                 d.field.look.as_ref().expect("display look"),
                 Some(l.rect.width()),
             );
+            d.rich = (!runs.is_empty()).then(|| super::super::rich::layout(&mut self.ui.text, runs, &style, line, self.scale, l.rect.width()));
+            if let Some(rich) = &d.rich { d.field.shape = rich.shape.clone(); }
             d.field.shape.lines.truncate(wrap.unwrap_or(usize::MAX));
         }
         self.display.retain(|id, _| seen.contains(id));
@@ -251,6 +255,20 @@ impl<S> Runtime<S> {
             .map(|(_, doc, at)| (doc, at))
     }
 
+    pub(super) fn display_link(&self, p: Point) -> Option<(crate::HitId, std::sync::Arc<str>)> {
+        for (i, l) in self.laid.iter().enumerate() {
+            let Some(d) = self.display.get(&l.id) else { continue };
+            let Some(rich) = &d.rich else { continue };
+            let rect = self.poses.get(i)?.rect;
+            for fragment in &rich.fragments {
+                let r = fragment.rect.offset(rect.left, rect.top);
+                if p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom {
+                    if let Some(url) = &fragment.run.link { return Some((l.hit, url.clone())); }
+                }
+            }
+        }
+        None
+    }
     pub(super) fn display_pointer(&mut self, event: &Event) {
         if self.display.is_empty() {
             return;
@@ -331,6 +349,12 @@ impl<S> Runtime<S> {
                 }
                 self.sync_display_ranges();
             }
+            Event::Release(p, Button::Left) => {
+                if self.display_drag.as_ref().is_none_or(|drag| self.documents.get(&drag.doc).is_none_or(|ed| ed.selection().is_empty())) {
+                    if let Some((hit, url)) = self.display_link(p.at) { self.queue.push(super::Action::Link(hit, url)); }
+                }
+                self.display_drag = None;
+            }
             Event::Release(..)
             | Event::Cancelled
             | Event::CaptureLost
@@ -348,7 +372,7 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
     let (_, h) = f.text.measure("Ag", &look.style);
     let lead = ((look.line - h) / 2.0).round();
     for (n, line) in d.field.shape.lines.iter().enumerate() {
-        let top = rect.top + n as f32 * look.line;
+        let top = rect.top + n as f32 * d.field.shape.line;
         let width = line.stops.iter().map(|s| s.1).fold(0.0, f32::max);
         let left = super::align_x(rect, width, d.align);
         let a = range.start.max(line.start);
@@ -366,13 +390,14 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
                 color: token::SELECTION.resolve(f.theme),
             });
         }
-        ops.push(Op::Text {
+        if d.rich.is_none() { ops.push(Op::Text {
             rect: Rect::new(left, top + lead, rect.width(), h),
             text: line.drawn.clone(),
             style: look.style.clone(),
             color: ink,
-        });
+        }); }
     }
+    if let Some(rich) = &d.rich { ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme))); }
     f.push(Op::Clipped {
         rect,
         ops: ops.into(),

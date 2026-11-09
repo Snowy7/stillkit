@@ -26,6 +26,8 @@ pub(crate) struct Measure {
     line: f32,
     wrap: Option<usize>,
     selectable: bool,
+    runs: Arc<[super::rich::Run]>,
+    scale: f32,
 }
 
 struct Retained {
@@ -341,6 +343,12 @@ fn scroll_styles(style: Style, axis: Axis) -> (Style, Style) {
 impl Measure {
     /// The text's size in device px: one line as wide as it is, or wrapped at the width given.
     fn size(&self, text: &mut Text, known: Option<f32>, available: AvailableSpace) -> (f32, f32) {
+        if !self.runs.is_empty() {
+            let width = known.unwrap_or(match available { AvailableSpace::Definite(w) => w, AvailableSpace::MinContent => 1.0, AvailableSpace::MaxContent => f32::MAX });
+            let layout = super::rich::layout(text, &self.runs, &self.style, self.line, self.scale, width);
+            let w = layout.shape.lines.iter().flat_map(|l| l.stops.iter().map(|s| s.1)).fold(0.0, f32::max);
+            return (w.ceil(), layout.shape.height());
+        }
         let (w, _) = text.measure(&self.text, &self.style);
         let Some(lines) = self.wrap else {
             return (w.ceil(), self.line);
@@ -376,9 +384,11 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
             line: f.face.line(cx.theme, cx.s) * rows as f32,
             wrap: None,
             selectable: false,
+            runs: Arc::from([]),
+            scale: cx.s,
         });
     }
-    let What::Text { text, face, wrap } = &el.what else {
+    let What::Text { text, face, wrap, runs } = &el.what else {
         return None;
     };
     Some(Measure {
@@ -387,6 +397,8 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
         line: face.line(cx.theme, cx.s),
         wrap: *wrap,
         selectable: el.selectable,
+        runs: runs.clone(),
+        scale: cx.s,
     })
 }
 

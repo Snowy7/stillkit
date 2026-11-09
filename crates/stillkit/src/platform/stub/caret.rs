@@ -8,3 +8,7 @@ pub(crate) fn stops(text: &mut Text, line: &str, style: &TextStyle) -> Vec<f32> 
     out.push(text.measure(line, style).0);
     out
 }
+
+pub(crate) fn attributed(text: &mut Text, line: &str, style: &TextStyle, _italic: bool) -> (f32, f32, Vec<f32>) {
+    let (w, h) = text.measure(line, style); (w, h, stops(text, line, style))
+}
