@@ -357,7 +357,7 @@ impl<'a, S: 'static> VirtualTable<'a, S> {
         body = if let Some(height) = height {
             body.h(height)
         } else {
-            body.grow(1.).min_h(0.)
+            body.h(0.).grow(1.).min_h(0.)
         };
         let page = (height.unwrap_or(280.) / 28.).floor().max(1.) as usize;
         let mut root = col()
@@ -816,7 +816,7 @@ impl<'a, S: 'static> VirtualTree<'a, S> {
         body = if let Some(height) = height {
             body.h(height)
         } else {
-            body.grow(1.).min_h(0.)
+            body.h(0.).grow(1.).min_h(0.)
         };
         let page = (height.unwrap_or(280.) / 28.).floor().max(1.) as usize;
         let mut root = col()
