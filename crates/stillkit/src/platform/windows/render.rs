@@ -515,6 +515,8 @@ pub struct Canvas {
 /// [`Canvas`], or the hardware device context of a GPU surface (`gpu`). One drawing code for
 /// both, so the two modes draw the same picture.
 pub(crate) struct Painter {
+    #[cfg(feature = "gpu")]
+    pub(crate) native_filters: bool,
     pub(crate) target: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
     images: RefCell<HashMap<usize, (Arc<Image>, ID2D1Bitmap)>>,
@@ -559,6 +561,8 @@ impl Painter {
                 None,
             )?;
             Ok(Self {
+                #[cfg(feature = "gpu")]
+                native_filters: false,
                 target,
                 brush,
                 images: RefCell::new(HashMap::new()),
@@ -768,10 +772,7 @@ impl Painter {
     /// inside a retained clipped group, so an unmatched Unclip cannot pop a caller's clip.
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
         #[cfg(feature = "gpu")]
-        let native = self
-            .target
-            .cast::<windows::Win32::Graphics::Direct2D::ID2D1DeviceContext>()
-            .is_ok();
+        let native = self.native_filters;
         #[cfg(not(feature = "gpu"))]
         let native = false;
         #[cfg(feature = "gpu")]

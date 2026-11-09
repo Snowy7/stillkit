@@ -147,8 +147,8 @@ Both radii follow `.animate()` springs and snap under reduced motion.
 CPU filters use three separable sliding box passes over the damaged patch plus
 three sigma of input. A lazily allocated per-thread cache keeps at most 16 patches
 and 16 MiB of filtered pixels. Unchanged display lists do not draw. D2D GPU uses
-its Gaussian effect; Vello GPU uses native filter layers. Partially faded backdrop
-filters use the CPU patch path. macOS CPU uses the shared software filter, while
+its Gaussian effect; Vello GPU uses native filter layers. Partially faded or nonopaque backdrop
+filters use the CPU patch path to preserve alpha. macOS CPU uses the shared software filter, while
 macOS GPU uses its existing Vello renderer. See `el_effects` and the ignored
 `cpu_blur_cost` test for a reproducible release benchmark.
 

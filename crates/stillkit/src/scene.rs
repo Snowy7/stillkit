@@ -743,7 +743,10 @@ fn backdrop_damage(ops: &[Op], regions: &mut Vec<Rect>) {
         match op {
             Op::BackdropBlur { rect, sigma, .. } => {
                 let input = rect.inflate(crate::blur::reach(*sigma));
-                if regions.iter().any(|r| r.intersects(&input)) { regions.push(*rect); }
+                let affected: Vec<_> = regions.iter().filter(|r| r.intersects(&input))
+                    .map(|r| r.inflate(crate::blur::reach(*sigma)).intersect(*rect))
+                    .filter(|r| !r.is_empty()).collect();
+                regions.extend(affected);
             }
             Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
                 let mut inner=regions.clone();

@@ -1,4 +1,5 @@
 //! Damage-sized CPU filters. Storage is allocated only when a scene uses blur.
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 use crate::platform::Renderer;
 use crate::{DisplayList, Image, Op, PixelRect, Rect};
 use anyhow::Result;
@@ -12,22 +13,42 @@ struct Entry {
     source: Vec<Op>,
     rect: Rect,
     sigma: f32,
+    mask: Option<(Rect, f32, f32)>,
     image: Arc<Image>,
 }
-thread_local! { static CACHE: RefCell<VecDeque<Entry>> = const { RefCell::new(VecDeque::new()) }; }
+thread_local! {
+    static CACHE: RefCell<VecDeque<Entry>> = const { RefCell::new(VecDeque::new()) };
+    static UI: RefCell<Option<crate::Ui>> = const { RefCell::new(None) };
+}
 
-fn raster(text: &mut crate::Text, source: Vec<Op>, rect: Rect, sigma: f32) -> Result<Arc<Image>> {
+fn raster(
+    text: &mut crate::Text,
+    source: Vec<Op>,
+    rect: Rect,
+    sigma: f32,
+    mask: Option<(Rect, f32, f32)>,
+) -> Result<Arc<Image>> {
+    let sigma = if sigma.is_finite() {sigma.clamp(0.0,64.0)} else {0.0};
     if let Some(image) = CACHE.with(|c| {
         c.borrow()
             .iter()
-            .find(|e| e.rect == rect && e.sigma == sigma && e.source == source)
+            .find(|e| e.rect == rect && e.sigma == sigma && e.mask == mask && e.source == source)
             .map(|e| e.image.clone())
     }) {
         return Ok(image);
     }
-    let ui = crate::Ui::new()?;
     let (width, height) = (rect.width() as u32, rect.height() as u32);
-    let canvas = crate::platform::current::Renderer::new(&ui, width, height)?;
+    let canvas = UI.with(|slot| -> Result<_> {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(crate::Ui::new()?);
+        }
+        crate::platform::current::Renderer::new(
+            slot.as_ref().expect("initialized filter services"),
+            width,
+            height,
+        )
+    })?;
     let list = DisplayList {
         ops: source.clone(),
         ..Default::default()
@@ -39,7 +60,29 @@ fn raster(text: &mut crate::Text, source: Vec<Op>, rect: Rect, sigma: f32) -> Re
         let i = y as usize * width as usize * 4;
         pixels[i..i + row.len()].copy_from_slice(row);
     })?;
+    let original = mask.map(|_| pixels.clone());
     boxes(&mut pixels, width as usize, height as usize, sigma);
+    if let (Some((bounds, radius, opacity)), Some(original)) = (mask, original) {
+        let radius = radius.clamp(0.0, bounds.width().min(bounds.height()) * 0.5);
+        for y in 0..height {
+            for x in 0..width {
+                let dx = (rect.left + x as f32 + 0.5 - (bounds.left + bounds.right) * 0.5).abs()
+                    - bounds.width() * 0.5
+                    + radius;
+                let dy = (rect.top + y as f32 + 0.5 - (bounds.top + bounds.bottom) * 0.5).abs()
+                    - bounds.height() * 0.5
+                    + radius;
+                let distance = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - radius;
+                let amount = (0.5 - distance).clamp(0.0, 1.0) * opacity;
+                let i = ((y * width + x) * 4) as usize;
+                for channel in 0..4 {
+                    pixels[i + channel] = (original[i + channel] as f32 * (1.0 - amount)
+                        + pixels[i + channel] as f32 * amount)
+                        .round() as u8;
+                }
+            }
+        }
+    }
     let image = Arc::new(Image {
         width,
         height,
@@ -58,6 +101,7 @@ fn raster(text: &mut crate::Text, source: Vec<Op>, rect: Rect, sigma: f32) -> Re
                 source,
                 rect,
                 sigma,
+                mask,
                 image: image.clone(),
             });
         }
@@ -114,6 +158,7 @@ fn patch(
     bounds: Rect,
     damage: Rect,
     sigma: f32,
+    mask: Option<(Rect, f32, f32)>,
 ) -> Result<Option<(Rect, Arc<Image>)>> {
     let output = bounds.intersect(damage);
     if output.is_empty() {
@@ -131,7 +176,7 @@ fn patch(
         .filter(|op| matches!(op, Op::Clip { .. } | Op::Unclip) || op.bounds().intersects(&rect))
         .cloned()
         .collect();
-    Ok(Some((rect, raster(text, source, rect, sigma)?)))
+    Ok(Some((rect, raster(text, source, rect, sigma, mask)?)))
 }
 
 pub(crate) fn prepare<'a>(
@@ -199,14 +244,14 @@ fn walk(
         match op {
             Op::Blurred { sigma, ops } if native => {
                 out.push(Op::Blurred {
-                    sigma: *sigma,
+                    sigma: sigma.clamp(0.0,64.0),
                     ops: walk(text, ops, &[], op.bounds(), native)?.into(),
                 });
             }
             Op::Blurred { sigma, ops } => {
                 let bounds = op.bounds();
                 let source = walk(text, ops, &[], bounds, native)?;
-                if let Some((rect, image)) = patch(text, &source, bounds, damage, *sigma)? {
+                if let Some((rect, image)) = patch(text, &source, bounds, damage, *sigma, None)? {
                     out.push(Op::Image {
                         rect,
                         image,
@@ -222,26 +267,41 @@ fn walk(
                 opacity,
             } => {
                 let source: Vec<_> = behind.iter().chain(&out).cloned().collect();
-                if native && *opacity == 1.0 {
+                // Source-over is exact for an opaque backdrop. Preserve alpha with the
+                // software replacement path when that cannot be established from the list.
+                let input=rect.inflate(reach(*sigma));
+                let opaque=source.iter().any(|op| matches!(op,Op::Fill{rect,radius,color} if *radius==0.0 && color.a==1.0 && rect.left<=input.left && rect.top<=input.top && rect.right>=input.right && rect.bottom>=input.bottom))
+                    && source.iter().all(|op| !matches!(op,Op::Hole{..}|Op::Clipped{..}|Op::RoundedClipped{..}|Op::Transformed{..}));
+                if native && *opacity == 1.0 && opaque {
                     out.push(Op::RoundedClipped {
                         rect: *rect,
                         radius: *radius,
                         ops: vec![Op::Blurred {
-                            sigma: *sigma,
+                            sigma: sigma.clamp(0.0,64.0),
                             ops: source.into(),
                         }]
                         .into(),
                     });
-                } else if let Some((area, image)) = patch(text, &source, *rect, damage, *sigma)? {
-                    out.push(Op::RoundedClipped {
-                        rect: *rect,
-                        radius: *radius,
-                        ops: vec![Op::Image {
-                            rect: area,
-                            image,
-                            opacity: *opacity,
-                            source: None,
-                        }]
+                } else if let Some((area, image)) = patch(
+                    text,
+                    &source,
+                    *rect,
+                    damage,
+                    *sigma,
+                    Some((*rect, *radius, *opacity)),
+                )? {
+                    let output = rect.intersect(damage);
+                    out.push(Op::Clipped {
+                        rect: output,
+                        ops: vec![
+                            Op::Hole { rect: output },
+                            Op::Image {
+                                rect: area,
+                                image,
+                                opacity: 1.0,
+                                source: None,
+                            },
+                        ]
                         .into(),
                     });
                 }

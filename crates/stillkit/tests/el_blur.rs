@@ -76,7 +76,7 @@ fn filters_move_scale_and_damage_their_dependencies() {
     let mut after = before.clone();
     after.ops[0] = fill(0.0, Rgba::new(0.0, 1.0, 0.0, 1.0));
     let damage = after.damage(&before).unwrap();
-    assert!(damage.right >= 70.0);
+    assert!(damage.right >= 52.0 && damage.right < 70.0);
     assert!(before.damage(&before).is_none());
     let mut op = scene(false, 4.0).ops.remove(0);
     op.translate(5.0, 6.0);
@@ -217,4 +217,13 @@ fn native_gpu_filters_mix_pixels_inside_the_mask() {
             assert_eq!(image.pixel(4, 40), [0, 0, 255, 255]);
         }
     }
+}
+
+#[test]
+fn a_uniform_translucent_backdrop_keeps_its_alpha() {
+    let mut ui=stillkit::Ui::new().unwrap();
+    let list=DisplayList {ops:vec![Op::Fill{rect:Rect::new(0.0,0.0,100.0,100.0),radius:0.0,color:Rgba::new(0.2,0.4,0.6,0.5)},Op::BackdropBlur{rect:Rect::new(20.0,20.0,60.0,60.0),radius:12.0,sigma:2.0,opacity:0.5}],..Default::default()};
+    let image=stillkit::render(&mut ui,&list,100,100).unwrap();
+    assert_eq!(image.pixel(50,50),image.pixel(10,50));
+    assert_eq!(image.pixel(20,20),image.pixel(10,50));
 }

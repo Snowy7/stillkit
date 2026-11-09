@@ -193,7 +193,9 @@ impl Device {
 
     /// A painter on this device's context, drawing text with `params`.
     fn painter(&self, params: &IDWriteRenderingParams) -> Result<Painter> {
-        Painter::new(self.dc.cast()?, &self.factory, params)
+        let mut painter = Painter::new(self.dc.cast()?, &self.factory, params)?;
+        painter.native_filters = true;
+        Ok(painter)
     }
 
     /// Points the context at `surface` (a texture of this device) for one draw.

@@ -10,7 +10,7 @@ fn runtime() -> Runtime<bool> {
         false,
         effects::view,
         Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
-        (320, 340),
+        (320, 440),
         1.0,
     )
     .unwrap()
@@ -67,7 +67,7 @@ fn gradient_damage_is_local_and_identical_frames_cost_no_redraw() {
 fn native_gradient_pixels() {
     let rt = runtime();
     let mut ui = stillkit::Ui::new().unwrap();
-    let image = stillkit::render(&mut ui, rt.list(), 320, 340).unwrap();
+    let image = stillkit::render(&mut ui, rt.list(), 320, 440).unwrap();
     // Linear fill has different ends, its rounded corner stays on the background.
     assert_ne!(image.pixel(30, 90), image.pixel(280, 90));
     assert_ne!(image.pixel(160, 170), image.pixel(30, 170));
