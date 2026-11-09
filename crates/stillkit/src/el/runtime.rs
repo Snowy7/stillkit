@@ -739,6 +739,7 @@ impl<S> Runtime<S> {
         self.targets = targets;
         self.sync_fields();
         self.sync_scrolls();
+        self.measure_virtual_rows();
         self.sync_timers();
         if !self.layers.is_empty() || !self.shown.is_empty() {
             self.follow_layers();
@@ -1091,8 +1092,40 @@ impl<S> Runtime<S> {
 
     /// Runs the view with each virtual list's scroll place in reach ([`super::virtual_list`]).
     fn run_view(&mut self) -> El<S> {
+        let flat = flatten(&self.root);
+        for (i, el) in flat.iter().enumerate() {
+            if let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) {
+                let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit)).and_then(|mut j| {
+                    loop {
+                        let parent = self.laid[j].parent?;
+                        if parent == i { return flat[j].key.clone(); }
+                        j = parent;
+                    }
+                });
+                if let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)) {
+                    rows.prepare(view.offset(self.anim.t) / self.scale, focused);
+                }
+            }
+        }
         let places = self.virtual_places();
         super::virtualize::with_viewports(places, || (self.view)(&self.state))
+    }
+
+    fn measure_virtual_rows(&mut self) {
+        let flat = flatten(&self.root);
+        for (i, el) in flat.iter().enumerate() {
+            let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) else { continue };
+            let mut changed = false;
+            for (j, child) in flat.iter().enumerate().skip(i + 1) {
+                if self.laid[j].parent == Some(i) && let Some(key) = &child.key {
+                    changed |= rows.measure(key, self.laid[j].rect.height() / self.scale);
+                }
+            }
+            if let Some(view) = self.scrolls.get_mut(&self.laid[i].id) {
+                view.to(rows.offset() * self.scale, None, self.anim.t);
+            }
+            self.stale_view |= changed;
+        }
     }
 
     /// Each keyed virtual list's offset and viewport now, design px.
@@ -2172,6 +2205,14 @@ fn semantics_of<S>(el: &El<S>, id: HitId, rel: Option<&Relation>, out: &mut Vec<
         invalid: s.invalid,
         // Keys resolve once the whole list is painted (`Runtime::paint`).
         active_descendant: None,
+        row_count: s.row_count,
+        column_count: s.column_count,
+        row_index: s.row_index,
+        column_index: s.column_index,
+        level: s.level,
+        size_of_set: s.size_of_set,
+        position_in_set: s.position_in_set,
+
     };
     if detail != Detail::default() || s.active.is_some() {
         out.push((id, Semantics::Detail(detail)));

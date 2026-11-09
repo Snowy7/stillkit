@@ -83,6 +83,21 @@ pub struct Detail {
     /// The hit item it shows as active while it keeps focus itself (a combobox's highlighted
     /// row), read as if it had focus.
     pub active_descendant: Option<HitId>,
+    /// Total rows, including virtual rows.
+    pub row_count: Option<usize>,
+    /// Total columns.
+    pub column_count: Option<usize>,
+    /// Zero-based row index in the complete model.
+    pub row_index: Option<usize>,
+    /// Zero-based column index.
+    pub column_index: Option<usize>,
+    /// One-based tree depth.
+    pub level: Option<usize>,
+    /// Number of siblings.
+    pub size_of_set: Option<usize>,
+    /// One-based sibling position.
+    pub position_in_set: Option<usize>,
+
 }
 
 /// Rich actions remain owned data until the surface's UI thread consumes them.
@@ -232,6 +247,13 @@ impl Snapshot {
                         }
                     }
                     Semantics::Detail(detail) => {
+                        if let Some(value) = detail.row_count { node.set_row_count(value); }
+                        if let Some(value) = detail.column_count { node.set_column_count(value); }
+                        if let Some(value) = detail.row_index { node.set_row_index(value); }
+                        if let Some(value) = detail.column_index { node.set_column_index(value); }
+                        if let Some(value) = detail.level { node.set_level(value); }
+                        if let Some(value) = detail.size_of_set { node.set_size_of_set(value); }
+                        if let Some(value) = detail.position_in_set { node.set_position_in_set(value); }
                         if let Some(description) = &detail.description {
                             node.set_description(&**description);
                         }

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
+
 ### Added
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
