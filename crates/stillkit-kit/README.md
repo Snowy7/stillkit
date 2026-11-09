@@ -407,3 +407,16 @@ No changes were made under `crates/stillkit`, and no branch was pushed or merged
 
 Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
 reuses the text gallery's overlay module to avoid duplicate module loading.
+
+
+## App shells
+
+`SplitView::new(key, &state, access, first, second)` composes two controlled panes.
+Keep `SplitState` in the model and persist its public `size` in app settings.
+`axis(SplitAxis::Vertical)` stacks panes; children may nest splits. `limits(min,max)`,
+`reset_size(px)` and `collapsible(true)` control the leading pane. Captured pointer
+travel resizes outside the grip; cancellation restores the starting size. Double-click
+and Home reset; axis arrows step by 10 px (Shift: 1); Enter collapses/restores.
+The splitter exposes an accessible range and resize cursor. Give the trailing pane
+room by choosing limits appropriate to the host's minimum window size.
+
