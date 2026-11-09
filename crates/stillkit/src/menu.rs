@@ -566,6 +566,7 @@ impl<C> Panel<C> {
 
 /// The open menu, if any, and the windows it reuses.
 pub struct Menu<C> {
+    no_activate: bool,
     name: Arc<str>,
     tokens: Tokens,
     panels: Vec<Panel<C>>,
@@ -584,6 +585,7 @@ impl<C: Clone> Menu<C> {
     /// technology calls the menu.
     pub fn new(name: &str) -> Result<Self> {
         let mut menu = Self {
+            no_activate: false,
             name: name.into(),
             tokens: Tokens::default(),
             panels: Vec::new(),
@@ -667,7 +669,7 @@ impl<C: Clone> Menu<C> {
         let drawn = started.elapsed();
         root.show();
         let shown = started.elapsed();
-        let how = root.take_focus();
+        let how = if self.no_activate { "no-activate" } else { root.take_focus() };
         log::debug!(
             "menu: drawn {drawn:.1?}, shown {shown:.1?}, focused {:.1?} ({how})",
             started.elapsed()
@@ -685,6 +687,43 @@ impl<C: Clone> Menu<C> {
         !self.panels.is_empty()
     }
 
+    /// Keep pooled panels non-activating, for embedded menus and internal visual fixtures.
+    pub fn set_no_activate(&mut self, value: bool) {
+        self.no_activate = value;
+        #[cfg(target_os = "windows")]
+        for surface in self.pool.iter().map(|(s,_)| s).chain(self.panels.iter().map(|p| &p.surface)) {
+            surface.set_no_activate(value);
+        }
+    }
+
+    /// Replace asynchronously loaded rows/icons without hiding, refocusing or replaying open
+    /// motion. Existing submenus retain their content window during icon-only updates.
+    pub fn update_entries(&mut self, ui: &mut Ui, items: Vec<Entry<C>>) -> Result<()> {
+        if self.panels.is_empty() { return Ok(()); }
+        let mut next = items;
+        for index in 0..self.panels.len() {
+            if index > 0 {
+                let row = self.panels[index].opened_by.unwrap();
+                let Some(Entry::Submenu { items, .. }) = self.panels[index-1].items.get(row).map(Entry::plain) else {
+                    while self.panels.len() > index { self.close_innermost(); }
+                    break;
+                };
+                next = items.clone();
+            }
+            let p = &mut self.panels[index];
+            let same_rows = p.items.iter().map(Entry::label).eq(next.iter().map(Entry::label));
+            p.items = std::mem::take(&mut next);
+            if !same_rows { p.hover = None; }
+            let mut layout = layout(&p.items, &self.tokens, p.layout.scale, &mut ui.text);
+            p.natural = layout.clone();
+            let work = screen_at(p.origin.0,p.origin.1).work;
+            layout.height = layout.height.min((work.3-work.1) as f32 - 2.0*margin(&self.tokens,layout.scale));
+            p.layout = layout;
+            self.redraw_checked(ui,index)?;
+        }
+        Ok(())
+    }
+
     /// Is the screen point on one of the open panels?
     pub fn contains(&self, x: i32, y: i32) -> bool {
         self.panels.iter().any(|p| p.contains(x, y))
@@ -693,6 +732,11 @@ impl<C: Clone> Menu<C> {
     /// Does `id` belong to one of the open panels?
     pub fn owns(&self, id: SurfaceId) -> bool {
         self.panels.iter().any(|p| p.surface.id() == id)
+    }
+
+    /// Read-only access to open panels, for host integration and window-scoped diagnostics.
+    pub fn surfaces(&self) -> impl Iterator<Item = &Surface> {
+        self.panels.iter().map(|p| &p.surface)
     }
 
     /// Handles an event for one of the menu's surfaces. Returns what it came to, if anything.
@@ -1067,6 +1111,10 @@ impl<C: Clone> Menu<C> {
         });
         self.redraw_checked(ui, self.panels.len() - 1)?;
         let p = self.panels.last_mut().unwrap();
+        if crate::glass::synchronous() {
+            p.surface.set_alpha(255)?;
+            return Ok(());
+        }
         if let Some(configured) = self.open_motion {
             p.surface.set_alpha(255)?;
             if configured.timing.enabled {
@@ -1181,7 +1229,7 @@ impl<C: Clone> Menu<C> {
 
     fn create(&self, submenu: bool) -> Result<Surface> {
         Surface::new_deferred_accessibility(
-            Kind::Popup { activate: !submenu },
+            Kind::Popup { activate: !submenu && !self.no_activate },
             &self.name,
             Role::Menu,
         )

@@ -678,6 +678,10 @@ impl Surface {
                 &self.glass_style.get(),
             );
             self.glass_open.set(opened);
+            if opened {
+                backdrop.opacity(self.hwnd, self.alpha);
+                if self.is_visible() { backdrop.visibility(self.hwnd, true); }
+            }
         }
     }
 
@@ -887,6 +891,9 @@ impl Surface {
             return Ok(());
         }
         if alpha != self.alpha {
+            if self.glass_open.get() && let Some(backdrop) = self.backdrop() {
+                backdrop.opacity(self.hwnd, alpha);
+            }
             self.alpha = alpha;
             self.update(self.origin, None)?;
         }
@@ -895,12 +902,16 @@ impl Surface {
 
     /// Shows the window without activating it.
     pub fn show(&self) {
+        let native = self.backdrop().is_some_and(|b| b.synchronous());
+        if native && !self.glass_open.get() { self.open_glass(); }
         // SAFETY: read-only window queries and a show of our own window, without activation.
         unsafe {
             if !IsWindowVisible(self.hwnd).as_bool()
                 || windows::Win32::UI::WindowsAndMessaging::IsIconic(self.hwnd).as_bool()
             {
-                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+                if !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, true)) {
+                    let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+                }
             }
         }
         if self.shared.desktop.is_some() {
@@ -1029,7 +1040,9 @@ impl Surface {
     /// Hide.
     pub fn hide(&self) {
         // SAFETY: our own window.
-        let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+        if !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, false)) {
+            let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+        }
         self.close_glass();
     }
 
