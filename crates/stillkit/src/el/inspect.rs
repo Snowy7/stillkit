@@ -49,7 +49,6 @@ impl ThemeWatch {
     /// Loads a look and watches byte changes, including atomic replacement.
     pub fn new(path: &Path, wake: crate::Waker) -> Result<(Self, Theme)> {
         let path = std::fs::canonicalize(path)?;
-        let initial = read_theme(&path)?;
         let pending: Arc<Mutex<Option<Result<Theme>>>> = Arc::new(Mutex::new(None));
         let slot = pending.clone();
         let source = path.clone();
@@ -60,6 +59,8 @@ impl ThemeWatch {
         })?;
         #[cfg(windows)]
         {
+            // Read after subscribing so a save during setup cannot be missed.
+            let initial = read_theme(&path)?;
             Ok((
                 Self {
                     _watch: watch,
@@ -70,7 +71,7 @@ impl ThemeWatch {
         }
         #[cfg(not(windows))]
         {
-            let _ = (slot, source, wake, initial);
+            let _ = (slot, source, wake);
             anyhow::bail!("native look watching is currently available on Windows")
         }
     }
@@ -93,6 +94,7 @@ pub fn parse_theme(path: &Path, source: &str) -> Result<Theme> {
 #[derive(Default)]
 pub(super) struct Inspector {
     panel: Option<Box<Runtime<Panel>>>,
+    captured: bool,
 }
 #[derive(Default)]
 struct Panel {
@@ -137,9 +139,15 @@ impl Inspector {
             p
         };
         let event = match *event {
-            Event::Move(p) if p.at.x >= left => Event::Move(shift(p)),
-            Event::Press(p, b) if p.at.x >= left => Event::Press(shift(p), b),
-            Event::Release(p, b) if p.at.x >= left => Event::Release(shift(p), b),
+            Event::Move(p) if self.captured || p.at.x >= left => Event::Move(shift(p)),
+            Event::Press(p, b) if p.at.x >= left => {
+                self.captured = true;
+                Event::Press(shift(p), b)
+            }
+            Event::Release(p, b) if self.captured || p.at.x >= left => {
+                self.captured = false;
+                Event::Release(shift(p), b)
+            }
             Event::Wheel(p, d) if p.at.x >= left => Event::Wheel(shift(p), d),
             _ => return false,
         };
@@ -395,6 +403,26 @@ mod tests {
         assert!(!rt.inspecting());
     }
     #[test]
+    fn panel_keeps_pointer_capture_until_release_outside() {
+        let mut rt = Runtime::new(
+            0,
+            |_| text("app").size(100.).on_press(|n: &mut i32| *n += 1),
+            Theme::solid(crate::Scheme::Dark, crate::theme::SYSTEM_BLUE),
+            (800, 600),
+            1.,
+        )
+        .unwrap();
+        rt.set_inspector(true);
+        rt.frame(Duration::ZERO);
+        rt.pointer_down(500., 50.);
+        assert!(rt.inspector.as_ref().unwrap().captured);
+        rt.pointer_move(20., 20.);
+        rt.pointer_up(20., 20.);
+        assert!(!rt.inspector.as_ref().unwrap().captured);
+        rt.frame(Duration::ZERO);
+        assert_eq!(*rt.state(), 0);
+    }
+    #[test]
     fn forced_hover_previews_the_subject_without_invoking_it() {
         let mut rt = Runtime::new(
             0,
@@ -421,6 +449,61 @@ mod tests {
         rt.frame(Duration::ZERO);
         assert_eq!(rt.presented("subject").unwrap().state, State::Hover);
         assert_eq!(*rt.state(), 0);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn saved_looks_restyle_without_restarting_or_rerunning_the_view() -> Result<()> {
+        let root =
+            std::env::temp_dir().join(format!("stillkit-theme-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&root)?;
+        for (extension, first, second) in [
+            ("toml", "base = 'mono'", "base = 'solid'"),
+            ("json", r#"{"base":"mono"}"#, r#"{"base":"solid"}"#),
+        ] {
+            let path = root.join(format!("look.{extension}"));
+            std::fs::write(&path, first)?;
+            let mut rt = Runtime::new(
+                42,
+                |n| text(n.to_string()),
+                Theme::solid(crate::Scheme::Dark, crate::theme::SYSTEM_BLUE),
+                (400, 300),
+                1.,
+            )?;
+            rt.watch_theme(&path)?;
+            rt.frame(Duration::ZERO);
+            let runs = rt.view_runs();
+            let wait = |rt: &mut Runtime<i32>| {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while rt
+                    .look_watch
+                    .as_ref()
+                    .unwrap()
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .is_none()
+                {
+                    assert!(
+                        Instant::now() < deadline,
+                        "save did not wake the look watcher"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                rt.frame(Duration::ZERO);
+            };
+            std::fs::write(&path, "{")?;
+            wait(&mut rt);
+            assert_eq!(rt.theme, parse_theme(&path, first)?);
+            let replacement = root.join("replacement");
+            std::fs::write(&replacement, second)?;
+            std::fs::rename(&replacement, &path)?;
+            wait(&mut rt);
+            assert_eq!(rt.theme, parse_theme(&path, second)?);
+            assert_eq!(*rt.state(), 42);
+            assert_eq!(rt.view_runs(), runs);
+        }
+        std::fs::remove_dir_all(root)?;
+        Ok(())
     }
     #[test]
     fn reload_parses_both_formats_and_rejects_partial_edits() {
