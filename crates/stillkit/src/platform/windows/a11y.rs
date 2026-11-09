@@ -220,6 +220,7 @@ mod tests {
     fn deferred_adapter_keeps_the_latest_hits_before_activation() {
         let mut a11y = A11y::deferred(HWND::default(), Role::Toolbar, "bar".into());
         let mut hits = vec![Hit {
+            shape: None,
             id: 7,
             rect: Rect::new(0.0, 0.0, 40.0, 24.0),
             role: Role::Button,
@@ -245,6 +246,7 @@ mod tests {
     #[test]
     fn hits_become_nodes_with_their_state_and_focus() {
         let hit = |id, enabled, checked| Hit {
+            shape: None,
             id,
             rect: Rect::new(0.0, id as f32 * 10.0, 50.0, 10.0),
             role: Role::MenuItem,
@@ -276,6 +278,7 @@ mod tests {
     #[test]
     fn triggers_offer_expand_when_closed_and_collapse_when_open() {
         let trigger = Hit {
+            shape: None,
             id: 0,
             rect: Rect::new(0.0, 0.0, 80.0, 24.0),
             role: Role::Button,
@@ -307,6 +310,7 @@ mod tests {
     #[test]
     fn duplicate_hits_and_stale_focus_still_make_a_valid_tree() {
         let hit = |id, label: &str| Hit {
+            shape: None,
             id,
             rect: Rect::new(0.0, 0.0, 50.0, 10.0),
             role: Role::Button,
@@ -357,6 +361,7 @@ mod tests {
         }
         .unwrap();
         let hit = |id| Hit {
+            shape: None,
             id,
             rect: Rect::new(0.0, 0.0, 50.0, 10.0),
             role: Role::Button,
@@ -382,6 +387,7 @@ mod semantic_tests {
     #[test]
     fn ranges_fields_reordering_and_live_feedback_expose_semantic_contracts() {
         let hit = |id, role| Hit {
+            shape: None,
             id,
             rect: crate::Rect::new(0.0, 0.0, 100.0, 30.0),
             role,
@@ -446,6 +452,7 @@ mod semantic_tests {
             role: Role::Window,
             name: "Studio".into(),
             hits: vec![Hit {
+                shape: None,
                 id,
                 rect: crate::Rect::default(),
                 role: Role::Button,

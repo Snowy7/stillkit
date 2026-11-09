@@ -36,11 +36,19 @@ pub(super) fn draw_ops(
     res: &mut Resources,
     text: &mut Text,
     ops: &[Op],
+    scene_transform: Affine,
     image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_cpu::ImageSource,
 ) -> Result<()> {
     let mut clips = 0;
     for op in ops {
         match op {
+            Op::Transformed { transform, ops } => {
+                let saved = scene_transform;
+                ctx.set_transform(saved * Affine::new(transform.0.map(f64::from)));
+                let result = draw_ops(ctx,res,text,ops,saved * Affine::new(transform.0.map(f64::from)),image_source);
+                ctx.set_transform(saved);
+                result?;
+            }
             Op::Hole { rect: r } => {
                 ctx.set_blend_mode(vello_cpu::peniko::BlendMode::new(vello_cpu::peniko::Mix::Normal, vello_cpu::peniko::Compose::Copy));
                 paint(ctx, Rgba::TRANSPARENT);
@@ -60,7 +68,7 @@ pub(super) fn draw_ops(
             }
             Op::Clipped { rect: r, ops } => {
                 ctx.push_clip_layer(&rounded(*r, 0.));
-                draw_ops(ctx, res, text, ops, image_source)?;
+                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
                 ctx.pop_layer();
             }
             Op::RoundedClipped {
@@ -69,7 +77,7 @@ pub(super) fn draw_ops(
                 ops,
             } => {
                 ctx.push_clip_layer(&rounded(*r, *radius));
-                draw_ops(ctx, res, text, ops, image_source)?;
+                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
                 ctx.pop_layer();
             }
             Op::Gradient { rect: r, radius, width, gradient } => {
@@ -190,6 +198,7 @@ pub(super) fn draw_ops(
                             weight: (style.size / 12.).max(1.),
                             color: *color,
                         }],
+                        scene_transform,
                         image_source,
                     )?;
                     continue;
@@ -322,7 +331,7 @@ pub(super) fn draw_ops(
                 }
             }
             Op::TextField { rect, field, .. } => {
-                draw_ops(ctx, res, text, &[field.op(*rect)], image_source)?;
+                draw_ops(ctx, res, text, &[field.op(*rect)], scene_transform, image_source)?;
             }
         }
     }

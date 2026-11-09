@@ -233,6 +233,7 @@ impl<S> Runtime<S> {
                     return None;
                 }
                 let rect = self.poses.get(i)?.rect;
+                let p = self.list.hits.iter().find(|h| h.id == l.hit).map_or(p, |h| h.unmap(p));
                 if doc.is_none()
                     && !(p.x >= rect.left
                         && p.x <= rect.right

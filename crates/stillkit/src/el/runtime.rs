@@ -1324,7 +1324,7 @@ impl<S> Runtime<S> {
         let flat = flatten(&self.root);
         (0..self.laid.len().min(flat.len()))
             .rev()
-            .find(|&i| flat[i].on_files.is_some() && self.poses.get(i).is_some_and(|pose| pose.rect.contains(p)))
+            .find(|&i| flat[i].on_files.is_some() && self.list.hits.iter().any(|h|h.id==self.laid[i].hit && h.contains(p)))
     }
 
     /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
@@ -1405,8 +1405,12 @@ impl<S> Runtime<S> {
             phase,
             button,
             at: design(at),
-            local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
-            delta: Point::new((at.x - last.x) / s, (at.y - last.y) / s),
+            local: { let p=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at)); Point::new((p.x-rect.left)/s,(p.y-rect.top)/s) },
+            delta: {
+                let shape=self.list.hits.iter().find(|h|h.id==hit);
+                let a=shape.map_or(at,|h|h.unmap(at));let b=shape.map_or(last,|h|h.unmap(last));
+                Point::new((a.x-b.x)/s,(a.y-b.y)/s)
+            },
             origin: design(origin),
             size: (rect.width() / s, rect.height() / s),
             mods: self.held,
@@ -1434,7 +1438,7 @@ impl<S> Runtime<S> {
                 let rect = self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect);
                 let event = super::element::WheelEvent {
                     at: Point::new(at.x / s, at.y / s),
-                    local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+                    local: {let p=self.list.hits.iter().find(|h|h.id==self.laid[i].hit).map_or(at,|h|h.unmap(at));Point::new((p.x-rect.left)/s,(p.y-rect.top)/s)},
                     delta: f32::from(delta) / 120.0,
                     mods: self.held,
                 };
@@ -1457,6 +1461,7 @@ impl<S> Runtime<S> {
         else {
             return;
         };
+        let at=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at));
         let along = |v: f32, start: f32, len: f32| ((v - start) / len.max(1.0)).clamp(0.0, 1.0);
         let (x, y) = (
             along(at.x, rect.left, rect.width()),
@@ -1710,7 +1715,7 @@ impl<S> Runtime<S> {
             .iter()
             .enumerate()
             .filter(|(i, l)| {
-                self.scrolls.contains_key(&l.id) && self.poses.get(*i).is_some_and(|p| p.rect.contains(at))
+                self.scrolls.contains_key(&l.id) && self.list.hits.iter().any(|h|h.id==self.laid[*i].hit && h.contains(at))
             })
             .map(|(_, l)| l.id)
             .collect();
@@ -2008,7 +2013,8 @@ impl<S> Runtime<S> {
     /// Presses and releases the pointer at the centre of the element keyed `key`, where it is
     /// drawn now; `false` if there is none.
     pub fn click(&mut self, key: &str) -> bool {
-        let Some(at) = self.presented(key).map(|s| s.rect.center()) else {
+        let hit = self.index_of_key(key).and_then(|i| self.list.hits.iter().find(|h| h.id == self.laid[i].hit));
+        let Some(at) = hit.map(|h| h.rect.center()).or_else(|| self.presented(key).map(|s| s.rect.center())) else {
             return false;
         };
         self.pointer_down(at.x, at.y);
@@ -2248,6 +2254,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             shadow: if look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
             angle: el.anim.rotate,
+            transform: el.anim.transform.clone(),
             motion,
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
@@ -2660,17 +2667,16 @@ fn paint_el<S>(
     if controls && !el.quiet {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
     }
-    // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
+    // Paint and hits share one affine scope; layout stays upright.
     let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
-    if angle != 0.0 {
-        let c = rect.center();
-        let turn = super::rotate::Turn::new(Point::new(c.x.round(), c.y.round()), angle);
-        if !turn.none() {
+    if angle != 0.0 || pose.transform.is_some() {
+        let [x,y,sx,sy,ox,oy] = pose.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]);
+        let origin = Point::new(rect.left + rect.width()*ox, rect.top + rect.height()*oy);
+        let transform = crate::Transform::new(origin,angle,(sx,sy),(x*f.s*pose.xf.s,y*f.s*pose.xf.s));
+        if transform != crate::Transform::IDENTITY {
             let drawn = f.list.ops.split_off(start);
-            f.list.ops.extend(turn.ops(drawn));
-            for h in &mut f.list.hits[hits..] {
-                h.rect = turn.bounds(h.rect);
-            }
+            f.push(Op::Transformed { transform, ops:drawn.into() });
+            for h in &mut f.list.hits[hits..] { h.transform(transform); }
         }
     }
     if pose.opacity < 1.0 {
@@ -2828,7 +2834,7 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::Shadow { color, .. }
             | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
             Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
-            Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
+            Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
             Op::TextField { .. } | Op::Clip { .. } | Op::Hole { .. } | Op::Unclip => {}
         }
     }
@@ -2838,6 +2844,7 @@ fn fade(ops: &mut [Op], by: f32) {
 /// hover, press and focus, only when it has a handler or is `focusable`.
 fn hit<S>(el: &El<S>, id: HitId, rect: Rect) -> Hit {
     Hit {
+        shape: None,
         id,
         rect,
         role: role_of(el),

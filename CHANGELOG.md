@@ -8,6 +8,7 @@
 ### Added
 - Component story browser (including ColorPicker), headless story baselines and a runnable ten-minute settings guide.
 - Opt-in F12 element inspector and native look-file reloads, with no inspection code in ordinary builds.
+- Draw-time translation, scaling and transform origins; native arbitrary rotations of text, images and boxes, with precise transformed hits.
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
 - Attributed display runs with native shaping, code faces, decorations, links and plain-text selection.
 - Display text and containers can opt into document selection, keyboard copy and accessible text ranges.

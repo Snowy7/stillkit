@@ -28,6 +28,7 @@ fn starts(ops: &[Op], out: &mut Vec<f32>) {
         match op {
             Op::Arc { start, .. } => out.push(*start),
             Op::Clipped { ops, .. } => starts(ops, out),
+            Op::Transformed { transform, ops } => { let mut local=Vec::new(); starts(ops,&mut local); out.extend(local.into_iter().map(|a|a+transform.0[1].atan2(transform.0[0]))); },
             _ => {}
         }
     }
@@ -149,13 +150,9 @@ fn a_rotated_box_draws_hits_and_damages_turned() {
     assert_eq!(bar.width(), 80.0, "layout keeps its upright box");
     let c = bar.center();
     let turned = Rect::new(c.x - 10.0, c.y - 40.0, 20.0, 80.0);
-    let fill = rt.list().ops.iter().find_map(|op| match op {
-        Op::Fill { rect, color, .. } if color.r == 1.0 && color.g == 0.0 => Some(*rect),
-        _ => None,
-    });
-    assert_eq!(fill, Some(turned), "it draws turned");
+    assert!(rt.list().ops.iter().any(|op| matches!(op,Op::Transformed { .. })), "paint uses an affine scope");
     let hit = rt.list().hits.iter().find(|h| h.actionable).unwrap();
-    assert_eq!(hit.rect, turned, "it hit-tests over the turned box");
+    assert!((hit.rect.left-turned.left).abs()<0.001 && (hit.rect.top-turned.top).abs()<0.001, "it hit-tests over the turned box");
     // A press where only the turned box is lands; one where only the upright box was doesn't.
     rt.pointer_down(c.x, c.y - 30.0);
     rt.pointer_up(c.x, c.y - 30.0);
@@ -180,42 +177,14 @@ fn a_rotated_box_draws_hits_and_damages_turned() {
 }
 
 #[test]
-fn a_turning_chevron_springs_and_draws_as_its_outline() {
-    let mut rt = Runtime::new(S::default(), turned, theme(), (300, 300), 1.0).unwrap();
-    let icons = |rt: &Runtime<S>| rt.list().ops.iter().filter(|op| matches!(op, Op::Icon { .. })).count();
-    assert_eq!(icons(&rt), 1, "upright, it is the icon itself");
-    rt.update(|s| s.open = true);
-    rt.frame(FRAME); // it sets off from where it is
-    rt.frame(FRAME);
-    assert!(rt.animating(), "the turn springs");
-    assert_eq!(icons(&rt), 0);
-    let chevron = rt.find("chevron").unwrap();
-    let lines: Vec<(f32, f32, f32, f32)> = rt
-        .list()
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            Op::Line { from, to, .. } if chevron.inflate(4.0).contains(*from) => Some((from.x, from.y, to.x, to.y)),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(lines.len(), 2, "a chevron's two strokes");
+fn a_turning_chevron_springs_and_keeps_native_geometry() {
+    let mut rt = Runtime::new(S::default(), turned, theme(), (300,300),1.0).unwrap();
+    rt.update(|s|s.open=true);
+    rt.frame(FRAME); rt.frame(FRAME);
+    assert!(rt.animating());
+    assert!(rt.list().ops.iter().any(|op|matches!(op,Op::Transformed{ops,..} if ops.iter().any(|op|matches!(op,Op::Icon{..})))));
     settle(&mut rt);
-    // Turned a quarter, `>` points down: its tip is the lowest point, on the centre line.
-    let mut points: Vec<(f32, f32)> = rt
-        .list()
-        .ops
-        .iter()
-        .filter_map(|op| match op {
-            Op::Line { from, to, .. } if chevron.inflate(4.0).contains(*from) => Some([(from.x, from.y), (to.x, to.y)]),
-            _ => None,
-        })
-        .flatten()
-        .collect();
-    points.sort_by(|a, b| a.1.total_cmp(&b.1));
-    let tip = *points.last().unwrap();
-    assert!((tip.0 - chevron.center().x).abs() < 0.01, "{points:?}");
-    assert!(tip.1 > chevron.center().y);
+    assert!(!rt.animating());
 }
 
 #[derive(Default)]

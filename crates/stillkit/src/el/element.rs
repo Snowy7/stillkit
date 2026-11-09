@@ -721,13 +721,15 @@ impl Cast {
 }
 
 /// How an element animates (`motion` and `instant` reach its whole subtree).
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub(crate) struct Anim {
     pub motion: Option<Motion>,
     pub instant: bool,
     pub transition: Option<Transition>,
-    /// Radians clockwise about its centre, at draw time ([`El::rotate`]).
+    /// Radians clockwise about its origin, at draw time ([`El::rotate`]).
     pub rotate: f32,
+    /// Translation, axis scales and fractional origin: `[x, y, sx, sy, ox, oy]`.
+    pub transform: Option<Arc<[f32; 6]>>,
     /// One turn every this long while it is visible ([`El::spin`]).
     pub spin: Option<Duration>,
 }
@@ -1625,13 +1627,34 @@ impl<S> El<S> {
         }
     }
 
-    /// Turns the element and everything in it `radians` clockwise about its centre, at draw
+    /// Translates the painted subtree in design pixels without moving its layout.
+    pub fn translate(mut self, x: f32, y: f32) -> Self {
+        let v = Arc::make_mut(self.anim.transform.get_or_insert_with(||Arc::new([0.,0.,1.,1.,0.5,0.5])));
+        v[0] = if x.is_finite() { x } else { 0. };
+        v[1] = if y.is_finite() { y } else { 0. };
+        self
+    }
+    /// Scales the painted subtree uniformly about its origin without moving layout.
+    pub fn scale(self, factor: f32) -> Self { self.scale_xy(factor,factor) }
+    /// Scales the painted subtree on each axis. Negative values reflect it.
+    pub fn scale_xy(mut self, x: f32, y: f32) -> Self {
+        let v = Arc::make_mut(self.anim.transform.get_or_insert_with(||Arc::new([0.,0.,1.,1.,0.5,0.5])));
+        v[2] = if x.is_finite() { x } else { 1. };
+        v[3] = if y.is_finite() { y } else { 1. };
+        self
+    }
+    /// Sets the fractional transform origin: `(0,0)` is top-left, `(0.5,0.5)` centre.
+    pub fn origin(mut self, x: f32, y: f32) -> Self {
+        let v = Arc::make_mut(self.anim.transform.get_or_insert_with(||Arc::new([0.,0.,1.,1.,0.5,0.5])));
+        v[4] = if x.is_finite() { x } else { 0.5 };
+        v[5] = if y.is_finite() { y } else { 0.5 };
+        self
+    }
+    /// Turns the element and everything in it `radians` clockwise about its origin (centre by default), at draw
     /// time: layout keeps its upright box, while what it draws, its hits (their bounding box)
     /// and its damage are turned. With [`motion`](Self::motion) the angle springs (it snaps
     /// under reduced motion): a disclosure chevron, `.rotate(if open { FRAC_PI_2 } else { 0.0 })`.
-    /// Arcs, lines, circles and icons turn exactly (an icon is drawn as its stroked outline
-    /// while turned; filled icons stay upright), and boxes at quarter turns; text, images
-    /// and boxes at other angles keep upright, about the turned centre.
+    /// All content and clips turn with it; pointer hits follow the painted geometry.
     pub fn rotate(mut self, radians: f32) -> Self {
         self.anim.rotate = if radians.is_finite() { radians } else { 0.0 };
         self
@@ -1815,7 +1838,7 @@ impl<S> El<S> {
 
     /// Whether it gets a hit item at all: interactive, or carrying semantics of its own.
     pub(crate) fn hit(&self) -> bool {
-        self.interactive() || self.sem.role.is_some() || self.sem.label.is_some() || self.tip.is_some()
+        self.on_files.is_some() || self.scrolls().is_some() || self.interactive() || self.sem.role.is_some() || self.sem.label.is_some() || self.tip.is_some()
     }
 
     /// The first text in it, for a default label.

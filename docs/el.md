@@ -57,7 +57,7 @@ notes area).
   popup's window grows by its shadows' reach.
 - **Text:** `font(TextRole)`, and `family(..)`, `weight(..)`, `text_size(..)` (its line scales with it) and `text_align(TextAlign::Start | Center | End)` over the role; fields take them too.
 - **Pointer:** `cursor(Cursor)`: the shape over it (innermost wins; fields show an I-beam), kept through a press that began on it. `Runtime::cursor()` reads it; `el::run` applies it. Shapes: arrow, text, hand, move, resize (both ways), grab, grabbing, crosshair, not allowed, copy.
-- **Transform:** `rotate(radians)` and `spin(period)`. See [Rotation and
+- **Transform:** `translate(x, y)`, `scale(factor)`, `scale_xy(x, y)`, `rotate(radians)`, `origin(x, y)` and `spin(period)`. Transform origins are fractions of the upright box (centre by default). Translation uses design pixels. Scale and rotation apply about that origin, followed by translation; nested transforms compose. All painted content, including text, images and clips, follows the transform on CPU and GPU. Layout stays upright. With `.animate()` spatial properties spring, keep velocity when retargeted, and snap under reduced motion. Pointer hits follow the exact transformed region. See [Rotation and
   spinners](#rotation-and-spinners).
 - **Semantics:** `key`, `role`, `label`, `checked`, `disabled`, `focusable`, `description`,
   `value` (the value as text, "40%"), `selected`, `expanded`, `range(min, max, step, value)`,
@@ -208,14 +208,7 @@ icon(Icon::ChevronRight).rotate(if s.open { FRAC_PI_2 } else { 0.0 }).animate() 
 arc(0.25).size(20.0).no_track().spin(Duration::from_secs(1))                   // a spinner
 ```
 
-- **`.rotate(radians)`** turns the element and its subtree clockwise about its centre at
-  draw time: layout keeps the upright box, while its ops, its hits (their bounding box) and so
-  its damage are turned. With motion the angle springs (it snaps under reduced motion). The
-  renderers have no transform: `el/rotate.rs` maps each op onto a turned op of its own kind.
-  Arcs (their start), lines and circles turn exactly at any angle, every box at quarter
-  turns, and icons are drawn as their stroked outline (lines with round joins and caps) while
-  turned. Text, images, filled icons and boxes at other angles stay upright about their
-  turned centre, and a clip at another angle grows to the turned box.
+- **`.rotate(radians)`** turns the complete subtree clockwise about `.origin(x,y)` (centre by default). Text, images, boxes and clips use native affine transforms in every renderer. Layout remains upright; hit regions follow the painted shape. With motion, translation, scale, origin and angle spring; reduced motion snaps spatial travel.
 - **`.spin(period)`** adds a turn every `period` on the runtime clock. A spinner moves only
   while it can be seen: laid out and live (not leaving), inside the window and every scroll
   view around it, not under an open dialog, its window shown (`Runtime::set_visible`; the
@@ -224,8 +217,15 @@ arc(0.25).size(20.0).no_track().spin(Duration::from_secs(1))                   /
   while something visible spins, so a spinner scrolled away, under a dialog or in a hidden
   window leaves no ticker. Its angle moves in thousandths of a radian. The view never runs.
 
+Unused transform support adds one optional pointer to retained element animation configuration,
+layout targets, poses, spring tracks and hit items: each record grows by 8 bytes on 64-bit
+Windows (release LLVM type layouts, compared with `89ac26a`). Transform values, six-channel
+spring storage and precise hit shapes allocate only when used. No new timer, thread or DLL is
+needed. `tests/el_transform.rs` checks interrupted motion, reduced motion, nested clipped hits,
+reflected and collapsed scales, operation translation/scaling and rotated text/image/box pixels.
+
 `tests/el_spin.rs` checks the spinner's clock, every stop and the ticker's end, a turned box's
-drawing, hits, pixels and damage, a chevron springing a quarter turn as its outline, and an arc
+drawing, hits, pixels and damage, a chevron springing a quarter turn with native geometry, and an arc
 from half past seven, by its pixels.
 
 `tests/golden/el-motion-*.png` are frame strips (0.1, 0.15, 0.2, 0.3, 0.45 and 1.5 s after a
@@ -548,10 +548,6 @@ use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x,
     trigger, not with its selected item over it.
   - Overlays aren't capped to the window or screen: give a long one `max_h` and a scroll
     view.
-- Rotation has no renderer transform: text, images, filled icons and boxes at angles other
-  than quarter turns stay upright (see [Rotation and spinners](#rotation-and-spinners)). A
-  turned icon is its outline in lines and discs, so a translucent ink darkens slightly where
-  they overlap. A transform op (or a rotation on `Op::Icon`) would make every op exact.
 - `spin` is the one continuous channel (a turn); indeterminate bars that slide need a clip
   builder and a `continuous` phase, not there yet. Linux doesn't tell the host when the window
   is hidden, so spinners there stop only for the other reasons.

@@ -1,4 +1,4 @@
-//! Native gradients in backgrounds and borders; click to retarget their springs.
+//! Native gradients and draw-time transforms in backgrounds and borders; click to retarget their springs.
 use stillkit::el::{self, App, El, Paint, col, el, text};
 use stillkit::paint::GradientStop;
 use stillkit::{Kind, Rgba, Scheme, Theme};
@@ -48,6 +48,10 @@ pub fn view(on: &bool) -> El<bool> {
         )
         .child(
             el().key("radial")
+                .rotate(if *on { 0.22 } else { 0.0 })
+                .scale(if *on { 0.85 } else { 1.0 })
+                .translate(if *on { 16.0 } else { 0.0 },0.0)
+                .origin(0.0,0.5)
                 .w(280.0)
                 .h(90.0)
                 .radius(18.0)

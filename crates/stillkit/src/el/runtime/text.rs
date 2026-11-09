@@ -360,6 +360,7 @@ impl<S> Runtime<S> {
             Event::Press(p, Button::Left) => {
                 let Some(hit) = self.ix.pressed else { return false };
                 let Some((id, i)) = self.field_of_hit(hit) else { return false };
+                let at=self.list.hits.iter().find(|h|h.id==hit).map_or(p.at,|h|h.unmap(p.at));
                 // The click that focuses a `select_all_on_focus` field selects it all, as a
                 // spreadsheet's or Unity's number field does: typing replaces the value.
                 let select_all = flatten(&self.root).get(i).and_then(|el| el.field()).is_some_and(|f| f.select_all);
@@ -386,7 +387,7 @@ impl<S> Runtime<S> {
                     _ => 1,
                 };
                 f.clicks = Some((now, p.at, clicks));
-                let at = f.hit(p.at, scroll_y);
+                let at = f.hit(at, scroll_y);
                 f.ed.preedit = None;
                 let from = match clicks {
                     1 => at..at,
@@ -400,9 +401,11 @@ impl<S> Runtime<S> {
             }
             Event::Move(p) => {
                 let Some(sel) = self.selecting.clone() else { return false };
+                let hit=self.laid.iter().find(|l|l.id==sel.id).map(|l|l.hit);
+                let at=self.list.hits.iter().find(|h|Some(h.id)==hit).map_or(p.at,|h|h.unmap(p.at));
                 let scroll_y = self.scrolls.get(&sel.id).map_or(0.0, |v| v.offset(self.anim.t));
                 let Some(f) = self.fields.get_mut(&sel.id) else { return false };
-                let at = f.hit(p.at, scroll_y);
+                let at = f.hit(at, scroll_y);
                 let unit = match sel.clicks {
                     1 => at..at,
                     2 => f.ed.word_at(at),
