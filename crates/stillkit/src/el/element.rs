@@ -39,21 +39,42 @@ impl From<f32> for Len {
     }
 }
 
-/// A colour, fixed or read from the theme's palette ([`super::token`]).
+/// A solid colour, theme colour or native gradient for an element's fill and border.
 #[derive(Clone, Copy)]
 pub enum Paint {
     /// Rgba.
     Rgba(Rgba),
     /// Theme.
     Theme(fn(&Theme) -> Rgba),
+    /// Linear fill, clockwise radians from the right, with positions from zero to one.
+    Linear {
+        /// Gradient stops, with positions from zero to one.
+        stops: &'static [crate::paint::GradientStop],
+        /// Clockwise radians from the right.
+        angle: f32,
+    },
+    /// Centred circular gradient reaching the farthest corner.
+    Radial {
+        /// Gradient stops, from the centre to the farthest corner.
+        stops: &'static [crate::paint::GradientStop],
+    },
 }
 
 impl Paint {
-    /// Resolve.
+    /// The solid colour under `theme`, or a gradient's first stop for ink-only uses.
     pub fn resolve(self, theme: &Theme) -> Rgba {
         match self {
             Self::Rgba(c) => c,
             Self::Theme(read) => read(theme),
+            Self::Linear { stops, .. } | Self::Radial { stops } => stops.first().map_or(Rgba::TRANSPARENT, |s| s.color),
+        }
+    }
+
+    pub(crate) fn gradient(self) -> Option<crate::paint::Gradient> {
+        match self {
+            Self::Linear { stops, angle } => Some(crate::paint::Gradient::new(stops, Some(angle))),
+            Self::Radial { stops } => Some(crate::paint::Gradient::new(stops, None)),
+            _ => None,
         }
     }
 }
