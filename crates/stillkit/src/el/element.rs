@@ -1161,7 +1161,10 @@ impl<S> El<S> {
     }
 
     /// Runs on `&mut S` with a field's text when Enter goes down in a [`text_input`] (Ctrl+Enter
-    /// in a [`text_area`]). Without it, Enter goes on to the field's ancestors.
+    /// in a [`text_area`]). Without it, Enter goes on to the field's ancestors. A field with a
+    /// [`value`](Self::value) and this but no [`on_input`](Self::on_input) is typed, then
+    /// committed: it keeps what is typed while it has focus, and shows its value again when
+    /// focus leaves without Enter (Unity's delayed fields).
     pub fn on_submit(mut self, handler: impl Fn(&mut S, &str) + 'static) -> Self {
         self.on_submit = Some(Box::new(handler));
         self

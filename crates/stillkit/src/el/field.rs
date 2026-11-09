@@ -91,6 +91,9 @@ pub(crate) struct Field {
     /// to take goes back to it.
     pub value: Option<Arc<str>>,
     pub taken: Option<super::edit::Mark>,
+    /// Typed, then committed: a field with a value and `on_submit` but no `on_input` keeps
+    /// what is typed while it has focus, and goes back to the value when it loses it.
+    pub commits: bool,
     pub look: Option<Look>,
     pub shape: Shape,
     /// What `shape` was laid out from.

@@ -40,14 +40,19 @@ impl<S> Runtime<S> {
         let mut seen = Vec::new();
         let fields = &mut self.fields;
         let refused = &mut false;
+        let typing = self.typing;
         each(&self.root, &self.laid, &mut |el, i, _| {
             let Some(spec) = el.field() else { return };
             let l = self.laid[i];
             seen.push(l.id);
             let field = fields.entry(l.id).or_insert_with(|| Field::new(spec.value.as_deref().unwrap_or("")));
             field.ed.max = spec.max_len;
+            field.commits = el.on_submit.is_some() && el.on_input.is_none();
+            // A committing field being typed in keeps its text until Enter or focus leaves.
+            let held = field.commits && typing == Some(l.id);
             if let Some(value) = &spec.value
                 && **value != field.ed.text
+                && !held
             {
                 match field.taken.take() {
                     Some(mark) if mark.text() == &**value => {
@@ -58,7 +63,9 @@ impl<S> Runtime<S> {
                 }
             }
             field.value = spec.value.clone();
-            field.taken = Some(field.ed.mark());
+            if !held {
+                field.taken = Some(field.ed.mark());
+            }
             let pad = |k: usize| el.sizing.pad[k].map_or(0.0, |p| (p.resolve(theme) * s).round());
             let r = l.rect;
             let content = Rect::new(
@@ -106,6 +113,15 @@ impl<S> Runtime<S> {
         if let Some(old) = self.typing.and_then(|id| self.fields.get_mut(&id)) {
             old.ed.preedit = None;
             old.goal = None;
+            // Left without Enter: a committing field shows its value again.
+            if old.commits
+                && let Some(value) = old.value.clone()
+                && *value != old.ed.text
+            {
+                old.ed.set_text(&value);
+                old.taken = Some(old.ed.mark());
+                old.reshape(&mut self.ui.text);
+            }
         }
         self.typing = now.map(|n| n.0);
         if let Some((id, all)) = now
@@ -209,7 +225,7 @@ impl<S> Runtime<S> {
 
     /// After an edit or a caret move in field `id`: lay it out, keep the caret in sight,
     /// restart the blink, and hand a changed text to `on_input` (or, with a value and no
-    /// handler, refuse it at once).
+    /// handler, refuse it at once, unless the field commits with `on_submit`).
     fn edited(&mut self, id: u64, changed: bool) {
         let Some(f) = self.fields.get_mut(&id) else { return };
         f.touch(self.clock);
@@ -225,8 +241,9 @@ impl<S> Runtime<S> {
             let f = self.fields.get_mut(&id).expect("the field edited");
             match (hit, handler) {
                 (Some(hit), true) => self.queue.push(Action::Input(hit, f.ed.text.clone())),
-                // A value with nothing to take edits: the view keeps it.
-                _ if f.value.is_some() => {
+                // A value with nothing to take edits: the view keeps it (a committing field
+                // holds them until Enter).
+                _ if f.value.is_some() && !f.commits => {
                     if let Some(mark) = f.taken.clone() {
                         f.ed.back(mark);
                         f.reshape(&mut self.ui.text);
