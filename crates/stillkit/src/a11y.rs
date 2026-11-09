@@ -83,6 +83,13 @@ pub struct Detail {
     /// The hit item it shows as active while it keeps focus itself (a combobox's highlighted
     /// row), read as if it had focus.
     pub active_descendant: Option<HitId>,
+    /// Virtual collection counts, indexes and tree positions, allocated only when used.
+    pub collection: Option<Box<Collection>>,
+}
+
+/// Counts and positions in a virtual grid or tree; indexes are zero-based, tree positions one-based.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Collection {
     /// Total rows, including virtual rows.
     pub row_count: Option<usize>,
     /// Total columns.
@@ -97,7 +104,6 @@ pub struct Detail {
     pub size_of_set: Option<usize>,
     /// One-based sibling position.
     pub position_in_set: Option<usize>,
-
 }
 
 /// Rich actions remain owned data until the surface's UI thread consumes them.
@@ -247,13 +253,15 @@ impl Snapshot {
                         }
                     }
                     Semantics::Detail(detail) => {
-                        if let Some(value) = detail.row_count { node.set_row_count(value); }
-                        if let Some(value) = detail.column_count { node.set_column_count(value); }
-                        if let Some(value) = detail.row_index { node.set_row_index(value); }
-                        if let Some(value) = detail.column_index { node.set_column_index(value); }
-                        if let Some(value) = detail.level { node.set_level(value); }
-                        if let Some(value) = detail.size_of_set { node.set_size_of_set(value); }
-                        if let Some(value) = detail.position_in_set { node.set_position_in_set(value); }
+                        if let Some(collection) = &detail.collection {
+                            if let Some(value) = collection.row_count { node.set_row_count(value); }
+                            if let Some(value) = collection.column_count { node.set_column_count(value); }
+                            if let Some(value) = collection.row_index { node.set_row_index(value); }
+                            if let Some(value) = collection.column_index { node.set_column_index(value); }
+                            if let Some(value) = collection.level { node.set_level(value); }
+                            if let Some(value) = collection.size_of_set { node.set_size_of_set(value); }
+                            if let Some(value) = collection.position_in_set { node.set_position_in_set(value); }
+                        }
                         if let Some(description) = &detail.description {
                             node.set_description(&**description);
                         }

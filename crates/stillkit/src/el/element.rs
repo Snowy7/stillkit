@@ -729,13 +729,7 @@ pub(crate) struct Sem {
     pub invalid: bool,
     /// The key of the descendant it shows as active ([`El::active_descendant`]).
     pub active: Option<Key>,
-    pub row_count: Option<usize>,
-    pub column_count: Option<usize>,
-    pub row_index: Option<usize>,
-    pub column_index: Option<usize>,
-    pub level: Option<usize>,
-    pub size_of_set: Option<usize>,
-    pub position_in_set: Option<usize>,
+    pub collection: Option<Box<crate::a11y::Collection>>,
 
 }
 
@@ -1260,19 +1254,40 @@ impl<S> El<S> {
     }
 
     /// Total rows, including virtual rows.
-    pub fn row_count(mut self, value: usize) -> Self { self.sem.row_count = Some(value); self }
+    pub fn row_count(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).row_count = Some(value);
+        self
+    }
     /// Total columns.
-    pub fn column_count(mut self, value: usize) -> Self { self.sem.column_count = Some(value); self }
+    pub fn column_count(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).column_count = Some(value);
+        self
+    }
     /// Zero-based row index in the complete model.
-    pub fn row_index(mut self, value: usize) -> Self { self.sem.row_index = Some(value); self }
+    pub fn row_index(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).row_index = Some(value);
+        self
+    }
     /// Zero-based column index.
-    pub fn column_index(mut self, value: usize) -> Self { self.sem.column_index = Some(value); self }
+    pub fn column_index(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).column_index = Some(value);
+        self
+    }
     /// One-based tree depth.
-    pub fn level(mut self, value: usize) -> Self { self.sem.level = Some(value); self }
+    pub fn level(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).level = Some(value);
+        self
+    }
     /// Number of siblings.
-    pub fn size_of_set(mut self, value: usize) -> Self { self.sem.size_of_set = Some(value); self }
+    pub fn size_of_set(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).size_of_set = Some(value);
+        self
+    }
     /// One-based sibling position.
-    pub fn position_in_set(mut self, value: usize) -> Self { self.sem.position_in_set = Some(value); self }
+    pub fn position_in_set(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).position_in_set = Some(value);
+        self
+    }
     /// Whether this member is chosen.
     /// A focus group's Tab lands on its selected (or checked) member.
     pub fn selected(mut self, selected: bool) -> Self {

@@ -221,6 +221,7 @@ pub struct Runtime<S> {
     dragging: Option<HitId>,
     /// Scroll views by identity.
     scrolls: HashMap<u64, ScrollView>,
+    variable_rows: bool,
     /// Whether a scroll view glides or its scrollbar shows (frames keep coming).
     scrolling: bool,
     /// Keys to scroll into view once the layout is current.
@@ -347,6 +348,7 @@ impl<S: 'static> Runtime<S> {
             queue: Vec::new(),
             dragging: None,
             scrolls: HashMap::new(),
+            variable_rows: false,
             scrolling: false,
             reveal: Vec::new(),
             followed: false,
@@ -450,7 +452,11 @@ impl<S> Runtime<S> {
         }
         let scrolled = self.tick_scrolls() || std::mem::take(&mut self.followed);
         // A virtual list scrolled past what it built: build again, in this frame.
-        if scrolled && self.virtual_stale() {
+        for _ in 0..3 {
+            if !scrolled || !(self.virtual_stale() || self.stale_view) {
+                break;
+            }
+            self.stale_view = false;
             let before = keyed(&self.root, &self.laid, &self.theme);
             self.views += 1;
             let root = self.run_view();
@@ -765,9 +771,11 @@ impl<S> Runtime<S> {
         let t = self.anim.t;
         let mut seen = HashSet::new();
         let mut followed = false;
+        let mut variable_rows = false;
         let areas: HashMap<u64, (f32, f32)> =
             self.fields.keys().filter_map(|&id| Some((id, self.field_extent(id)?))).collect();
         each(&self.root, &self.laid, &mut |el, i, _| {
+            variable_rows |= el.virt.as_ref().is_some_and(|v| v.variable.is_some());
             let field = areas.get(&self.laid[i].id).copied();
             let axis = el.scrolls().or(field.map(|_| Axis::Vertical));
             if let (Some(axis), Some(extent)) = (axis, self.laid[i].extent.or(field)) {
@@ -787,6 +795,7 @@ impl<S> Runtime<S> {
         });
         self.scrolls.retain(|id, _| seen.contains(id));
         self.followed |= followed;
+        self.variable_rows = variable_rows;
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
@@ -1092,18 +1101,20 @@ impl<S> Runtime<S> {
 
     /// Runs the view with each virtual list's scroll place in reach ([`super::virtual_list`]).
     fn run_view(&mut self) -> El<S> {
-        let flat = flatten(&self.root);
-        for (i, el) in flat.iter().enumerate() {
-            if let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) {
-                let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit)).and_then(|mut j| {
-                    loop {
-                        let parent = self.laid[j].parent?;
-                        if parent == i { return flat[j].key.clone(); }
-                        j = parent;
+        if self.variable_rows {
+            let flat = flatten(&self.root);
+            for (i, el) in flat.iter().enumerate() {
+                if let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) {
+                    let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit)).and_then(|mut j| {
+                        loop {
+                            let parent = self.laid[j].parent?;
+                            if parent == i { return flat[j].key.clone(); }
+                            j = parent;
+                        }
+                    });
+                    if let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)) {
+                        rows.prepare(view.offset(self.anim.t) / self.scale, focused);
                     }
-                });
-                if let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)) {
-                    rows.prepare(view.offset(self.anim.t) / self.scale, focused);
                 }
             }
         }
@@ -1111,7 +1122,11 @@ impl<S> Runtime<S> {
         super::virtualize::with_viewports(places, || (self.view)(&self.state))
     }
 
+    /// Measures built rows and keeps the keyed anchor still.
     fn measure_virtual_rows(&mut self) {
+        if !self.variable_rows {
+            return;
+        }
         let flat = flatten(&self.root);
         for (i, el) in flat.iter().enumerate() {
             let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) else { continue };
@@ -1150,6 +1165,7 @@ impl<S> Runtime<S> {
             if let Some(v) = &el.virt
                 && let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id))
             {
+                if let Some(rows) = &v.variable { rows.track(view.offset(t) / s); }
                 stale |= v.stale(view.offset(t) / s, view.viewport / s);
             }
         });
@@ -2205,14 +2221,7 @@ fn semantics_of<S>(el: &El<S>, id: HitId, rel: Option<&Relation>, out: &mut Vec<
         invalid: s.invalid,
         // Keys resolve once the whole list is painted (`Runtime::paint`).
         active_descendant: None,
-        row_count: s.row_count,
-        column_count: s.column_count,
-        row_index: s.row_index,
-        column_index: s.column_index,
-        level: s.level,
-        size_of_set: s.size_of_set,
-        position_in_set: s.position_in_set,
-
+        collection: s.collection.clone(),
     };
     if detail != Detail::default() || s.active.is_some() {
         out.push((id, Semantics::Detail(detail)));
