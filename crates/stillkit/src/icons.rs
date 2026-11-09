@@ -76,6 +76,25 @@ pub fn from_system_glyph(glyph: char) -> Option<Icon> {
     })
 }
 
+/// An app's own icon for [`Icon::Path`]: SVG path data (the `d` of one or more `<path>`s, with
+/// circles and rects written as paths) on Lucide's 24-unit grid, stroked with round caps and
+/// joins like the built-in set, so it sits beside them at any size and weight. Declare it once:
+///
+/// ```
+/// use stillkit::icons::{Icon, IconPath};
+/// static CUBE: IconPath = IconPath { name: "box", d: "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16ZM3.3 7 12 12l8.7-5M12 22V12" };
+/// let icon = Icon::Path(&CUBE);
+/// ```
+///
+/// `name` identifies it (renderers cache its geometry by icon); give each outline its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IconPath {
+    /// A unique name, such as its Lucide file name.
+    pub name: &'static str,
+    /// SVG path data on a 24-unit grid.
+    pub d: &'static str,
+}
+
 /// A named icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Icon {
@@ -325,6 +344,8 @@ pub enum Icon {
     Toggle,
     /// Panel top.
     PanelTop,
+    /// An app's own outline ([`IconPath`]): any SVG path data on Lucide's 24-unit grid.
+    Path(&'static IconPath),
 }
 
 impl Icon {
@@ -572,11 +593,15 @@ impl Icon {
             Self::Grid => "grid-3x3",
             Self::Toggle => "toggle-right",
             Self::PanelTop => "panel-top",
+            Self::Path(p) => p.name,
         }
     }
 
     /// The outline as path segments on Lucide's 24-unit grid.
     pub(crate) fn segments(self) -> Vec<Seg> {
+        if let Self::Path(p) = self {
+            return path(p.d);
+        }
         let name = self.lucide();
         crate::icon_paths::PATHS
             .iter()
@@ -851,5 +876,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn app_icons_draw_their_own_path() {
+        static TRIANGLE: IconPath = IconPath { name: "test-triangle", d: "M4 20L12 4L20 20Z" };
+        let segs = Icon::Path(&TRIANGLE).segments();
+        assert_eq!(segs.len(), 4);
+        assert_eq!(segs.first(), Some(&Seg::Move(Point::new(4.0, 20.0))));
+        assert_eq!(Icon::Path(&TRIANGLE).lucide(), "test-triangle");
+        assert!(!Icon::Path(&TRIANGLE).filled() && Icon::Path(&TRIANGLE).font_glyph().is_none());
     }
 }
