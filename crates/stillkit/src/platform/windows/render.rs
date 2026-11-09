@@ -812,7 +812,7 @@ impl Painter {
                     }) else { return };
                     let geometry = mask.cast().ok();
                     let mut parameters = D2D1_LAYER_PARAMETERS {
-                        contentBounds: d2d(*rect),
+                        contentBounds: d2d(rect.intersect(damage)),
                         geometricMask: std::mem::ManuallyDrop::new(geometry),
                         maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                         maskTransform: windows_numerics::Matrix3x2::identity(),
@@ -821,7 +821,7 @@ impl Painter {
                         layerOptions: D2D1_LAYER_OPTIONS_NONE,
                     };
                     t.PushLayer(&parameters, None::<&ID2D1Layer>);
-                    self.ops(text, ops, *rect);
+                    self.ops(text, ops, rect.intersect(damage));
                     t.PopLayer();
                     std::mem::ManuallyDrop::drop(&mut parameters.geometricMask);
                 }

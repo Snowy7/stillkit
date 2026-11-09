@@ -205,7 +205,12 @@ impl Op {
     pub fn bounds(&self) -> Rect {
         match self {
             Self::Continuous { rect, width, .. } => rect.inflate(width * 0.5 + 1.0),
-            Self::Clipped { rect, .. } | Self::RoundedClipped { rect, .. } => *rect,
+            Self::Clipped { rect, .. } => *rect,
+            Self::RoundedClipped { rect, ops, .. } => ops.iter()
+                .map(Op::bounds)
+                .reduce(|a, b| a.union(b))
+                .unwrap_or_default()
+                .intersect(*rect),
             Self::Emphasis { rect, style, .. } => rect.inflate(2.0 + style.size * 0.1),
             Self::Arc {
                 center,
