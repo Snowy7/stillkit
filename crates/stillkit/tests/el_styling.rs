@@ -143,3 +143,43 @@ fn the_pointer_takes_the_innermost_shape_and_keeps_it_through_a_press() {
     rt.pointer_up(plain.center().x, plain.center().y);
     assert_eq!(rt.cursor(), Cursor::Arrow);
 }
+
+fn edged(_: &()) -> El<()> {
+    col().pad(10.0).child(
+        el().key("key")
+            .w(100.0)
+            .h(24.0)
+            .radius(6.0)
+            .fill(BLUE)
+            .edges(RED, GREEN)
+            .on_press(|_| {})
+            .pressed(|e| e.edges(GREEN, Rgba::TRANSPARENT)),
+    )
+}
+
+/// The edge colour each one-design-px band (2 device px) at `rect`'s top and bottom carries.
+fn edges(rt: &Runtime<()>, rect: Rect) -> (Option<Rgba>, Option<Rgba>) {
+    let band = |top: f32| {
+        rt.list().ops.iter().find_map(|op| match op {
+            Op::Clipped { rect: clip, ops } if clip.top == top && clip.height() == 2.0 && clip.width() == rect.width() => {
+                ops.iter().find_map(|op| match op {
+                    Op::Fill { rect: r, color, radius } if *r == rect && *radius > 0.0 => Some(*color),
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+    };
+    (band(rect.top), band(rect.bottom - 2.0))
+}
+
+#[test]
+fn edges_light_the_top_and_shade_the_bottom_following_the_corners_and_states() {
+    let mut rt = runtime(edged);
+    let r = rt.find("key").unwrap();
+    assert!(filled(&rt, r, BLUE), "the fill lies under the edges");
+    assert_eq!(edges(&rt, r), (Some(RED), Some(GREEN)), "{:?}", rt.list().ops);
+    rt.pointer_down(r.center().x, r.center().y);
+    settle(&mut rt);
+    assert_eq!(edges(&rt, r), (Some(GREEN), None), "pressed swaps the light; a clear edge draws nothing");
+}

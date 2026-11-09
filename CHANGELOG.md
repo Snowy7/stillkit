@@ -15,7 +15,7 @@
 - `el::virtual_list`: lists of any length that build only the rows near sight, rebuilding in the same frame when scrolling passes them.
 - Native layers: `el::native(name)` holes and `Surface::native_layer`/`place_native_layer`/`release_native_layer`, so a host's Metal or Vulkan view (a 3D viewport) lives under el content with overlays on top (macOS; Windows GPU surfaces; not yet Wayland).
 - el raw pointer and wheel: `on_pointer` (hover, held press with capture, merged moves, deltas, modifiers, click count) and `on_wheel`; `Runtime::set_modifiers`.
-- el styling for dense tools: `border`, `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
+- el styling for dense tools: `border`, `edges` (a design px of light and shade inside a box's top and bottom, following its corners), `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `Surface::set_caption(Caption::Compact)` (a 40-point title area with the macOS traffic lights centred) and `Surface::system_controls()` (their rect, so an app's own title bar leaves them room).
 - `Event::KeyUp`: a key going up on macOS, Windows and Linux, for held-key input such as fly navigation.
 - `El::focus_ring(false)`: an element that leaves showing focus to its container (`focus_within`), so a field inside a search box is not ringed twice.
