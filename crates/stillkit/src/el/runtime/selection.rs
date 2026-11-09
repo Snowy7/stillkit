@@ -128,7 +128,7 @@ impl<S> Runtime<S> {
                 Some(l.rect.width()),
             );
             d.rich = (!runs.is_empty()).then(|| super::super::rich::layout(&mut self.ui.text, runs, &style, line, self.scale, l.rect.width()));
-            if let Some(rich) = &d.rich { d.field.shape = rich.shape.clone(); }
+            if let Some(rich) = &d.rich { d.field.shape = rich.shape.clone(); d.field.look.as_mut().expect("rich look").line = rich.shape.line; }
             d.field.shape.lines.truncate(wrap.unwrap_or(usize::MAX));
         }
         self.display.retain(|id, _| seen.contains(id));
@@ -280,7 +280,7 @@ impl<S> Runtime<S> {
             let rect = self.poses.get(i)?.rect;
             if p.x < rect.left || p.x > rect.right || p.y < rect.top || p.y > rect.bottom { continue; }
             for fragment in &rich.fragments {
-                let r = fragment.rect.offset(rect.left, rect.top);
+                let r = super::super::rich::bounds(rich, fragment, rect, d.align);
                 if p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
                     && let Some(url) = &fragment.run.link { return Some((l.hit, url.clone())); }
             }
@@ -408,9 +408,9 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
         }); }
     }
     if let Some(rich) = &d.rich {
-        ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme)));
+        ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme), d.align));
         for (i, fragment) in rich.fragments.iter().enumerate().filter(|(_, f)| f.run.link.is_some()) {
-            let bounds = fragment.rect.offset(rect.left, rect.top).intersect(rect);
+            let bounds = super::super::rich::bounds(rich, fragment, rect, d.align).intersect(rect);
             if bounds.width() <= 0.0 || bounds.height() <= 0.0 { continue; }
             f.list.hits.push(crate::Hit { id: link_id(d.id, i),
                 rect: bounds, role: crate::Role::Link,

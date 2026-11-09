@@ -78,6 +78,37 @@ impl Run {
         self.link = Some(url.into());
         self
     }
+
+    /// Sets an explicit font weight.
+    pub fn weight(mut self, weight: u16) -> Self {
+        self.weight = Some(weight.clamp(100, 900));
+        self
+    }
+    /// Sets an explicit foreground colour.
+    pub fn color(mut self, color: Rgba) -> Self {
+        self.color = Some(color);
+        self
+    }
+    /// Sets an installed font family.
+    pub fn family(mut self, family: impl Into<Arc<str>>) -> Self {
+        self.family = Some(family.into());
+        self
+    }
+    /// Sets the font size in design pixels.
+    pub fn size(mut self, size: f32) -> Self {
+        self.size = Some(size);
+        self
+    }
+    /// Uses the platform's monospace face without a code background.
+    pub fn mono(self) -> Self {
+        self.family(if cfg!(windows) {
+            "Consolas"
+        } else if cfg!(target_os = "macos") {
+            "Menlo"
+        } else {
+            "monospace"
+        })
+    }
     fn style(&self, base: &TextStyle, scale: f32) -> TextStyle {
         let mut style = base.clone();
         if let Some(weight) = self.weight {
@@ -125,6 +156,7 @@ impl<S> El<S> {
 #[derive(Clone)]
 pub(crate) struct Fragment {
     pub run: Run,
+    pub line: usize,
     pub style: TextStyle,
     pub rect: Rect,
 }
@@ -207,6 +239,7 @@ pub(crate) fn layout(
                 fragment.text = part.into();
                 out.fragments.push(Fragment {
                     run: fragment,
+                    line: (y / line) as usize,
                     style: style.clone(),
                     rect: Rect::new(x, y + (line - h) / 2.0, w, h),
                 });
@@ -231,11 +264,12 @@ pub(crate) fn paint(
     ink: Rgba,
     accent: Rgba,
     background: Rgba,
+    align: super::element::TextAlign,
 ) -> Vec<Op> {
     let mut ops = Vec::new();
     for fragment in &layout.fragments {
         let run = &fragment.run;
-        let rect = fragment.rect.offset(rect.left, rect.top);
+        let rect = bounds(layout, fragment, rect, align);
         let color = run
             .color
             .unwrap_or(if run.link.is_some() { accent } else { ink });
@@ -264,4 +298,23 @@ pub(crate) fn paint(
         }
     }
     ops
+}
+
+pub(crate) fn bounds(
+    layout: &Layout,
+    fragment: &Fragment,
+    rect: Rect,
+    align: super::element::TextAlign,
+) -> Rect {
+    let width = layout
+        .shape
+        .lines
+        .get(fragment.line)
+        .map_or(0.0, |l| l.stops.iter().map(|s| s.1).fold(0.0, f32::max));
+    let left = match align {
+        super::element::TextAlign::Start => rect.left,
+        super::element::TextAlign::Center => rect.left + (rect.width() - width) / 2.0,
+        super::element::TextAlign::End => rect.right - width,
+    };
+    fragment.rect.offset(left, rect.top)
 }
