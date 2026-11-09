@@ -9,6 +9,11 @@
 - Opt-in F12 element inspector and native look-file reloads, with no inspection code in ordinary builds.
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
+- Linux folder/file/save pickers through the XDG FileChooser portal with local URI decoding.
+- Single-instance guards forward launch arguments and activation URLs to the UI thread.
+- Opt-in desktop notifications with action events: shell balloons on Windows and D-Bus on Linux.
+- Opt-in global hotkeys using RegisterHotKey and the compositor-dependent GlobalShortcuts portal.
+- Opt-in Windows and Linux tray icons, click events and stillkit menu placement, without service threads or startup shell imports.
 - Stable-id editor TabStrip with reorder, overflow, close and tear-out intents; composable PopupList listbox.
 - Controlled nested SplitView panes with captured resizing, collapse/reset and keyboard range semantics.
 - Cached virtual trees with deep reveal, ancestor-preserving filters, desktop selection, full tree keyboard navigation and natural filename sorting; add the `data_grid` example.
@@ -16,7 +21,7 @@
 - el styling for dense tools: `border`, `edges` (a design px of light and shade inside a box's top and bottom, following its corners), `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
-- `stillkit::dialog`: native folder/file pickers, save panel and error alert (macOS, Windows; Linux has no portal client yet).
+- `stillkit::dialog`: native folder/file pickers, save panel and error alert (macOS, Windows; Linux uses the XDG portal).
 - `el::SystemClipboard`: the system clipboard on every platform (Windows now has one outside fields).
 - `Runtime::touch`: host bookkeeping on the state (draining outgoing requests) without running the view.
 - `El::cascade_ink`: opt-in ink inheritance, so labels and icons follow their control's colour and hover look.

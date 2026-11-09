@@ -267,6 +267,7 @@ fn frame(n: &mut Native, q: &QueueHandle<State>, id: SurfaceId) {
 }
 /// Takes one pending native event without blocking; sleep with `host::wait` when empty.
 pub fn next_event() -> Option<(SurfaceId, Event)> {
+    super::services::dispatch();
     runtime(|r| {
         r.queue.dispatch_pending(&mut r.state)?;
         if r.state.events.is_empty() {
@@ -311,6 +312,7 @@ pub(super) fn wait() {
             if !r.state.events.is_empty() {
                 return Ok(());
             }
+            if super::services::dispatch() { return Ok(()); }
             r.conn.flush()?;
             let Some(guard) = r.queue.prepare_read() else { continue };
             let timer = super::wake::armed();
@@ -324,6 +326,7 @@ pub(super) fn wait() {
                 let fd = n.a11y.fd();
                 (fd >= 0).then_some(libc::pollfd { fd, events: libc::POLLIN, revents: 0 })
             }));
+            fds.extend(super::services::poll_fds());
             // SAFETY: fds contains initialized pollfds; no timeout or idle timer.
             if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, -1) } < 0 {
                 continue;
