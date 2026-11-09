@@ -215,6 +215,122 @@ pub enum Op {
 }
 
 impl Op {
+    /// Moves it by `(dx, dy)` device px, nested ops included. Hosts that place one list
+    /// inside another use this (or [`DisplayList::translated`]) instead of matching every
+    /// variant, so a new op never breaks them.
+    pub fn translate(&mut self, dx: f32, dy: f32) {
+        match self {
+            Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
+                *rect = rect.offset(dx, dy);
+                for op in Arc::make_mut(ops) {
+                    op.translate(dx, dy);
+                }
+            }
+            Op::Arc { center, .. } => {
+                center.x += dx;
+                center.y += dy;
+            }
+            Op::Line { from, to, .. } => {
+                from.x += dx;
+                from.y += dy;
+                to.x += dx;
+                to.y += dy;
+            }
+            Op::Gradient { rect, .. }
+            | Op::Continuous { rect, .. }
+            | Op::Image { rect, .. }
+            | Op::RoundedImage { rect, .. }
+            | Op::TextField { rect, .. }
+            | Op::Fill { rect, .. }
+            | Op::Icon { rect, .. }
+            | Op::Stroke { rect, .. }
+            | Op::Text { rect, .. }
+            | Op::Emphasis { rect, .. }
+            | Op::Clip { rect }
+            | Op::Hole { rect }
+            | Op::Shadow { rect, .. }
+            | Op::SoftShadow { rect, .. } => *rect = rect.offset(dx, dy),
+            Op::Unclip => {}
+        }
+    }
+
+    /// Scales it by `by` about the origin: positions, sizes, radii, widths, blurs and text
+    /// sizes, nested ops included. A host that lays out at one size and paints at another
+    /// (a thumbnail) uses this instead of matching every variant.
+    pub fn scale(&mut self, by: f32) {
+        let rect = |r: &mut Rect| {
+            r.left *= by;
+            r.top *= by;
+            r.right *= by;
+            r.bottom *= by;
+        };
+        let point = |p: &mut Point| {
+            p.x *= by;
+            p.y *= by;
+        };
+        match self {
+            Op::Image { rect: r, .. } | Op::Clip { rect: r } | Op::Hole { rect: r } | Op::TextField { rect: r, .. } => rect(r),
+            Op::RoundedImage { rect: r, radius, .. } | Op::Fill { rect: r, radius, .. } => {
+                rect(r);
+                *radius *= by;
+            }
+            Op::Stroke { rect: r, radius, width, .. }
+            | Op::Continuous { rect: r, radius, width, .. }
+            | Op::Gradient { rect: r, radius, width, .. } => {
+                rect(r);
+                *radius *= by;
+                *width *= by;
+            }
+            Op::Icon { rect: r, weight, .. } => {
+                rect(r);
+                *weight *= by;
+            }
+            Op::Text { rect: r, style, .. } | Op::Emphasis { rect: r, style, .. } => {
+                rect(r);
+                style.size *= by;
+                style.tracking *= by;
+            }
+            Op::Line { from, to, width, .. } => {
+                point(from);
+                point(to);
+                *width *= by;
+            }
+            Op::Arc { center, radius, width, .. } => {
+                point(center);
+                *radius *= by;
+                *width *= by;
+            }
+            Op::Shadow { rect: r, radius, spread, drop, .. } => {
+                rect(r);
+                *radius *= by;
+                *spread *= by;
+                *drop *= by;
+            }
+            Op::SoftShadow { rect: r, radius, blur, offset, spread, .. } => {
+                rect(r);
+                *radius *= by;
+                *blur *= by;
+                offset.0 *= by;
+                offset.1 *= by;
+                *spread *= by;
+            }
+            Op::Clipped { rect: r, ops } => {
+                rect(r);
+                for op in Arc::make_mut(ops) {
+                    op.scale(by);
+                }
+            }
+            Op::RoundedClipped { rect: r, radius, ops } => {
+                rect(r);
+                *radius *= by;
+                for op in Arc::make_mut(ops) {
+                    op.scale(by);
+                }
+            }
+            Op::Unclip => {}
+        }
+    }
+
     /// Every pixel this operation may touch, antialiasing included.
     pub fn bounds(&self) -> Rect {
         match self {
@@ -337,42 +453,9 @@ impl DisplayList {
     /// Moves a list into a cropped surface without changing its hit identities.
     pub fn translated(&self, dx: f32, dy: f32) -> Self {
         let mut list = self.clone();
-        fn translate(ops: &mut [Op], dx: f32, dy: f32) {
-            for op in ops {
-                match op {
-                    Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
-                        *rect = rect.offset(dx, dy);
-                        translate(Arc::make_mut(ops), dx, dy);
-                    }
-                    Op::Arc { center, .. } => {
-                        center.x += dx;
-                        center.y += dy;
-                    }
-                    Op::Line { from, to, .. } => {
-                        from.x += dx;
-                        from.y += dy;
-                        to.x += dx;
-                        to.y += dy;
-                    }
-                    Op::Gradient { rect, .. }
-                    | Op::Continuous { rect, .. }
-                    | Op::Image { rect, .. }
-                    | Op::RoundedImage { rect, .. }
-                    | Op::TextField { rect, .. }
-                    | Op::Fill { rect, .. }
-                    | Op::Icon { rect, .. }
-                    | Op::Stroke { rect, .. }
-                    | Op::Text { rect, .. }
-                    | Op::Emphasis { rect, .. }
-                    | Op::Clip { rect }
-                    | Op::Hole { rect }
-                    | Op::Shadow { rect, .. }
-                    | Op::SoftShadow { rect, .. } => *rect = rect.offset(dx, dy),
-                    Op::Unclip => {}
-                }
-            }
+        for op in &mut list.ops {
+            op.translate(dx, dy);
         }
-        translate(&mut list.ops, dx, dy);
         for hit in &mut list.hits {
             hit.rect = hit.rect.offset(dx, dy);
         }
@@ -616,6 +699,26 @@ mod tests {
         let regions = new.damage_regions(&old);
         let area: f32 = regions.iter().map(|r| r.width() * r.height()).sum();
         assert!(area < 4.0 * 12.0 * 12.0, "only the inserted and the changed op: {regions:?}");
+    }
+
+    #[test]
+    fn ops_translate_and_scale_with_what_they_hold() {
+        let mut op = Op::RoundedClipped {
+            rect: Rect::new(10.0, 10.0, 20.0, 20.0),
+            radius: 4.0,
+            ops: Arc::from([Op::Line {
+                from: Point::new(10.0, 10.0),
+                to: Point::new(30.0, 10.0),
+                width: 2.0,
+                color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+            }]),
+        };
+        op.translate(5.0, -5.0);
+        op.scale(2.0);
+        let Op::RoundedClipped { rect, radius, ops } = op else { unreachable!() };
+        assert_eq!((rect, radius), (Rect::new(30.0, 10.0, 40.0, 40.0), 8.0));
+        let Op::Line { from, to, width, .. } = &ops[0] else { unreachable!() };
+        assert_eq!((*from, *to, *width), (Point::new(30.0, 10.0), Point::new(70.0, 10.0), 4.0));
     }
 
     #[test]
