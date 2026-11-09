@@ -21,7 +21,7 @@ pub mod calendar;
 pub mod chart;
 pub mod color_row;
 pub use platform::current::compose;
-/// Legacy immediate-mode Studio controls; retained for mypaper. Prefer `el` and stillkit-kit.
+/// Legacy immediate-mode Studio controls; retained for Glaze. Prefer `el` and stillkit-kit.
 #[doc(hidden)]
 pub mod controls;
 pub mod damage;

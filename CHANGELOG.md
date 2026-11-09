@@ -39,7 +39,7 @@
 A draft inventory, not a published release. The target is a real small Windows/Wayland app built from these docs with el + kit, CPU or GPU.
 
 ### Added
-- Native surfaces extracted from mypaper with history and MIT licensing.
+- Native surfaces extracted from Glaze with history and MIT licensing.
 - Keyed declarative elements, flex/grid layout, damage-only redraw and snap/tree/script tooling.
 - Spring layout/colour/presence motion, reduced motion and idle ticker shutdown.
 - Independent theme parts, five light/dark presets, mix diagnostics and TOML/JSON loading.
