@@ -782,6 +782,7 @@ impl<S> Runtime<S> {
             }
         });
         let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.states_on);
+        self.anim.match_flights((&self.laid, &self.targets, &self.poses), &laid, &targets, mode);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
             && mode == Mode::Animate
@@ -2225,6 +2226,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
         let passed = (el.cascade || inherited.is_some()).then_some(ink);
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
+            flight: el.flight.clone(),
             fill: look.fill.map(|p| p.resolve(theme)),
             fill_gradient: look.fill.and_then(|p| p.gradient()).map(Arc::new),
             border_gradient: look.border.and_then(|b| b.paint.gradient()).map(Arc::new),
@@ -2242,7 +2244,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             value,
             angle: el.anim.rotate,
             transform: el.anim.transform.clone(),
-            motion,
+            motion: motion.or_else(|| (el.flight.is_some() && !instant).then_some(theme.motion.layout)),
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
                 slide: (t.slide.0 * s, t.slide.1 * s),
