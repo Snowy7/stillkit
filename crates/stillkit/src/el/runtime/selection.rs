@@ -1,6 +1,6 @@
 //! Selection of display text, retained independently of application state.
 use super::super::{
-    edit::Cmd,
+    edit::{Cmd, Move},
     element::{KeyCode, What},
     field::{Field, Look},
     token,
@@ -173,8 +173,32 @@ impl<S> Runtime<S> {
                 return true;
             }
         }
-        if let Some(cmd @ Cmd::Move(..)) = super::super::edit::command(key, self.mods, false) {
-            ed.apply(&cmd, false);
+        if let Some(cmd @ Cmd::Move(m, extend)) = super::super::edit::command(key, self.mods, false)
+        {
+            if matches!(m, Move::Home | Move::End) {
+                let at = ed.caret;
+                if let Some(d) = self
+                    .display
+                    .values()
+                    .filter(|d| d.doc == id && d.start <= at)
+                    .max_by_key(|d| d.start)
+                {
+                    let line = d.field.shape.line_of(at.saturating_sub(d.start));
+                    if let Some(line) = d.field.shape.lines.get(line) {
+                        ed.place(
+                            d.start
+                                + if m == Move::Home {
+                                    line.start
+                                } else {
+                                    line.end
+                                },
+                            extend,
+                        );
+                    }
+                }
+            } else {
+                ed.apply(&cmd, false);
+            }
             self.sync_display_ranges();
             return true;
         }
