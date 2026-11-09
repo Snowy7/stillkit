@@ -67,6 +67,7 @@ notes area).
 - **Motion:** `motion(spring)` (a `Spring` or `token::MOTION_LAYOUT` / `MOTION_INTERACTIVE` /
   `MOTION_OPEN`), `animate()` (the theme's layout spring), `transition(Transition::fade() |
   scale(s) | slide(x, y))`, `instant()`. See [Animation](#animation).
+- **Raw pointer:** `on_pointer(|s, e: &PointerEvent, tx| -> bool)`: `Hover`, then `Down`, `Move`… `Up` or `Cancel` for a press of any button that began on it (it holds the pointer until released, wherever it goes), with design-px `at`, `local`, `delta` (moves within a frame merge), `origin`, `size`, `mods` and `clicks`; return whether the state changed (a hover that changed nothing runs no view). `on_wheel(|s, w: &WheelEvent, tx| -> bool)` takes the wheel over it before scroll views. Hosts pass held modifiers with `Runtime::set_modifiers` (`el::run` does).
 - **Handlers:** `on_press(|s: &mut S| ..)` (click, Enter, Space, assistive invoke),
   `on_press_with(|s, tx: &mut Tx| ..)` (`tx.instant()`, `tx.set_theme(..)`) and
   `on_drag(|s, x, y| ..)` (the pointer's place across the box, `0..=1`, while pressed; its

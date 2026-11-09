@@ -6,6 +6,7 @@
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
 - `stillkit::dialog`: native folder/file pickers, save panel and error alert (macOS, Windows; Linux has no portal client yet).
+- el raw pointer and wheel: `on_pointer` (hover, held press with capture, merged moves, deltas, modifiers, click count) and `on_wheel`; `Runtime::set_modifiers`.
 - el styling for dense tools: `border`, `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - Real soft shadows (`Op::SoftShadow`) with elevation levels per look, and Windows system backdrop frost for CPU surfaces.
 - Kit text components (text, secure and search fields, text area, combobox, command palette) and Linux Vulkan/Vello Hybrid GPU rendering and glass.
