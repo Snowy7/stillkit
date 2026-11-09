@@ -1170,3 +1170,11 @@ mod text;
 pub use combobox::{Combobox, QueryState};
 pub use palette::{Command, CommandPalette};
 pub use text::{SearchField, SecureField, TextArea, TextField};
+
+mod split_view;
+pub use split_view::{SplitAxis, SplitState, SplitView};
+
+mod tab_strip;
+mod popup_list;
+pub use tab_strip::{Tab, TabEvent, TabStrip, TabStripState};
+pub use popup_list::{PopupItem, PopupList};
