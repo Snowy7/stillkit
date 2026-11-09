@@ -28,7 +28,7 @@ fn main() -> anyhow::Result<()> {
 }
 ```
 
-This exact [example](crates/stillkit/examples/guide_getting_started.rs) builds with the repo. Add anyhow and a pinned git dependency on stillkit; [getting started](docs/guide/getting-started.md) covers the required AccessKit patch and nightly setup. This is pre-release groundwork; no crates.io release is promised yet.
+This exact [example](crates/stillkit/examples/guide_getting_started.rs) builds with the repo. Add anyhow and a pinned git dependency on stillkit; [getting started](docs/guide/getting-started.md) covers the required AccessKit patch; the crates build on stable Rust 1.96 or newer. This is pre-release groundwork; no crates.io release is promised yet.
 
 ## Choose a layer
 

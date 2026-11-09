@@ -63,3 +63,48 @@ pub(super) fn fired() {
     }
     ARMED.set(false);
 }
+
+thread_local! {
+    /// The [`Waker`](crate::Waker)'s eventfd, polled beside the display while it exists.
+    static WAKER: Cell<Option<RawFd>> = const { Cell::new(None) };
+}
+
+/// The [`Waker`](crate::Waker)'s native half: an eventfd the display wait polls. Writes from
+/// any thread make it readable; the wait reads it back to zero.
+pub(crate) struct Poster(Option<std::sync::Arc<OwnedFd>>);
+
+impl Poster {
+    pub(crate) fn new() -> Self {
+        // SAFETY: plain syscall; the result is checked and owned below.
+        let fd = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if fd < 0 {
+            return Self(None);
+        }
+        WAKER.set(Some(fd));
+        // SAFETY: a fresh descriptor; the Arc keeps it open while any Waker clone lives, and
+        // a waker lives for its thread (`waker` caches it), so the polled fd stays valid.
+        Self(Some(std::sync::Arc::new(unsafe { OwnedFd::from_raw_fd(fd) })))
+    }
+
+    pub(crate) fn post(&self) {
+        use std::os::fd::AsRawFd;
+        let Some(fd) = &self.0 else { return };
+        let one = 1u64.to_ne_bytes();
+        // SAFETY: writes 8 bytes from a local buffer to a live non-blocking eventfd.
+        unsafe { libc::write(fd.as_raw_fd(), one.as_ptr().cast(), one.len()) };
+    }
+}
+
+/// The waker's descriptor, once this thread made one.
+pub(super) fn waker_fd() -> Option<RawFd> {
+    WAKER.get()
+}
+
+/// The waker fired: read the counter back to zero.
+pub(super) fn woken() {
+    if let Some(fd) = WAKER.get() {
+        let mut n = [0u8; 8];
+        // SAFETY: reads at most 8 bytes into a local buffer from a non-blocking eventfd.
+        unsafe { libc::read(fd, n.as_mut_ptr().cast(), n.len()) };
+    }
+}

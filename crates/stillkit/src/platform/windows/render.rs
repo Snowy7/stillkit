@@ -801,7 +801,19 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
+                Op::Hole { rect } => {
+                    // Clear ignores blending: the clip bounds it to the hole.
+                    t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
+                    t.Clear(Some(&color(Rgba::TRANSPARENT)));
+                    t.PopAxisAlignedClip();
+                }
                 Op::RoundedClipped { rect, radius, ops } => {
+                    // An idle edge wash is retained for damage comparison, but needs no
+                    // geometry or D2D layer. Bound visible layers by their actual children,
+                    // so one caption button never allocates a window-sized offscreen bitmap.
+                    if matches!(ops.as_ref(), [Op::Fill { color, .. }] if color.a <= 0.0) {
+                        return;
+                    }
                     use windows::Win32::Graphics::Direct2D::{
                         D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_LAYER_OPTIONS_NONE,
                         D2D1_LAYER_PARAMETERS, ID2D1Layer,
@@ -812,7 +824,7 @@ impl Painter {
                     }) else { return };
                     let geometry = mask.cast().ok();
                     let mut parameters = D2D1_LAYER_PARAMETERS {
-                        contentBounds: d2d(*rect),
+                        contentBounds: d2d(op.bounds().intersect(damage)),
                         geometricMask: std::mem::ManuallyDrop::new(geometry),
                         maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
                         maskTransform: windows_numerics::Matrix3x2::identity(),
@@ -821,7 +833,7 @@ impl Painter {
                         layerOptions: D2D1_LAYER_OPTIONS_NONE,
                     };
                     t.PushLayer(&parameters, None::<&ID2D1Layer>);
-                    self.ops(text, ops, *rect);
+                    self.ops(text, ops, rect.intersect(damage));
                     t.PopLayer();
                     std::mem::ManuallyDrop::drop(&mut parameters.geometricMask);
                 }

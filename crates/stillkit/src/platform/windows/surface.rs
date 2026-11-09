@@ -108,9 +108,21 @@ pub enum Event {
     Release(Pointer, Button),
     /// Double click.
     DoubleClick(Pointer, Button),
+    /// Files dragged from another app are over the surface ([`take_dropped_files`] after
+    /// [`Event::FilesDropped`]).
+    FilesHover(Pointer),
+    /// The dragged files left the surface, or the drag was cancelled.
+    FilesLeave,
+    /// Files were dropped here; [`take_dropped_files`] has their paths.
+    FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
-    /// A desktop surface activated; Explorer may finish reordering its band afterwards.
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
+    /// The surface became the active window. Desktop surfaces: Explorer may finish reordering
+    /// its band afterwards. App windows: anything kept beside it in the z-order (a glass
+    /// plate below it) needs restacking now, since activation raised it.
     Activated,
     /// The surface lost the activation (another window was clicked or focused).
     Deactivated,
@@ -359,6 +371,14 @@ impl Surface {
         if let Kind::App { min } = kind {
             let ex = if gpu { layered } else { WINDOW_EX_STYLE::default() };
             let hwnd = crate::app_window::create(name, Some(wndproc), ex)?;
+            // Files dropped from Explorer arrive as WM_DROPFILES. WS_EX_ACCEPTFILES is all
+            // DragAcceptFiles sets; setting it here keeps shell32.dll out until a drop lands.
+            // SAFETY: the window this call just made.
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::WS_EX_ACCEPTFILES;
+                let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_ACCEPTFILES.0 as isize);
+            }
             let app = crate::app_window::AppShared::new(min);
             return Ok(Self::adopt(hwnd, kind, name, role, deferred, Some(app), gpu));
         }
@@ -678,6 +698,10 @@ impl Surface {
                 &self.glass_style.get(),
             );
             self.glass_open.set(opened);
+            if opened {
+                backdrop.opacity(self.hwnd, self.alpha);
+                if self.is_visible() { backdrop.visibility(self.hwnd, true); }
+            }
         }
     }
 
@@ -887,6 +911,9 @@ impl Surface {
             return Ok(());
         }
         if alpha != self.alpha {
+            if self.glass_open.get() && let Some(backdrop) = self.backdrop() {
+                backdrop.opacity(self.hwnd, alpha);
+            }
             self.alpha = alpha;
             self.update(self.origin, None)?;
         }
@@ -895,10 +922,13 @@ impl Surface {
 
     /// Shows the window without activating it.
     pub fn show(&self) {
+        let native = self.backdrop().is_some_and(|b| b.synchronous());
+        if native && !self.glass_open.get() { self.open_glass(); }
         // SAFETY: read-only window queries and a show of our own window, without activation.
         unsafe {
-            if !IsWindowVisible(self.hwnd).as_bool()
-                || windows::Win32::UI::WindowsAndMessaging::IsIconic(self.hwnd).as_bool()
+            if (!IsWindowVisible(self.hwnd).as_bool()
+                || windows::Win32::UI::WindowsAndMessaging::IsIconic(self.hwnd).as_bool())
+                && !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, true))
             {
                 let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
             }
@@ -1028,8 +1058,10 @@ impl Surface {
 
     /// Hide.
     pub fn hide(&self) {
-        // SAFETY: our own window.
-        let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+        if !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, false)) {
+            // SAFETY: our own window.
+            let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+        }
         self.close_glass();
     }
 
@@ -1541,6 +1573,13 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(id, Event::Move(pointer(shared, lparam)));
         }
         WM_MOUSELEAVE => push(id, Event::Leave),
+        windows::Win32::UI::WindowsAndMessaging::WM_DROPFILES => {
+            // SAFETY: the HDROP this message carries, read then released once.
+            let Some((at, paths)) = (unsafe { dropped_files(wparam.0 as *mut _) }) else { return LRESULT(0) };
+            set_dropped_files(paths);
+            let (ox, oy) = shared.origin.get();
+            push(id, Event::FilesDropped(Pointer { at: Point::new(at.x as f32, at.y as f32), screen: (ox + at.x, oy + at.y) }));
+        }
         WM_CAPTURECHANGED => push(id, Event::CaptureLost),
         WM_MOUSEWHEEL => {
             let mut at = POINT {
@@ -1575,6 +1614,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             push(id, Event::Release(p, b));
         }
         WM_KEYDOWN => push(id, Event::Key(wparam.0 as u16)),
+        windows::Win32::UI::WindowsAndMessaging::WM_KEYUP
+        | windows::Win32::UI::WindowsAndMessaging::WM_SYSKEYUP => push(id, Event::KeyUp(wparam.0 as u16)),
         windows::Win32::UI::WindowsAndMessaging::WM_DPICHANGED => {
             push(id, Event::DpiChanged((wparam.0 & 0xffff) as u32))
         }
@@ -1588,7 +1629,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         windows::Win32::UI::WindowsAndMessaging::WM_CANCELMODE => push(id, Event::Cancelled),
         WM_ACTIVATE if (wparam.0 & 0xFFFF) as u32 == WA_INACTIVE => push(id, Event::Deactivated),
-        WM_ACTIVATE if shared.desktop.is_some() => push(id, Event::Activated),
+        WM_ACTIVATE => push(id, Event::Activated),
         WM_A11Y_ACTION => {
             let hit = lparam.0 as HitId;
             push(
@@ -1650,4 +1691,209 @@ fn default_render() -> crate::platform::Render {
     return crate::platform::render();
     #[cfg(not(feature = "gpu"))]
     crate::platform::Render::Cpu
+}
+
+/// Native layers by (parent window, name): the child window and where it was last placed.
+type Natives = std::collections::HashMap<(isize, String), (isize, Option<crate::Rect>)>;
+
+thread_local! {
+    static NATIVES: RefCell<Natives> = RefCell::new(Natives::new());
+}
+
+/// A native layer's window procedure: transparent to hit testing, so the pointer reaches the
+/// surface (which routes it like any other input) and its DirectComposition content on top.
+unsafe extern "system" fn native_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{HTTRANSPARENT, WM_NCHITTEST};
+    if msg == WM_NCHITTEST {
+        return LRESULT(HTTRANSPARENT as isize);
+    }
+    // SAFETY: the default procedure for this window's own messages.
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+impl Surface {
+    /// The native layer `name`, made on first use: a child window under the surface's content
+    /// where the host presents with its own GPU device (a Vulkan or DXGI swapchain for the
+    /// child's client area). It shows where the content is transparent ([`crate::Op::Hole`],
+    /// drawn by [`crate::el::native`]) once placed. The surface must render on the GPU
+    /// ([`Render::Gpu`](crate::platform::Render::Gpu), the `gpu` feature): its
+    /// DirectComposition content is composed over child windows; a CPU (layered) surface can't
+    /// show one, and this fails.
+    pub fn native_layer(&self, name: &str) -> Result<crate::NativeHandle> {
+        use windows::Win32::UI::WindowsAndMessaging::{WS_CHILD, WS_CLIPSIBLINGS};
+        use windows::core::w;
+        let parent = self.hwnd.0 as isize;
+        if let Some(child) = NATIVES.with_borrow(|n| n.get(&(parent, name.to_owned())).map(|(c, _)| *c)) {
+            return Ok(crate::NativeHandle::Hwnd(child));
+        }
+        anyhow::ensure!(
+            self.render() == crate::platform::Render::Gpu,
+            "native layers need a GPU surface on Windows (Render::Gpu): a layered CPU window can't show child windows"
+        );
+        // SAFETY: plain Win32 class registration and child window creation on this thread.
+        let child = unsafe {
+            let class = WNDCLASSEXW {
+                cbSize: size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(native_proc),
+                hInstance: GetModuleHandleW(None)?.into(),
+                lpszClassName: w!("StillkitNativeLayer"),
+                ..Default::default()
+            };
+            if RegisterClassExW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
+                return Err(windows::core::Error::from_thread()).context("RegisterClassExW");
+            }
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("StillkitNativeLayer"),
+                w!(""),
+                WS_CHILD | WS_CLIPSIBLINGS,
+                0,
+                0,
+                1,
+                1,
+                Some(self.hwnd),
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        let child = child.0 as isize;
+        NATIVES.with_borrow_mut(|n| n.insert((parent, name.to_owned()), (child, None)));
+        Ok(crate::NativeHandle::Hwnd(child))
+    }
+
+    /// Shows native layer `name` at `rect` (device px from the client's top-left), or hides it
+    /// (`None`). Unchanged rects cost nothing; unknown names are ignored.
+    pub fn place_native_layer(&self, name: &str, rect: Option<crate::Rect>) {
+        use windows::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOWNA, SetWindowPos};
+        let key = (self.hwnd.0 as isize, name.to_owned());
+        let Some(child) = NATIVES.with_borrow_mut(|n| {
+            let entry = n.get_mut(&key)?;
+            (entry.1 != rect).then(|| {
+                entry.1 = rect;
+                entry.0
+            })
+        }) else {
+            return;
+        };
+        let child = HWND(child as *mut _);
+        // SAFETY: a live child window of this surface.
+        unsafe {
+            match rect {
+                Some(r) => {
+                    let _ = SetWindowPos(
+                        child,
+                        None,
+                        r.left.round() as i32,
+                        r.top.round() as i32,
+                        r.width().round().max(1.0) as i32,
+                        r.height().round().max(1.0) as i32,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                    let _ = ShowWindow(child, SW_SHOWNA);
+                }
+                None => {
+                    let _ = ShowWindow(child, SW_HIDE);
+                }
+            }
+        }
+    }
+
+    /// Removes native layer `name`; its handle is invalid afterwards.
+    pub fn release_native_layer(&self, name: &str) {
+        if let Some((child, _)) = NATIVES.with_borrow_mut(|n| n.remove(&(self.hwnd.0 as isize, name.to_owned()))) {
+            // SAFETY: a child window this surface made.
+            let _ = unsafe { DestroyWindow(HWND(child as *mut _)) };
+        }
+    }
+}
+
+thread_local! {
+    static DROPPED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The paths of the files dropped with the last [`Event::FilesDropped`] (taken once).
+pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
+    DROPPED.with_borrow_mut(std::mem::take)
+}
+
+/// Reads and releases a `WM_DROPFILES` drop: where it landed (client px) and its paths.
+/// shell32.dll's drop functions are looked up on the first drop, not imported: a static import
+/// would map shell32 into every stillkit process at start (rule: nothing loads until asked).
+///
+/// # Safety
+/// `drop` is the `HDROP` a `WM_DROPFILES` message carried, not yet finished.
+unsafe fn dropped_files(drop: *mut core::ffi::c_void) -> Option<(POINT, Vec<std::path::PathBuf>)> {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW};
+    use windows::core::{s, w};
+    type QueryFile = unsafe extern "system" fn(*mut core::ffi::c_void, u32, *mut u16, u32) -> u32;
+    type QueryPoint = unsafe extern "system" fn(*mut core::ffi::c_void, *mut POINT) -> i32;
+    type Finish = unsafe extern "system" fn(*mut core::ffi::c_void);
+    // SAFETY: system32's shell32 and its documented exports, called with their signatures on
+    // the caller's live HDROP, which DragFinish releases last.
+    unsafe {
+        let shell = LoadLibraryExW(w!("shell32.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok()?;
+        let query: QueryFile = std::mem::transmute(GetProcAddress(shell, s!("DragQueryFileW"))?);
+        let point: QueryPoint = std::mem::transmute(GetProcAddress(shell, s!("DragQueryPoint"))?);
+        let finish: Finish = std::mem::transmute(GetProcAddress(shell, s!("DragFinish"))?);
+        let mut at = POINT::default();
+        point(drop, &mut at);
+        let paths = (0..query(drop, u32::MAX, std::ptr::null_mut(), 0))
+            .map(|i| {
+                let mut buf = vec![0u16; query(drop, i, std::ptr::null_mut(), 0) as usize + 1];
+                let len = query(drop, i, buf.as_mut_ptr(), buf.len() as u32) as usize;
+                std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]))
+            })
+            .collect();
+        finish(drop);
+        Some((at, paths))
+    }
+}
+
+/// Keeps dropped paths for [`take_dropped_files`].
+#[allow(dead_code)]
+pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
+    DROPPED.with_borrow_mut(|d| *d = paths);
+}
+
+impl Surface {
+    /// The title area's height where the system draws window controls: only macOS does, so
+    /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
+    pub fn set_caption(&self, _: crate::Caption) {}
+
+    /// Where the system draws the window controls: nowhere here (apps draw their own).
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::System::Memory::{GMEM_MOVEABLE, GMEM_ZEROINIT, GlobalAlloc, GlobalLock, GlobalUnlock};
+
+    /// A drop as Explorer builds it: a `DROPFILES` header, then nul-separated wide paths.
+    #[test]
+    fn a_drop_reads_its_point_and_paths_through_the_lazy_shell32_calls() {
+        let paths = [r"C:\one.txt", r"D:\a folder\two"];
+        let mut wide: Vec<u16> = paths.iter().flat_map(|p| p.encode_utf16().chain([0])).collect();
+        wide.push(0);
+        const HEADER: usize = 20; // pFiles, pt, fNC, fWide
+        // SAFETY: a fresh allocation sized for the header and paths, filled while locked; the
+        // reader's DragFinish frees it.
+        let drop = unsafe {
+            let global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, HEADER + wide.len() * 2).unwrap();
+            let bytes = GlobalLock(global).cast::<u8>();
+            bytes.cast::<u32>().write_unaligned(HEADER as u32);
+            bytes.add(4).cast::<POINT>().write_unaligned(POINT { x: 12, y: 34 });
+            bytes.add(16).cast::<i32>().write_unaligned(1);
+            std::ptr::copy_nonoverlapping(wide.as_ptr().cast::<u8>(), bytes.add(HEADER), wide.len() * 2);
+            let _ = GlobalUnlock(global);
+            global.0
+        };
+        // SAFETY: an unfinished HDROP made above.
+        let (at, read) = unsafe { super::dropped_files(drop) }.expect("shell32's drop functions");
+        assert_eq!((at.x, at.y), (12, 34));
+        assert_eq!(read, paths.map(std::path::PathBuf::from));
+    }
 }

@@ -98,8 +98,18 @@ pub enum Event {
     Release(Pointer, Button),
     /// Double click.
     DoubleClick(Pointer, Button),
+    /// Files dragged from another app are over the surface ([`take_dropped_files`] after
+    /// [`Event::FilesDropped`]).
+    FilesHover(Pointer),
+    /// The dragged files left the surface, or the drag was cancelled.
+    FilesLeave,
+    /// Files were dropped here; [`take_dropped_files`] has their paths.
+    FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
     /// The surface's window became the key window.
     Activated,
     /// The surface's window stopped being the key window.
@@ -286,6 +296,8 @@ pub struct Surface {
     glass: Cell<Option<crate::Glass>>,
     glass_style: Cell<crate::glass::GlassStyle>,
     glass_open: Cell<bool>,
+    /// Native layers by name ([`Surface::native_layer`]): layer-hosting views under the content.
+    natives: RefCell<HashMap<String, Native>>,
     #[cfg(feature = "gpu")]
     gpu: Option<Rc<RefCell<super::gpu::Window>>>,
     #[cfg(feature = "gpu")]
@@ -314,6 +326,9 @@ impl Surface {
         // AccessKit subclasses the view before anything observes it.
         *view.ivars().a11y.borrow_mut() = Some(super::a11y::A11y::new(&view, id, role, name.into()));
         view.setWantsLayer(true);
+        // Files dragged from other apps (see the view's dragging methods).
+        // SAFETY: an extern static AppKit defines.
+        view.registerForDraggedTypes(&objc2_foundation::NSArray::from_slice(&[unsafe { objc2_app_kit::NSPasteboardTypeFileURL }]));
         view.setLayerContentsRedrawPolicy(NSViewLayerContentsRedrawPolicy::Never);
         view.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
         if let Some(layer) = view.layer() {
@@ -353,6 +368,7 @@ impl Surface {
             glass: Cell::new(None),
             glass_style: Cell::new(Default::default()),
             glass_open: Cell::new(false),
+            natives: RefCell::default(),
             #[cfg(feature = "gpu")]
             gpu: None,
             #[cfg(feature = "gpu")]
@@ -780,5 +796,135 @@ impl crate::platform::Window for Surface {
     }
     fn next_event() -> Option<(SurfaceId, Event)> {
         next_event()
+    }
+}
+
+/// A native layer: a layer-hosting view with a `CAMetalLayer`, below the content view.
+struct Native {
+    view: Retained<NSView>,
+    layer: Retained<objc2_quartz_core::CALayer>,
+    /// The device-px rect it was last placed at.
+    rect: Option<crate::Rect>,
+}
+
+impl Surface {
+    /// The native layer `name`, made on first use: a `CAMetalLayer` in a layer-hosting view
+    /// beneath the surface's content, where the host draws with its own GPU device. It shows
+    /// only where the content is transparent ([`crate::Op::Hole`], drawn by
+    /// [`crate::el::native`]) and once placed ([`place_native_layer`](Self::place_native_layer)).
+    /// Making one loads no GPU driver: the layer has no device until the host gives it one.
+    pub fn native_layer(&self, name: &str) -> Result<crate::NativeHandle> {
+        if let Some(n) = self.natives.borrow().get(name) {
+            return Ok(crate::NativeHandle::Metal(Retained::as_ptr(&n.layer).cast_mut().cast()));
+        }
+        let mtm = MainThreadMarker::new().context("AppKit views need the main thread")?;
+        // The window's content view is the container the surface's view hangs in.
+        let container = self.window.contentView().context("the surface's window has no container")?;
+        let class = objc2::runtime::AnyClass::get(c"CAMetalLayer").context("QuartzCore has no CAMetalLayer")?;
+        // SAFETY: `+layer` is CALayer's autoreleased constructor; CAMetalLayer is a CALayer.
+        let layer: Retained<objc2_quartz_core::CALayer> = unsafe { msg_send![class, layer] };
+        layer.setContentsScale(self.window.backingScaleFactor());
+        let view = NSView::initWithFrame(NSView::alloc(mtm), NSRect::ZERO);
+        // Layer-hosting: the layer is set before the view wants one.
+        view.setLayer(Some(&layer));
+        view.setWantsLayer(true);
+        view.setHidden(true);
+        container.addSubview_positioned_relativeTo(&view, objc2_app_kit::NSWindowOrderingMode::Below, Some(&self.view));
+        let handle = crate::NativeHandle::Metal(Retained::as_ptr(&layer).cast_mut().cast());
+        self.natives.borrow_mut().insert(name.to_owned(), Native { view, layer, rect: None });
+        Ok(handle)
+    }
+
+    /// Shows native layer `name` at `rect` (device px from the client's top-left), or hides it
+    /// (`None`). Unchanged rects cost nothing; unknown names are ignored.
+    pub fn place_native_layer(&self, name: &str, rect: Option<crate::Rect>) {
+        let mut natives = self.natives.borrow_mut();
+        let Some(n) = natives.get_mut(name) else { return };
+        if n.rect == rect {
+            return;
+        }
+        n.rect = rect;
+        let Some(r) = rect else {
+            n.view.setHidden(true);
+            return;
+        };
+        let s = self.window.backingScaleFactor();
+        let height = self.window.contentView().map_or(0.0, |c| c.bounds().size.height);
+        // The container isn't flipped: AppKit's origin is its bottom-left.
+        let frame = NSRect::new(
+            NSPoint::new(f64::from(r.left) / s, height - f64::from(r.bottom) / s),
+            NSSize::new(f64::from(r.width()) / s, f64::from(r.height()) / s),
+        );
+        n.view.setFrame(frame);
+        n.layer.setContentsScale(s);
+        n.view.setHidden(false);
+    }
+
+    /// Removes native layer `name`; its handle is invalid afterwards.
+    pub fn release_native_layer(&self, name: &str) {
+        if let Some(n) = self.natives.borrow_mut().remove(name) {
+            n.view.removeFromSuperview();
+        }
+    }
+}
+
+thread_local! {
+    static DROPPED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The paths of the files dropped with the last [`Event::FilesDropped`] (taken once).
+pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
+    DROPPED.with_borrow_mut(std::mem::take)
+}
+
+/// Keeps dropped paths for [`take_dropped_files`].
+#[allow(dead_code)]
+pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
+    DROPPED.with_borrow_mut(|d| *d = paths);
+}
+
+impl Surface {
+    /// How tall the title area is where the traffic lights sit: [`Caption::Compact`] gives the
+    /// window an empty compact toolbar, which makes the title area 40 points and centres the
+    /// lights in it, for an app's own taller title bar. App windows only.
+    ///
+    /// [`Caption::Compact`]: crate::Caption::Compact
+    pub fn set_caption(&self, caption: crate::Caption) {
+        if !self.is_app() {
+            return;
+        }
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        match caption {
+            crate::Caption::Standard => self.window.setToolbar(None),
+            crate::Caption::Compact => {
+                if self.window.toolbar().is_none() {
+                    let toolbar = objc2_app_kit::NSToolbar::new(mtm);
+                    self.window.setToolbar(Some(&toolbar));
+                }
+                self.window.setToolbarStyle(objc2_app_kit::NSWindowToolbarStyle::UnifiedCompact);
+            }
+        }
+    }
+
+    /// Where the system draws the window controls (the traffic lights, close to zoom), in
+    /// device px from the client's top-left, so an app's title bar leaves them room. `None`
+    /// in full screen, where they are hidden, and for non-app surfaces.
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        if !self.is_app() || self.window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+            return None;
+        }
+        let close = self.window.standardWindowButton(objc2_app_kit::NSWindowButton::CloseButton)?;
+        let zoom = self.window.standardWindowButton(objc2_app_kit::NSWindowButton::ZoomButton)?;
+        let height = self.window.contentView()?.bounds().size.height;
+        let s = self.window.backingScaleFactor();
+        let frame = |b: &objc2_app_kit::NSButton| b.convertRect_toView(b.bounds(), None);
+        let (c, z) = (frame(&close), frame(&zoom));
+        let px = |v: f64| (v * s) as f32;
+        Some(crate::Rect {
+            left: px(c.origin.x),
+            top: px(height - (c.origin.y + c.size.height)),
+            right: px(z.origin.x + z.size.width),
+            bottom: px(height - c.origin.y),
+        })
     }
 }

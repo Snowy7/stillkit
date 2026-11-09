@@ -9,10 +9,11 @@ license.workspace = true
 keywords = ["gui", "native", "wayland", "windows", "declarative"]
 categories = ["gui", "rendering"]
 readme = "../../README.md"
-rust-version = "1.101"
+rust-version = "1.96"
 
 [package.metadata.stillkit]
-# Cargo requires a numeric rust-version, not a nightly date.
+# The crates build on stable (rust-version, verified with 1.96 and 1.99.1); this repo's own
+# dev loop uses nightly for Cranelift (rust-toolchain.toml), which downstream builds never need.
 toolchain = "nightly"
 verified-rustc-commit-date = "2026-11-02"
 
@@ -62,6 +63,9 @@ features = [
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_Com",
+  # The system clipboard (`clipboard::System`).
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
   "Win32_System_LibraryLoader",
   "Win32_System_ProcessStatus",
   # The spike's clock (GetSystemTimePreciseAsFileTime).
@@ -156,4 +160,9 @@ test = true
 # has its own `main` instead of the harness's worker threads.
 [[test]]
 name = "macos_no_gpu_driver"
+harness = false
+
+# Waking the UI thread's wait from another thread needs a main-thread event queue.
+[[test]]
+name = "waker"
 harness = false
