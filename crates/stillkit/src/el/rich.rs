@@ -358,19 +358,6 @@ fn pieces(text: &str) -> Vec<&str> {
     }
     out
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn punctuation_stays_attached_and_hard_breaks_keep_their_offsets() {
-        assert_eq!(
-            pieces("let answer = 42;\nnext"),
-            ["let ", "answer ", "= ", "42;", "\n", "next"]
-        );
-        assert_eq!(pieces("hello, world!"), ["hello, ", "world!"]);
-    }
-}
-
 // Shape each resulting line as a whole, preserving ligatures and joining inside long words.
 fn break_word<'a>(
     text: &mut Text,
@@ -405,3 +392,17 @@ fn break_word<'a>(
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn punctuation_stays_attached_and_hard_breaks_keep_their_offsets() {
+        assert_eq!(
+            pieces("let answer = 42;\nnext"),
+            ["let ", "answer ", "= ", "42;", "\n", "next"]
+        );
+        assert_eq!(pieces("hello, world!"), ["hello, ", "world!"]);
+    }
+}
+
