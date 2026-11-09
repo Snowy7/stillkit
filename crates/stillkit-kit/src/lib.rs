@@ -1152,6 +1152,8 @@ pub use tooltip::Tooltip;
 // Layout and data
 mod chart;
 mod data;
+mod virtual_data;
+pub use virtual_data::{DataSelection, TableColumn, TableModel};
 mod feedback;
 mod navigation;
 mod color;

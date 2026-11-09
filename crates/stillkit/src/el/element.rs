@@ -168,8 +168,8 @@ impl Tx {
         self.instant = true;
     }
 
-    /// The modifier keys held with the key an [`El::on_key`] handler is looking at (none for a
-    /// press or a timer).
+    /// The modifiers captured with this key, press, pointer or wheel action.
+    /// Timers and other programmatic actions carry none.
     pub fn modifiers(&self) -> Modifiers {
         self.mods
     }

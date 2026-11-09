@@ -407,3 +407,16 @@ No changes were made under `crates/stillkit`, and no branch was pushed or merged
 
 Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
 reuses the text gallery's overlay module to avoid duplicate module loading.
+
+### Virtual tables
+
+For large data, keep a `TableModel` in app state and call `Table::virtual_rows`.
+`set_rows` supplies stable keys and type-ahead labels only when the order changes;
+the custom cell callback runs only for the built range. Columns retain their widths
+with min/max bounds and a header drag handle. The header stays above the scrolling
+body. The sort callback applies your comparator and calls `set_rows` with the result.
+`selection.multi = true` enables Ctrl toggles and Shift ranges. Up/Down, Home/End,
+PageUp/PageDown, type-ahead and Enter operate over the whole model, including rows
+that have never been built. `reveal(key)` scrolls to an unbuilt row. Grid, row and
+cell semantics include complete counts and indexes. Width persistence across process
+launches belongs to the app; the model retains widths across view runs.

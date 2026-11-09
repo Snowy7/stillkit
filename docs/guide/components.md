@@ -58,3 +58,5 @@ fn main() -> anyhow::Result<()> {
 
 
 [All guides](../../README.md#guides) | [Element reference](../el.md)
+
+Large datasets use `Table::virtual_rows` with app-owned `TableModel`; only visible cells are built. See the kit README for selection, sorting and bounded column widths.

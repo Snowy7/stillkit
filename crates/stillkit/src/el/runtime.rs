@@ -71,7 +71,7 @@ struct Capture {
 }
 
 enum Action<S> {
-    Press(HitId),
+    Press(HitId, Modifiers),
     Drag(HitId, f32, f32),
     /// The pointer's story on an element with `on_pointer`.
     Pointer(HitId, super::element::PointerEvent),
@@ -580,7 +580,7 @@ impl<S> Runtime<S> {
                     self.stale_view = true;
                     continue;
                 }
-                Action::Press(hit)
+                Action::Press(hit, _)
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
@@ -594,9 +594,15 @@ impl<S> Runtime<S> {
             let Some(el) = element(&self.root, &self.laid, hit) else {
                 continue;
             };
+            tx.mods = match &action {
+                Action::Press(_, mods) => *mods,
+                Action::Pointer(_, event) => event.mods,
+                Action::Wheel(_, event) => event.mods,
+                _ => Modifiers::NONE,
+            };
             let state = &mut self.state;
             match action {
-                Action::Press(_) => match &el.on_press {
+                Action::Press(_, _) => match &el.on_press {
                     Some(handler) => handler(state, &mut tx),
                     None => continue,
                 },
@@ -1060,7 +1066,7 @@ impl<S> Runtime<S> {
         }
         let before = self.ix.clone();
         if let Response::Activate(hit) = self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), event) {
-            self.queue.push(Action::Press(hit));
+            self.queue.push(Action::Press(hit, self.held));
         }
         self.pointer_input(event);
         if !self.fields.is_empty()
@@ -1501,7 +1507,7 @@ impl<S> Runtime<S> {
             Intent::Focus(hit, press) => {
                 self.focus_hit(hit);
                 if press {
-                    self.queue.push(Action::Press(hit));
+                    self.queue.push(Action::Press(hit, self.mods));
                 }
             }
             Intent::Scroll(index, to) => {
