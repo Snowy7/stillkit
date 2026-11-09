@@ -45,7 +45,7 @@ pub enum Op {
     Clipped { #[doc = "Bounds in device pixels."] rect: Rect, #[doc = "Ops."] ops: Arc<[Op]> },
     /// An antialiased rounded clip for a composed card (picture, content and overlays).
     RoundedClipped { #[doc = "Bounds in device pixels."] rect: Rect, #[doc = "Radius."] radius: f32, #[doc = "Ops."] ops: Arc<[Op]> },
-    /// Markdown emphasis without changing the shared text style contract.
+    /// Italic or struck-through text, used by attributed display runs.
     Emphasis {
         /// Bounds in device pixels.
         rect: Rect,

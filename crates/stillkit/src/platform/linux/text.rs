@@ -48,6 +48,14 @@ impl Text {
     ) -> &Buffer {
         if !self.system_loaded && &*style.family == "monospace" {
             self.fonts.db_mut().load_system_fonts();
+            if let Ok(output) = std::process::Command::new("fc-match").args(["-f", "%{family}", "monospace"]).output()
+                && output.status.success()
+            {
+                let name = String::from_utf8_lossy(&output.stdout);
+                if let Some(name) = name.split(',').next().filter(|name| !name.trim().is_empty()) {
+                    self.fonts.db_mut().set_monospace_family(name.trim());
+                }
+            }
             self.system_loaded = true;
         }
         if italic && !self.italic_loaded {

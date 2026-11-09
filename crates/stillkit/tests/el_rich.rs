@@ -77,7 +77,7 @@ fn rich_runs_golden() {
     let mut rt = Runtime::new(
         (),
         |_| {
-            el::col().pad(16.0).child(
+            el::col().pad(16.0).fill(el::token::SURFACE).child(
                 el::rich_text([
                     Run::new("Native rich text ").bold().size(19.0),
                     Run::new("italic ").italic(),

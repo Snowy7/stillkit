@@ -1,7 +1,7 @@
 use stillkit::el::{self, App, El, Run};
 use stillkit::{Kind, Scheme, Theme};
 fn view(_: &()) -> El<()> {
-    el::col().pad(24.0).child(
+    el::col().pad(24.0).fill(el::token::SURFACE).child(
         el::rich_text([
             Run::new("Rich text ").bold(),
             Run::new("wraps with emphasis, ").italic(),

@@ -1789,7 +1789,7 @@ impl<S> El<S> {
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
         (self.selectable && matches!(self.what, What::Text { .. }))
-            || self.on_link.is_some()
+            || self.on_link.is_some() && matches!(&self.what, What::Text { runs, .. } if runs.iter().any(|r| r.link.is_some()))
             || self.on_press.is_some()
             || self.on_drag.is_some()
             || self.on_pointer.is_some()
