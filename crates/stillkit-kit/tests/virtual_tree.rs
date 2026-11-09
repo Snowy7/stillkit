@@ -184,9 +184,11 @@ fn defaults_fill_parent_and_leaf_open_is_optional() {
 #[test]
 fn configured_open_receives_the_leaf_key() {
     fn view(s: &(TreeModel, Option<String>)) -> El<(TreeModel, Option<String>)> {
-        VirtualTree::new("files", &s.0, |s| &mut s.0)
-            .on_open(|s, key| s.1 = Some(key.to_string()))
-            .build()
+        VirtualTree::new("files", &s.0, |s: &mut (TreeModel, Option<String>)| {
+            &mut s.0
+        })
+        .on_open(|s, key| s.1 = Some(key.to_string()))
+        .build()
     }
     let mut rt = Runtime::new(
         (TreeModel::new(vec![TreeNode::new("leaf", "Leaf")]), None),
