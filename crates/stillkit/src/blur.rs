@@ -16,7 +16,7 @@ struct Entry {
 }
 thread_local! { static CACHE: RefCell<VecDeque<Entry>> = const { RefCell::new(VecDeque::new()) }; }
 
-fn raster(source: Vec<Op>, rect: Rect, sigma: f32) -> Result<Arc<Image>> {
+fn raster(text: &mut crate::Text, source: Vec<Op>, rect: Rect, sigma: f32) -> Result<Arc<Image>> {
     if let Some(image) = CACHE.with(|c| {
         c.borrow()
             .iter()
@@ -28,13 +28,12 @@ fn raster(source: Vec<Op>, rect: Rect, sigma: f32) -> Result<Arc<Image>> {
     let ui = crate::Ui::new()?;
     let (width, height) = (rect.width() as u32, rect.height() as u32);
     let canvas = crate::platform::current::Renderer::new(&ui, width, height)?;
-    let mut text = ui.text;
     let list = DisplayList {
         ops: source.clone(),
         ..Default::default()
     }
     .translated(-rect.left, -rect.top);
-    canvas.draw(&mut text, &list, PixelRect::full(width, height))?;
+    canvas.draw(text, &list, PixelRect::full(width, height))?;
     let mut pixels = vec![0; width as usize * height as usize * 4];
     canvas.read(PixelRect::full(width, height), |y, row| {
         let i = y as usize * width as usize * 4;
@@ -110,6 +109,7 @@ fn boxes(pixels: &mut [u8], w: usize, h: usize, sigma: f32) {
 }
 
 fn patch(
+    text: &mut crate::Text,
     source: &[Op],
     bounds: Rect,
     damage: Rect,
@@ -131,17 +131,17 @@ fn patch(
         .filter(|op| matches!(op, Op::Clip { .. } | Op::Unclip) || op.bounds().intersects(&rect))
         .cloned()
         .collect();
-    Ok(Some((rect, raster(source, rect, sigma)?)))
+    Ok(Some((rect, raster(text, source, rect, sigma)?)))
 }
 
-pub(crate) fn prepare(ops: &[Op], damage: Rect) -> Result<Cow<'_, [Op]>> {
-    prepare_mode(ops, damage, false)
+pub(crate) fn prepare(text: &mut crate::Text, ops: &[Op], damage: Rect) -> Result<Cow<'_, [Op]>> {
+    prepare_mode(text, ops, damage, false)
 }
 #[cfg(feature = "gpu")]
-pub(crate) fn prepare_native(ops: &[Op], damage: Rect) -> Result<Cow<'_, [Op]>> {
-    prepare_mode(ops, damage, true)
+pub(crate) fn prepare_native(text: &mut crate::Text, ops: &[Op], damage: Rect) -> Result<Cow<'_, [Op]>> {
+    prepare_mode(text, ops, damage, true)
 }
-fn prepare_mode(ops: &[Op], damage: Rect, native: bool) -> Result<Cow<'_, [Op]>> {
+fn prepare_mode(text: &mut crate::Text, ops: &[Op], damage: Rect, native: bool) -> Result<Cow<'_, [Op]>> {
     fn has(ops: &[Op]) -> bool {
         ops.iter().any(|o| match o {
             Op::Blurred { .. } | Op::BackdropBlur { .. } => true,
@@ -167,26 +167,27 @@ fn prepare_mode(ops: &[Op], damage: Rect, native: bool) -> Result<Cow<'_, [Op]>>
             .sum()
     }
     Ok(Cow::Owned(walk(
+        text,
         ops,
         &[],
         damage.inflate(padding(ops)),
         native,
     )?))
 }
-fn walk(ops: &[Op], behind: &[Op], damage: Rect, native: bool) -> Result<Vec<Op>> {
+fn walk(text: &mut crate::Text, ops: &[Op], behind: &[Op], damage: Rect, native: bool) -> Result<Vec<Op>> {
     let mut out = Vec::new();
     for op in ops {
         match op {
             Op::Blurred { sigma, ops } if native => {
                 out.push(Op::Blurred {
                     sigma: *sigma,
-                    ops: walk(ops, &[], op.bounds(), native)?.into(),
+                    ops: walk(text, ops, &[], op.bounds(), native)?.into(),
                 });
             }
             Op::Blurred { sigma, ops } => {
                 let bounds = op.bounds();
-                let source = walk(ops, &[], bounds, native)?;
-                if let Some((rect, image)) = patch(&source, bounds, damage, *sigma)? {
+                let source = walk(text, ops, &[], bounds, native)?;
+                if let Some((rect, image)) = patch(text, &source, bounds, damage, *sigma)? {
                     out.push(Op::Image {
                         rect,
                         image,
@@ -212,7 +213,7 @@ fn walk(ops: &[Op], behind: &[Op], damage: Rect, native: bool) -> Result<Vec<Op>
                         }]
                         .into(),
                     });
-                } else if let Some((area, image)) = patch(&source, *rect, damage, *sigma)? {
+                } else if let Some((area, image)) = patch(text, &source, *rect, damage, *sigma)? {
                     out.push(Op::RoundedClipped {
                         rect: *rect,
                         radius: *radius,
@@ -235,13 +236,13 @@ fn walk(ops: &[Op], behind: &[Op], damage: Rect, native: bool) -> Result<Vec<Op>
                     }];
                     out.push(Op::Transformed {
                         transform: *transform,
-                        ops: walk(ops, &prefix, inverse.bounds(damage), native)?.into(),
+                        ops: walk(text, ops, &prefix, inverse.bounds(damage), native)?.into(),
                     });
                 }
             }
             Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
                 let prefix: Vec<_> = behind.iter().chain(&out).cloned().collect();
-                let inner = walk(ops, &prefix, damage.intersect(*rect), native)?.into();
+                let inner = walk(text, ops, &prefix, damage.intersect(*rect), native)?.into();
                 out.push(match op {
                     Op::Clipped { .. } => Op::Clipped {
                         rect: *rect,

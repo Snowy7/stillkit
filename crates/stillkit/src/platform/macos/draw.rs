@@ -133,7 +133,7 @@ pub(super) fn region(ctx: &CGContext, text: &mut Text, images: &mut Images, list
 /// Marker clips are scoped to this slice (a retained group's included), so an unmatched
 /// `Unclip` never pops a caller's clip.
 fn ops(ctx: &CGContext, text: &mut Text, images: &mut Images, ops_: &[Op], damage: Rect) {
-    let prepared = crate::blur::prepare(ops_, damage);
+    let prepared = crate::blur::prepare(text, ops_, damage);
     let Ok(prepared) = prepared else { return };
     let ops_ = prepared.as_ref();
     let mut pushed = 0;

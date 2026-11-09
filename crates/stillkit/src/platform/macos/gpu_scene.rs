@@ -141,7 +141,7 @@ pub(super) fn draw_ops(
     image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_hybrid::ImageSource,
 ) -> Result<()> {
     let prepared =
-        crate::blur::prepare_native(ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
+        crate::blur::prepare_native(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
     let ops = prepared.as_ref();
     let mut clips = 0;
     for op in ops {

@@ -231,8 +231,7 @@ struct Track {
     ink: Prop<4>,
     ink_rest: Rgba,
     opacity: Prop<1>,
-    blur: Prop<1>,
-    backdrop_blur: Prop<1>,
+    blurs: Option<Box<Prop<2>>>,
     radius: Prop<1>,
     shadow: Prop<1>,
     value: Prop<1>,
@@ -261,8 +260,7 @@ impl Track {
             ink: Prop::at(oklab(Some(target.ink))),
             ink_rest: target.ink,
             opacity: Prop::at([target.opacity]),
-            blur: Prop::at([target.blur]),
-            backdrop_blur: Prop::at([target.backdrop_blur]),
+            blurs: (target.blur > 0.0 || target.backdrop_blur > 0.0).then(|| Box::new(Prop::at([target.blur, target.backdrop_blur]))),
             radius: Prop::at([target.radius]),
             shadow: Prop::at([target.shadow]),
             value: Prop::at([target.value]),
@@ -291,8 +289,9 @@ impl Track {
         self.ink.set(oklab(Some(target.ink)), fade.map(|s| s.faster(2.0)), t);
         self.ink_rest = target.ink;
         self.opacity.set([target.opacity], fade, t);
-        self.blur.set([target.blur], spatial, t);
-        self.backdrop_blur.set([target.backdrop_blur], spatial, t);
+        if self.blurs.is_some() || target.blur > 0.0 || target.backdrop_blur > 0.0 {
+            self.blurs.get_or_insert_with(|| Box::new(Prop::at([0.0; 2]))).set([target.blur, target.backdrop_blur], spatial, t);
+        }
         self.radius.set([target.radius], spatial, t);
         self.shadow.set([target.shadow], fade, t);
         self.value.set([target.value], spatial, t);
@@ -334,8 +333,7 @@ impl Track {
             self.border.settle(t, color),
             self.ink.settle(t, color),
             self.opacity.settle(t, color),
-            self.blur.settle(t, 0.01),
-            self.backdrop_blur.settle(t, 0.01),
+            self.blurs.as_mut().is_some_and(|p| p.settle(t, 0.01)),
             self.radius.settle(t, 0.1),
             self.shadow.settle(t, color),
             self.value.settle(t, 1.0 / 2048.0),
@@ -354,8 +352,7 @@ impl Track {
             || self.border.moving.is_some()
             || self.ink.moving.is_some()
             || self.opacity.moving.is_some()
-            || self.blur.moving.is_some()
-            || self.backdrop_blur.moving.is_some()
+            || self.blurs.as_ref().is_some_and(|p| p.moving.is_some())
             || self.radius.moving.is_some()
             || self.shadow.moving.is_some()
             || self.value.moving.is_some()
@@ -555,8 +552,8 @@ impl Animator {
             edges: track.edges,
             ink: color(&track.ink, Some(track.ink_rest)).unwrap_or(track.ink_rest),
             opacity: scalar(&track.opacity) * fade,
-            blur: (track.blur.value(t)[0].clamp(0.0,64.0)*100.0).round()/100.0,
-            backdrop_blur: (track.backdrop_blur.value(t)[0].clamp(0.0,64.0)*100.0).round()/100.0,
+            blur: track.blurs.as_ref().map_or(0.0, |p| (p.value(t)[0].clamp(0.0,64.0)*100.0).round()/100.0),
+            backdrop_blur: track.blurs.as_ref().map_or(0.0, |p| (p.value(t)[1].clamp(0.0,64.0)*100.0).round()/100.0),
             radius: track.radius.value(t)[0].max(0.0),
             shadow: scalar(&track.shadow),
             // An arc's sweep to a thousandth of a turn, so its slow tail repaints nothing new.

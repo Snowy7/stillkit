@@ -596,6 +596,12 @@ fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect
                 i += 1;
                 j += 1;
             }
+            (Some(Op::Blurred {sigma:a,ops:before}), Some(Op::Blurred {sigma:b,ops:after})) if a == b => {
+                let mut inner=Vec::new();
+                collect_damage(before,after,None,&mut inner);
+                for rect in inner {push(out,clip,rect.inflate(crate::blur::reach(*a)));}
+                i+=1; j+=1;
+            }
             (
                 Some(Op::Clipped {
                     rect: a,

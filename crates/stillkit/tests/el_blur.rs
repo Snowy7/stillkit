@@ -165,3 +165,33 @@ fn cpu_blur_cost() {
         }
     }
 }
+
+#[test]
+fn partial_cpu_updates_equal_fresh_filters() {
+    use stillkit::platform::Renderer;
+    let mut ui=stillkit::Ui::new().unwrap();
+    for backdrop in [false,true] {
+        let canvas=stillkit::platform::current::Renderer::new(&ui,100,100).unwrap();
+        let before=scene(backdrop,4.0);
+        canvas.draw(&mut ui.text,&before,stillkit::PixelRect::full(100,100)).unwrap();
+        let mut after=scene(backdrop,4.0);
+        if backdrop {after.ops[0]=fill(0.0,Rgba::new(0.0,1.0,0.0,1.0));}
+        else if let Op::Blurred{ops,..}=&mut after.ops[0] {Arc::make_mut(ops)[0]=fill(0.0,Rgba::new(0.0,1.0,0.0,1.0));}
+        // Arbitrary narrow damage exercises the kernel's halo independently of scene damage.
+        let area=stillkit::PixelRect{x:36,y:34,width:8,height:12};
+        canvas.draw(&mut ui.text,&after,area).unwrap();
+        let fresh=stillkit::render(&mut ui,&after,100,100).unwrap();
+        canvas.read(area,|y,row| {let i=((area.y+y)*100+area.x) as usize*4;assert_eq!(row,&fresh.pixels[i..i+row.len()]);}).unwrap();
+    }
+}
+
+#[cfg(all(windows,feature="gpu"))]
+#[test]
+fn native_gpu_filters_mix_pixels_inside_the_mask() {
+    let mut ui=stillkit::Ui::new().unwrap();
+    for backdrop in [false,true] {
+        let Some(image)=stillkit::platform::windows::gpu::render(&mut ui,&scene(backdrop,4.0),100,100).unwrap() else {return};
+        let p=image.pixel(40,40);assert!(p[0]>20 && p[2]>20,"{p:?}");
+        if backdrop {assert_eq!(image.pixel(4,40),[0,0,255,255]);}
+    }
+}

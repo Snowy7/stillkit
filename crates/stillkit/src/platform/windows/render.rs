@@ -802,12 +802,12 @@ impl Painter {
         let native = false;
         #[cfg(feature = "gpu")]
         let prepared = if native {
-            crate::blur::prepare_native(ops, damage)
+            crate::blur::prepare_native(text, ops, damage)
         } else {
-            crate::blur::prepare(ops, damage)
+            crate::blur::prepare(text, ops, damage)
         };
         #[cfg(not(feature = "gpu"))]
-        let prepared = crate::blur::prepare(ops, damage);
+        let prepared = crate::blur::prepare(text, ops, damage);
         let _ = native;
         let Ok(prepared) = prepared else { return };
         let ops = prepared.as_ref();

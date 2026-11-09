@@ -41,12 +41,12 @@ pub(super) fn draw_ops(
 ) -> Result<()> {
     #[cfg(feature = "gpu")]
     let prepared = if NATIVE_FILTERS {
-        crate::blur::prepare_native(ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?
+        crate::blur::prepare_native(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?
     } else {
-        crate::blur::prepare(ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?
+        crate::blur::prepare(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?
     };
     #[cfg(not(feature = "gpu"))]
-    let prepared = crate::blur::prepare(ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
+    let prepared = crate::blur::prepare(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
     let ops = prepared.as_ref();
     let mut clips = 0;
     for op in ops {
