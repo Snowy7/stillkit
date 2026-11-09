@@ -1277,7 +1277,7 @@ impl<C: Clone> Menu<C> {
             p.interaction.as_ref(),
         );
         for op in &mut list.ops {
-            if let Op::Text {rect,text,style,..}=op { *text=ui.text.fit(text,style,rect.width()).into(); }
+            if let Op::Text {rect,text,style,..}=op { *text=ui.text.fit(text,style,rect.width()); }
         }
         let at = (p.origin.0 - edge, p.origin.1 - edge);
         let size = ((w + 2 * edge) as u32, (h + 2 * edge) as u32);
