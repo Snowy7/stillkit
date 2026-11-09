@@ -212,3 +212,22 @@ fn a_link_clipped_out_of_its_viewport_does_not_change_the_cursor() {
     rt.pointer_move(5.0, 15.0);
     assert_eq!(rt.cursor(), stillkit::Cursor::Arrow);
 }
+
+#[test]
+fn link_hover_repaints_without_running_the_view() {
+    let mut rt = Runtime::new(
+        (),
+        |_| el::rich_text([Run::new("hover me").link("app:docs")]).on_link(|_, _| {}),
+        theme(),
+        (180, 80),
+        1.0,
+    )
+    .unwrap();
+    rt.frame(Duration::ZERO);
+    let before = rt.list().ops.clone();
+    let views = rt.view_runs();
+    rt.pointer_move(5.0, 10.0);
+    rt.frame(Duration::from_millis(100));
+    assert_eq!(rt.view_runs(), views);
+    assert_ne!(rt.list().ops, before);
+}
