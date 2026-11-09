@@ -7,6 +7,7 @@ use std::{
 };
 use vello_cpu::kurbo::Affine;
 mod scene {
+    const NATIVE_FILTERS: bool = true;
     type Scene = vello_hybrid::Scene;
     type Resources = vello_hybrid::Resources;
     include!("scene.rs");

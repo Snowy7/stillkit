@@ -134,6 +134,24 @@ Unchanged display lists still produce no damage and no draw. No new imports are
 needed. Gradient stops and spring arrays allocate only when used; each retained
 target, pose and animation track also gains two optional pointers for gradient data.
 
+## Subtree and backdrop blur
+
+`.blur(sigma)` filters an element's completed subtree. `.backdrop_blur(sigma)`
+filters preceding paint within the same surface through the element's rounded
+bounds, then draws its fill, border and children. Combine a backdrop blur with a
+translucent fill for a frosted panel. Neither API reads the desktop or other windows.
+Sigma is Gaussian standard deviation in design pixels, capped at 64 device pixels
+by each filter. Zero adds no filter operation. Negative and nonfinite inputs become zero.
+Both radii follow `.animate()` springs and snap under reduced motion.
+
+CPU filters use three separable sliding box passes over the damaged patch plus
+three sigma of input. A lazily allocated per-thread cache keeps at most 16 patches
+and 16 MiB of filtered pixels. Unchanged display lists do not draw. D2D GPU uses
+its Gaussian effect; Vello GPU uses native filter layers. Partially faded backdrop
+filters use the CPU patch path. macOS CPU uses the shared software filter, while
+macOS GPU uses its existing Vello renderer. See `el_effects` and the ignored
+`cpu_blur_cost` test for a reproducible release benchmark.
+
 ## How a frame is made
 
 1. **Handlers** queued by input run on `&mut S` at the start of the frame. If any ran (or the

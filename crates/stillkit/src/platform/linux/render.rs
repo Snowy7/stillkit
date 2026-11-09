@@ -6,6 +6,8 @@ use anyhow::{Result, ensure};
 use std::cell::RefCell;
 use vello_cpu::{Pixmap, RenderContext, Resources, kurbo::Affine};
 mod scene {
+    #[cfg(feature = "gpu")]
+    const NATIVE_FILTERS: bool = false;
     type Scene = vello_cpu::RenderContext;
     type Resources = vello_cpu::Resources;
     include!("scene.rs");

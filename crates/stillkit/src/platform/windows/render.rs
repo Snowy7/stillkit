@@ -37,9 +37,15 @@ use crate::text::Text;
 
 impl crate::platform::Renderer for Canvas {
     type Context = Ui;
-    fn new(ui: &Ui, width: u32, height: u32) -> Result<Self> { Self::new(ui, width, height) }
-    fn draw(&self, text: &mut Text, list: &DisplayList, damage: PixelRect) -> Result<()> { self.draw(text, list, damage) }
-    fn read(&self, damage: PixelRect, sink: impl FnMut(u32, &[u8])) -> Result<()> { self.read(damage, sink) }
+    fn new(ui: &Ui, width: u32, height: u32) -> Result<Self> {
+        Self::new(ui, width, height)
+    }
+    fn draw(&self, text: &mut Text, list: &DisplayList, damage: PixelRect) -> Result<()> {
+        self.draw(text, list, damage)
+    }
+    fn read(&self, damage: PixelRect, sink: impl FnMut(u32, &[u8])) -> Result<()> {
+        self.read(damage, sink)
+    }
 }
 
 #[cfg(test)]
@@ -103,24 +109,41 @@ fn rounded_groups_clip_composed_pictures_and_translate_without_losing_the_mask()
             rect: Rect::new(4.0, 4.0, 24.0, 28.0),
             radius: 8.0,
             ops: vec![
-                Op::Fill { rect: Rect::new(0.0, 0.0, 40.0, 40.0), radius: 0.0, color: Rgba::rgb8([255, 0, 0], 1.0) },
-                Op::Clipped { rect: Rect::new(4.0, 4.0, 24.0, 14.0), ops: vec![
-                    Op::Fill { rect: Rect::new(0.0, 0.0, 40.0, 40.0), radius: 0.0, color: Rgba::rgb8([0, 0, 255], 1.0) },
-                ].into() },
-            ].into(),
+                Op::Fill {
+                    rect: Rect::new(0.0, 0.0, 40.0, 40.0),
+                    radius: 0.0,
+                    color: Rgba::rgb8([255, 0, 0], 1.0),
+                },
+                Op::Clipped {
+                    rect: Rect::new(4.0, 4.0, 24.0, 14.0),
+                    ops: vec![Op::Fill {
+                        rect: Rect::new(0.0, 0.0, 40.0, 40.0),
+                        radius: 0.0,
+                        color: Rgba::rgb8([0, 0, 255], 1.0),
+                    }]
+                    .into(),
+                },
+            ]
+            .into(),
         }],
         ..Default::default()
     };
     let image = render(&mut ui, &list, 40, 40).unwrap();
     assert_eq!(image.pixel(4, 4), [0, 0, 0, 0]);
     assert_eq!(image.pixel(16, 4), [255, 0, 0, 255]);
-    assert_eq!(image.pixel(4, 17), [255, 0, 0, 255], "the picture's lower edge stays square");
+    assert_eq!(
+        image.pixel(4, 17),
+        [255, 0, 0, 255],
+        "the picture's lower edge stays square"
+    );
     assert_eq!(image.pixel(4, 18), [0, 0, 255, 255]);
     assert_eq!(image.pixel(4, 31), [0, 0, 0, 0]);
     let translated = render(&mut ui, &list.translated(3.0, 2.0), 48, 48).unwrap();
-    for y in 0..40 { for x in 0..40 {
-        assert_eq!(translated.pixel(x + 3, y + 2), image.pixel(x, y));
-    } }
+    for y in 0..40 {
+        for x in 0..40 {
+            assert_eq!(translated.pixel(x + 3, y + 2), image.pixel(x, y));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -303,7 +326,7 @@ pub struct Ui {
     params: IDWriteRenderingParams,
 }
 
-pub use crate::bitmap::{TextQuality, TextMode};
+pub use crate::bitmap::{TextMode, TextQuality};
 impl TextQuality {
     fn params(self, text: &Text) -> Result<IDWriteRenderingParams> {
         let mode: DWRITE_RENDERING_MODE1 = match self.mode {
@@ -417,7 +440,11 @@ impl Ui {
             let wic: IWICImagingFactory =
                 CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)
                     .context("WIC")?;
-            let text = if isolated { Text::isolated()? } else { Text::new()? };
+            let text = if isolated {
+                Text::isolated()?
+            } else {
+                Text::new()?
+            };
             let params = TextQuality::default().params(&text)?;
             Ok(Self {
                 text,
@@ -472,8 +499,6 @@ impl Image {
             })
         }
     }
-
-
 }
 
 /// Draws `list` into a new `width`×`height` image exactly as a surface shows it: on the GPU
@@ -563,7 +588,9 @@ impl Painter {
                 arcs: RefCell::new(HashMap::new()),
                 continuous: RefCell::new(HashMap::new()),
                 icons: RefCell::new(HashMap::new()),
-                shadows: RefCell::new(crate::shadow::Cache::new(crate::shadow::Cache::<ID2D1Bitmap>::BUDGET)),
+                shadows: RefCell::new(crate::shadow::Cache::new(
+                    crate::shadow::Cache::<ID2D1Bitmap>::BUDGET,
+                )),
                 round,
                 #[cfg(feature = "gpu")]
                 base: std::cell::Cell::new((0.0, 0.0)),
@@ -576,8 +603,13 @@ impl Painter {
         fn used_images(ops: &[Op], live: &mut std::collections::HashSet<usize>) {
             for op in ops {
                 match op {
-                    Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
-                    Op::Blurred { ops, .. } | Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
+                    Op::Image { image, .. } | Op::RoundedImage { image, .. } => {
+                        live.insert(Arc::as_ptr(image) as usize);
+                    }
+                    Op::Blurred { ops, .. }
+                    | Op::Transformed { ops, .. }
+                    | Op::Clipped { ops, .. }
+                    | Op::RoundedClipped { ops, .. } => used_images(ops, live),
                     _ => {}
                 }
             }
@@ -591,8 +623,6 @@ impl Painter {
     pub(crate) fn release_images(&self) {
         self.images.borrow_mut().clear();
     }
-
-
 }
 
 impl Canvas {
@@ -763,35 +793,65 @@ impl Painter {
     /// Runs between BeginDraw/EndDraw. Marker clips are scoped to this slice, including
     /// inside a retained clipped group, so an unmatched Unclip cannot pop a caller's clip.
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
+        #[cfg(feature = "gpu")]
+        let native = self
+            .target
+            .cast::<windows::Win32::Graphics::Direct2D::ID2D1DeviceContext>()
+            .is_ok();
+        #[cfg(not(feature = "gpu"))]
+        let native = false;
+        #[cfg(feature = "gpu")]
+        let prepared = if native {
+            crate::blur::prepare_native(ops, damage)
+        } else {
+            crate::blur::prepare(ops, damage)
+        };
+        #[cfg(not(feature = "gpu"))]
         let prepared = crate::blur::prepare(ops, damage);
+        let _ = native;
         let Ok(prepared) = prepared else { return };
         let ops = prepared.as_ref();
         // D2D axis clips expand rotated rectangles to their bounding boxes. Preserve
         // marker clips as geometry scopes when an affine turn is active.
         // SAFETY: the caller owns the active draw scope; recursive scopes balance their layers.
         unsafe {
-        let mut xf=windows_numerics::Matrix3x2::identity();
-        self.target.GetTransform(&mut xf);
-        if (xf.M12 != 0.0 || xf.M21 != 0.0) && ops.iter().any(|op|matches!(op,Op::Clip{..})) {
-            let mut i=0;
-            while i<ops.len() {
-                if let Op::Clip { rect } = &ops[i] {
-                    let mut depth=1;let mut end=i+1;
-                    while end<ops.len() {
-                        match ops[end] { Op::Clip{..}=>depth+=1,Op::Unclip=>depth-=1,_=>{} }
-                        if depth==0 {break;}
-                        end+=1;
+            let mut xf = windows_numerics::Matrix3x2::identity();
+            self.target.GetTransform(&mut xf);
+            if (xf.M12 != 0.0 || xf.M21 != 0.0)
+                && ops.iter().any(|op| matches!(op, Op::Clip { .. }))
+            {
+                let mut i = 0;
+                while i < ops.len() {
+                    if let Op::Clip { rect } = &ops[i] {
+                        let mut depth = 1;
+                        let mut end = i + 1;
+                        while end < ops.len() {
+                            match ops[end] {
+                                Op::Clip { .. } => depth += 1,
+                                Op::Unclip => depth -= 1,
+                                _ => {}
+                            }
+                            if depth == 0 {
+                                break;
+                            }
+                            end += 1;
+                        }
+                        let group = Op::RoundedClipped {
+                            rect: *rect,
+                            radius: 0.0,
+                            ops: ops[i + 1..end].to_vec().into(),
+                        };
+                        self.op(text, &group, damage);
+                        i = (end + 1).min(ops.len());
+                    } else {
+                        if !matches!(ops[i], Op::Unclip) && touches(&ops[i], damage) {
+                            self.op(text, &ops[i], damage);
+                        }
+                        i += 1;
                     }
-                    let group=Op::RoundedClipped{rect:*rect,radius:0.0,ops:ops[i+1..end].to_vec().into()};
-                    self.op(text,&group,damage);
-                    i=(end+1).min(ops.len());
-                } else {
-                    if !matches!(ops[i],Op::Unclip) && touches(&ops[i],damage) { self.op(text,&ops[i],damage); }
-                    i+=1;
                 }
+                return;
             }
-            return;
-        }
         }
         let mut pushed = 0;
         // SAFETY: the caller owns this draw scope; each pushed clip is balanced below.
@@ -825,14 +885,31 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
-                Op::Blurred { .. } | Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
+                #[cfg(feature = "gpu")]
+                Op::Blurred { sigma, ops } => {
+                    if let Err(error) = self.native_blur(text, ops, *sigma, damage) {
+                        eprintln!("subtree blur: {error:#}");
+                    }
+                }
+                #[cfg(not(feature = "gpu"))]
+                Op::Blurred { .. } => unreachable!("filters resolved before drawing"),
+                Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
                 Op::Transformed { transform, ops } => {
                     let mut saved = windows_numerics::Matrix3x2::identity();
                     t.GetTransform(&mut saved);
-                    let [a,b,c,d,x,y] = transform.0;
-                    let local = windows_numerics::Matrix3x2 { M11:a,M12:b,M21:c,M22:d,M31:x,M32:y };
+                    let [a, b, c, d, x, y] = transform.0;
+                    let local = windows_numerics::Matrix3x2 {
+                        M11: a,
+                        M12: b,
+                        M21: c,
+                        M22: d,
+                        M31: x,
+                        M32: y,
+                    };
                     t.SetTransform(&(local * saved));
-                    if let Some(inverse) = transform.inverse() { self.ops(text,ops,inverse.bounds(damage).inflate(1.0)); }
+                    if let Some(inverse) = transform.inverse() {
+                        self.ops(text, ops, inverse.bounds(damage).inflate(1.0));
+                    }
                     t.SetTransform(&saved);
                 }
                 Op::Hole { rect } => {
@@ -854,8 +931,12 @@ impl Painter {
                     };
                     let Ok(factory) = t.GetFactory() else { return };
                     let Ok(mask) = factory.CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
-                        rect: d2d(*rect), radiusX: *radius, radiusY: *radius,
-                    }) else { return };
+                        rect: d2d(*rect),
+                        radiusX: *radius,
+                        radiusY: *radius,
+                    }) else {
+                        return;
+                    };
                     let geometry = mask.cast().ok();
                     let mut parameters = D2D1_LAYER_PARAMETERS {
                         contentBounds: d2d(op.bounds().intersect(damage)),
@@ -924,10 +1005,18 @@ impl Painter {
                     }
                 }
                 Op::Clipped { rect, ops } => {
-                    let mut xf=windows_numerics::Matrix3x2::identity();
+                    let mut xf = windows_numerics::Matrix3x2::identity();
                     t.GetTransform(&mut xf);
                     if xf.M12 != 0.0 || xf.M21 != 0.0 {
-                        self.op(text,&Op::RoundedClipped {rect:*rect,radius:0.0,ops:ops.clone()},damage);
+                        self.op(
+                            text,
+                            &Op::RoundedClipped {
+                                rect: *rect,
+                                radius: 0.0,
+                                ops: ops.clone(),
+                            },
+                            damage,
+                        );
                         return;
                     }
                     t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
@@ -1072,26 +1161,70 @@ impl Painter {
                         log::error!("text field: {e:#}");
                     }
                 }
-                Op::Gradient { rect, radius, width, gradient } => {
-                    use windows::Win32::Graphics::Direct2D::*;
+                Op::Gradient {
+                    rect,
+                    radius,
+                    width,
+                    gradient,
+                } => {
                     use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-                    let stops: Vec<_> = gradient.stops.iter().map(|s| D2D1_GRADIENT_STOP { position: s.offset, color: color(s.color) }).collect();
+                    use windows::Win32::Graphics::Direct2D::*;
+                    let stops: Vec<_> = gradient
+                        .stops
+                        .iter()
+                        .map(|s| D2D1_GRADIENT_STOP {
+                            position: s.offset,
+                            color: color(s.color),
+                        })
+                        .collect();
                     let result = (|| -> Result<ID2D1Brush> {
-                        let stops = t.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let stops = t.CreateGradientStopCollection(
+                            &stops,
+                            D2D1_GAMMA_2_2,
+                            D2D1_EXTEND_MODE_CLAMP,
+                        )?;
                         let point = |p: crate::Point| Vector2 { X: p.x, Y: p.y };
                         Ok(if gradient.angle.is_some() {
-                            let (a,b) = gradient.line(*rect);
-                            t.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: point(a), endPoint: point(b) }, None, &stops)?.cast()?
+                            let (a, b) = gradient.line(*rect);
+                            t.CreateLinearGradientBrush(
+                                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                                    startPoint: point(a),
+                                    endPoint: point(b),
+                                },
+                                None,
+                                &stops,
+                            )?
+                            .cast()?
                         } else {
-                            let r = ((rect.width() * rect.width() + rect.height() * rect.height()).sqrt() * 0.5).max(0.001);
-                            t.CreateRadialGradientBrush(&D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES { center: point(rect.center()), gradientOriginOffset: Vector2::default(), radiusX: r, radiusY: r }, None, &stops)?.cast()?
+                            let r = ((rect.width() * rect.width() + rect.height() * rect.height())
+                                .sqrt()
+                                * 0.5)
+                                .max(0.001);
+                            t.CreateRadialGradientBrush(
+                                &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                                    center: point(rect.center()),
+                                    gradientOriginOffset: Vector2::default(),
+                                    radiusX: r,
+                                    radiusY: r,
+                                },
+                                None,
+                                &stops,
+                            )?
+                            .cast()?
                         })
                     })();
                     match result {
                         Ok(brush) => {
-                            let r = D2D1_ROUNDED_RECT { rect: d2d(*rect), radiusX: *radius, radiusY: *radius };
-                            if *width > 0.0 { t.DrawRoundedRectangle(&r, &brush, *width, None); }
-                            else { t.FillRoundedRectangle(&r, &brush); }
+                            let r = D2D1_ROUNDED_RECT {
+                                rect: d2d(*rect),
+                                radiusX: *radius,
+                                radiusY: *radius,
+                            };
+                            if *width > 0.0 {
+                                t.DrawRoundedRectangle(&r, &brush, *width, None);
+                            } else {
+                                t.FillRoundedRectangle(&r, &brush);
+                            }
                         }
                         Err(e) => log::error!("gradient: {e:#}"),
                     }
@@ -1274,7 +1407,9 @@ impl Painter {
         };
         let mut cache = self.shadows.borrow_mut();
         // SAFETY: per this function's contract.
-        let made = cache.get(plan.key, |key| unsafe { self.mask(&crate::shadow::shared(key)) });
+        let made = cache.get(plan.key, |key| unsafe {
+            self.mask(&crate::shadow::shared(key))
+        });
         let Some(mask) = made else { return };
         let t = &self.target;
         // SAFETY: per this function's contract; the antialias mode is restored.
@@ -1325,7 +1460,12 @@ impl Painter {
         // SAFETY: `alpha` holds width × height bytes, one row of `width` bytes after another.
         unsafe {
             self.target
-                .CreateBitmap(size, Some(mask.alpha.as_ptr().cast()), mask.width, &properties)
+                .CreateBitmap(
+                    size,
+                    Some(mask.alpha.as_ptr().cast()),
+                    mask.width,
+                    &properties,
+                )
                 .ok()
         }
     }
@@ -1424,14 +1564,16 @@ impl Painter {
             self.brush.SetColor(&color(c));
             let mut saved = windows_numerics::Matrix3x2::identity();
             t.GetTransform(&mut saved);
-            t.SetTransform(&(windows_numerics::Matrix3x2 {
-                M11: scale,
-                M12: 0.0,
-                M21: 0.0,
-                M22: scale,
-                M31: rect.left,
-                M32: rect.top,
-            } * saved));
+            t.SetTransform(
+                &(windows_numerics::Matrix3x2 {
+                    M11: scale,
+                    M12: 0.0,
+                    M21: 0.0,
+                    M22: scale,
+                    M31: rect.left,
+                    M32: rect.top,
+                } * saved),
+            );
             if icon.filled() {
                 t.FillGeometry(&*geometry, &self.brush, None);
             }
@@ -1711,7 +1853,14 @@ mod tests {
     }
 
     fn soft(rect: Rect, color: Rgba) -> Op {
-        Op::SoftShadow { rect, radius: 12.0, blur: 24.0, offset: (0.0, 8.0), spread: 0.0, color }
+        Op::SoftShadow {
+            rect,
+            radius: 12.0,
+            blur: 24.0,
+            offset: (0.0, 8.0),
+            spread: 0.0,
+            color,
+        }
     }
 
     #[test]
@@ -1768,7 +1917,9 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            canvas.draw(&mut text, &list, PixelRect::full(900, 600)).unwrap();
+            canvas
+                .draw(&mut text, &list, PixelRect::full(900, 600))
+                .unwrap();
         }
         assert_eq!(canvas.paint.shadows.borrow().len(), 1);
     }
@@ -1798,7 +1949,9 @@ mod tests {
             let canvas = Canvas::new(&ui, w, h).unwrap();
             let full = PixelRect::full(w, h);
             let mask = std::time::Instant::now();
-            let plan = crate::shadow::plan(rect.offset(0.0, 8.0 * scale), 10.0 * scale, 12.0 * scale).unwrap();
+            let plan =
+                crate::shadow::plan(rect.offset(0.0, 8.0 * scale), 10.0 * scale, 12.0 * scale)
+                    .unwrap();
             let _ = crate::shadow::mask(plan.key);
             let mask = mask.elapsed();
             crate::shadow::MASKS.with_borrow_mut(|c| *c = crate::shadow::Cache::new(1 << 20));
@@ -1847,15 +2000,32 @@ mod tests {
 fn canvas_releases_pictures_that_left_the_display_list() {
     let mut ui = Ui::new().unwrap();
     let canvas = Canvas::new(&ui, 8, 8).unwrap();
-    let image = Arc::new(Image { width: 8, height: 8, pixels: vec![255; 8 * 8 * 4] });
+    let image = Arc::new(Image {
+        width: 8,
+        height: 8,
+        pixels: vec![255; 8 * 8 * 4],
+    });
     let old = Arc::downgrade(&image);
     let mut list = DisplayList::default();
-    list.ops.push(Op::RoundedImage { rect: Rect::new(0.0,0.0,8.0,8.0), image, opacity:1.0, source:None, radius:1.0 });
-    canvas.draw(&mut ui.text, &list, PixelRect::full(8,8)).unwrap();
+    list.ops.push(Op::RoundedImage {
+        rect: Rect::new(0.0, 0.0, 8.0, 8.0),
+        image,
+        opacity: 1.0,
+        source: None,
+        radius: 1.0,
+    });
+    canvas
+        .draw(&mut ui.text, &list, PixelRect::full(8, 8))
+        .unwrap();
     drop(list);
     assert!(old.upgrade().is_some(), "canvas retained its live bitmap");
-    canvas.draw(&mut ui.text, &DisplayList::default(), PixelRect::full(8,8)).unwrap();
-    assert!(old.upgrade().is_none(), "the previous page's pixels were freed");
+    canvas
+        .draw(&mut ui.text, &DisplayList::default(), PixelRect::full(8, 8))
+        .unwrap();
+    assert!(
+        old.upgrade().is_none(),
+        "the previous page's pixels were freed"
+    );
 }
 
 #[test]
@@ -1907,36 +2077,138 @@ fn bounded_canvas_bands_preserve_partial_damage_and_the_last_short_band() {
     assert_eq!(heights, [7, 7, 6]);
 }
 
-
 #[cfg(test)]
 mod gradient_cost {
     use super::*;
     #[test]
     #[ignore = "CPU timing probe; run in release mode with --nocapture"]
     fn native_gradient_cost() {
-        for (w,h) in [(100,100),(320,180),(800,600)] {
-            for kind in [0,1,2] {
+        for (w, h) in [(100, 100), (320, 180), (800, 600)] {
+            for kind in [0, 1, 2] {
                 let mut ui = Ui::new().unwrap();
-                let canvas = Canvas::new(&ui,w,h).unwrap();
-                let rect = Rect::new(0.0,0.0,w as f32,h as f32);
-                let red = Rgba::new(1.0,0.2,0.1,1.0);
-                let blue = Rgba::new(0.1,0.2,1.0,1.0);
-                let op = if kind == 0 { Op::Fill { rect, radius: 12.0, color: red } } else {
-                    Op::Gradient { rect, radius: 12.0, width: 0.0, gradient: crate::paint::Gradient::new(&[
-                        crate::paint::GradientStop { offset: 0.0, color: red },
-                        crate::paint::GradientStop { offset: 1.0, color: blue },
-                    ], (kind == 1).then_some(0.5)) }
+                let canvas = Canvas::new(&ui, w, h).unwrap();
+                let rect = Rect::new(0.0, 0.0, w as f32, h as f32);
+                let red = Rgba::new(1.0, 0.2, 0.1, 1.0);
+                let blue = Rgba::new(0.1, 0.2, 1.0, 1.0);
+                let op = if kind == 0 {
+                    Op::Fill {
+                        rect,
+                        radius: 12.0,
+                        color: red,
+                    }
+                } else {
+                    Op::Gradient {
+                        rect,
+                        radius: 12.0,
+                        width: 0.0,
+                        gradient: crate::paint::Gradient::new(
+                            &[
+                                crate::paint::GradientStop {
+                                    offset: 0.0,
+                                    color: red,
+                                },
+                                crate::paint::GradientStop {
+                                    offset: 1.0,
+                                    color: blue,
+                                },
+                            ],
+                            (kind == 1).then_some(0.5),
+                        ),
+                    }
                 };
-                let list = DisplayList { ops: vec![op], ..Default::default() };
+                let list = DisplayList {
+                    ops: vec![op],
+                    ..Default::default()
+                };
                 let mut samples = Vec::new();
                 for i in 0..220 {
                     let start = std::time::Instant::now();
-                    canvas.draw(&mut ui.text,&list,PixelRect::full(w,h)).unwrap();
-                    if i >= 20 { samples.push(start.elapsed().as_secs_f64() * 1000.0); }
+                    canvas
+                        .draw(&mut ui.text, &list, PixelRect::full(w, h))
+                        .unwrap();
+                    if i >= 20 {
+                        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+                    }
                 }
                 samples.sort_by(f64::total_cmp);
-                println!("{w}x{h} kind={kind} median={:.4}ms p95={:.4}ms",samples[100],samples[190]);
+                println!(
+                    "{w}x{h} kind={kind} median={:.4}ms p95={:.4}ms",
+                    samples[100], samples[190]
+                );
             }
+        }
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl Painter {
+    // A compatible GPU bitmap keeps the filter input isolated from the surface's clips.
+    unsafe fn native_blur(
+        &self,
+        text: &mut Text,
+        ops: &[Op],
+        sigma: f32,
+        damage: Rect,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::*;
+        use windows::Win32::Graphics::Direct2D::*;
+        // SAFETY: owned COM objects, used synchronously inside this painter's draw scope.
+        unsafe {
+            let dc: ID2D1DeviceContext = self.target.cast()?;
+            let bounds = ops
+                .iter()
+                .map(Op::bounds)
+                .reduce(Rect::union)
+                .unwrap_or_default()
+                .inflate(crate::blur::reach(sigma));
+            let r = bounds.intersect(damage).inflate(crate::blur::reach(sigma));
+            let r = Rect {
+                left: r.left.floor(),
+                top: r.top.floor(),
+                right: r.right.ceil(),
+                bottom: r.bottom.ceil(),
+            };
+            if r.is_empty() {
+                return Ok(());
+            }
+            let size = D2D_SIZE_U {
+                width: r.width() as u32,
+                height: r.height() as u32,
+            };
+            let target = self.target.CreateCompatibleRenderTarget(
+                None,
+                Some(&size),
+                None,
+                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
+            )?;
+            let painter = Painter::new(
+                target.cast()?,
+                &self.target.GetFactory()?,
+                &self.target.GetTextRenderingParams()?,
+            )?;
+            target.BeginDraw();
+            target.Clear(Some(&color(Rgba::TRANSPARENT)));
+            target.SetTransform(&windows_numerics::Matrix3x2::translation(-r.left, -r.top));
+            painter.ops(text, ops, r);
+            target.EndDraw(None, None)?;
+            let effect = dc.CreateEffect(&CLSID_D2D1GaussianBlur)?;
+            effect.SetValue(
+                D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0 as u32,
+                D2D1_PROPERTY_TYPE_FLOAT,
+                &sigma.clamp(0.0, 64.0).to_ne_bytes(),
+            )?;
+            effect.SetInput(0, &target.GetBitmap()?, true);
+            dc.DrawImage(
+                &effect.GetOutput()?,
+                Some(&Vector2 {
+                    X: r.left,
+                    Y: r.top,
+                }),
+                Some(&d2d(Rect::new(0.0, 0.0, r.width(), r.height()))),
+                D2D1_INTERPOLATION_MODE_LINEAR,
+                D2D1_COMPOSITE_MODE_SOURCE_OVER,
+            );
+            Ok(())
         }
     }
 }

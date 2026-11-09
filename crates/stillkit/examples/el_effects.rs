@@ -50,8 +50,8 @@ pub fn view(on: &bool) -> El<bool> {
             el().key("radial")
                 .rotate(if *on { 0.22 } else { 0.0 })
                 .scale(if *on { 0.85 } else { 1.0 })
-                .translate(if *on { 16.0 } else { 0.0 },0.0)
-                .origin(0.0,0.5)
+                .translate(if *on { 16.0 } else { 0.0 }, 0.0)
+                .origin(0.0, 0.5)
                 .w(280.0)
                 .h(90.0)
                 .radius(18.0)
@@ -68,12 +68,31 @@ pub fn view(on: &bool) -> El<bool> {
                 .animate()
                 .child(text("Native gradient border")),
         )
+        .child(
+            el().w(280.0)
+                .h(75.0)
+                .fill(Paint::Linear { stops, angle: 0.0 })
+                .child(
+                    el().absolute(20.0, 10.0)
+                        .w(240.0)
+                        .h(55.0)
+                        .radius(12.0)
+                        .backdrop_blur(if *on { 12.0 } else { 3.0 })
+                        .fill(Rgba::new(1.0, 1.0, 1.0, 0.2))
+                        .animate()
+                        .child(
+                            text("Frosted backdrop")
+                                .blur(if *on { 2.0 } else { 0.0 })
+                                .animate(),
+                        ),
+                ),
+        )
 }
 fn main() -> anyhow::Result<()> {
     el::run(App {
         title: "Paint and motion",
-        size: (320.0, 340.0),
-        kind: Kind::App { min: (320, 340) },
+        size: (320.0, 440.0),
+        kind: Kind::App { min: (320, 440) },
         theme: Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
         state: false,
         view,
