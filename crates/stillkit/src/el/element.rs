@@ -528,6 +528,8 @@ pub(crate) struct Look {
     pub opacity: f32,
     /// A stroke inside the box's edge ([`El::border`]).
     pub border: Option<Border>,
+    /// One design px of light and shade along the inner top and bottom edges ([`El::edges`]).
+    pub edges: Option<(Paint, Paint)>,
 }
 
 impl Look {
@@ -541,6 +543,7 @@ impl Look {
             shadow: patch.shadow.or(self.shadow),
             opacity: if patch.opacity < 1.0 { patch.opacity } else { self.opacity },
             border: patch.border.or(self.border),
+            edges: patch.edges.or(self.edges),
         }
     }
 }
@@ -691,6 +694,7 @@ fn new<S>(what: What) -> El<S> {
             shadow: None,
             opacity: 1.0,
             border: None,
+            edges: None,
         },
         sem: Sem::default(),
         anim: Anim::default(),
@@ -1278,6 +1282,16 @@ impl<S> El<S> {
     /// A look it takes while it is pressed (CSS's `:active`), over its hover and focus looks.
     pub fn pressed(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
         self.states.press = Some(style(el()).look);
+        self
+    }
+
+    /// One design px of `top` along the box's inner top edge and of `bottom` along its inner
+    /// bottom edge, following its corners (they snap between state looks, not spring): the
+    /// light catching a raised surface's top and the shade under it (`edges(highlight,
+    /// lowlight)`), or a well's shade under its lip (`edges(shade, Rgba::TRANSPARENT)`).
+    /// Depth without a border or a rule.
+    pub fn edges(mut self, top: impl Into<Paint>, bottom: impl Into<Paint>) -> Self {
+        self.look.edges = Some((top.into(), bottom.into()));
         self
     }
 
