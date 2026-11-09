@@ -287,6 +287,7 @@ pub struct Runtime<S> {
     display: HashMap<u64, selection::Display>,
     documents: HashMap<u64, super::edit::Editor>,
     display_drag: Option<selection::Drag>,
+    link_down: Option<(HitId, Arc<str>)>,
     display_clicks: Option<(Duration, Point, u8)>,
     /// The field with focus, by identity, as last seen.
     typing: Option<u64>,
@@ -401,6 +402,7 @@ impl<S: 'static> Runtime<S> {
             display: HashMap::new(),
             documents: HashMap::new(),
             display_drag: None,
+            link_down: None,
             display_clicks: None,
             typing: None,
             selecting: None,
@@ -2262,15 +2264,13 @@ fn role_of<S>(el: &El<S>) -> Role {
             (_, true) => Role::MultilineTextInput,
             _ => Role::TextInput,
         }
-    } else if el.on_link.is_some() {
-        Role::Link
     } else if el.on_drag.is_some() || el.sem.range.is_some() {
         Role::Slider
     } else if el.scrolls().is_some() {
         Role::ScrollView
     } else if el.interactive() && el.sem.checked.is_some() {
         Role::Switch
-    } else if el.selectable && matches!(el.what, What::Text { .. }) {
+    } else if (el.selectable || el.on_link.is_some()) && matches!(el.what, What::Text { .. }) {
         Role::Label
     } else if el.interactive() {
         Role::Button

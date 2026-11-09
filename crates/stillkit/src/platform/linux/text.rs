@@ -9,6 +9,7 @@ pub struct Text {
     cache: HashMap<Key, Buffer>,
     capacity: usize,
     italic_loaded: bool,
+    system_loaded: bool,
 }
 impl Text {
     /// Creates a new instance.
@@ -33,6 +34,7 @@ impl Text {
             cache: HashMap::new(),
             capacity: 512,
             italic_loaded: false,
+            system_loaded: false,
         })
     }
     pub(crate) fn shape(&mut self, text: &str, style: &TextStyle) -> &Buffer {
@@ -44,6 +46,10 @@ impl Text {
         style: &TextStyle,
         italic: bool,
     ) -> &Buffer {
+        if !self.system_loaded && &*style.family == "monospace" {
+            self.fonts.db_mut().load_system_fonts();
+            self.system_loaded = true;
+        }
         if italic && !self.italic_loaded {
             self.fonts
                 .db_mut()
@@ -71,7 +77,9 @@ impl Text {
                 &mut self.fonts,
                 Metrics::new(style.size.max(1.), style.size.max(1.) * 1.25),
             );
-            let family = if self.has_family(&style.family) {
+            let family = if &*style.family == "monospace" {
+                Family::Monospace
+            } else if self.has_family(&style.family) {
                 Family::Name(&style.family)
             } else {
                 Family::SansSerif

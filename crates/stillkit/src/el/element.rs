@@ -761,6 +761,8 @@ pub(crate) struct Group {
     pub follow: bool,
 }
 
+type LinkHandler<S> = Arc<dyn Fn(&mut S, &str)>;
+
 /// One element of a view: a box, text, icon, image, arc or kit painting, with its children.
 /// Build with [`el`], [`row`], [`col`], [`text`], [`icon`], [`image`], [`arc`] and [`paint`].
 pub struct El<S> {
@@ -806,7 +808,7 @@ pub struct El<S> {
     /// Draws no focus ring of its own ([`El::focus_ring`]).
     pub(crate) quiet: bool,
     pub(crate) selectable: bool,
-    pub(crate) on_link: Option<Arc<dyn Fn(&mut S, &str)>>,
+    pub(crate) on_link: Option<LinkHandler<S>>,
     pub(crate) children: Vec<El<S>>,
 }
 

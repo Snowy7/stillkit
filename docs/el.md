@@ -589,3 +589,11 @@ The window host uses `el::SystemClipboard`; headless runtimes can inject a
 `Clipboard` with `Runtime::set_clipboard`.
 
 See `examples/display_selection.rs` for a scrollable help document.
+
+## Attributed display text
+
+`rich_text([Run::new("Hello "), Run::new("world").bold()])` wraps attributed runs as a paragraph.
+Runs expose weight, italic, underline, strike, colour, family, size, code and link properties.
+Unset properties inherit the element face. `.on_link(|state, url| ..)` delegates activation to
+the app; stillkit never opens a URL. `.selectable()` joins the plain source to document selection.
+See `examples/el_rich.rs`. Drawing uses existing Text, Emphasis, Fill and Line operations.

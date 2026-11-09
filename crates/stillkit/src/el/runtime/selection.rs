@@ -13,7 +13,9 @@ use std::time::Duration;
 
 pub(super) struct Display {
     pub field: Field,
+    id: u64,
     rich: Option<super::super::rich::Layout>,
+    selectable: bool,
     doc: u64,
     start: usize,
     align: super::super::element::TextAlign,
@@ -96,12 +98,15 @@ impl<S> Runtime<S> {
             seen.insert(l.id);
             let d = self.display.entry(l.id).or_insert_with(|| Display {
                 field: Field::new(text),
+                id: l.id,
                 rich: None,
+                selectable: el.selectable,
                 doc,
                 start,
                 align: face.align,
             });
             d.doc = doc;
+            d.selectable = el.selectable;
             d.start = start;
             d.align = face.align;
             d.field.ed.set_text(text);
@@ -157,6 +162,7 @@ impl<S> Runtime<S> {
             .focus
             .and_then(|h| self.laid.iter().find(|l| l.hit == h))
             .and_then(|l| self.display.get(&l.id))
+            .filter(|d| d.selectable)
             .map(|d| d.doc)
         else {
             return false;
@@ -262,9 +268,8 @@ impl<S> Runtime<S> {
             let rect = self.poses.get(i)?.rect;
             for fragment in &rich.fragments {
                 let r = fragment.rect.offset(rect.left, rect.top);
-                if p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom {
-                    if let Some(url) = &fragment.run.link { return Some((l.hit, url.clone())); }
-                }
+                if p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
+                    && let Some(url) = &fragment.run.link { return Some((l.hit, url.clone())); }
             }
         }
         None
@@ -275,10 +280,11 @@ impl<S> Runtime<S> {
         }
         match *event {
             Event::Press(p, Button::Left) | Event::DoubleClick(p, Button::Left) => {
+                self.link_down = self.display_link(p.at);
                 if !self.ix.pressed.is_some_and(|hit| {
                     self.laid
                         .iter()
-                        .any(|l| l.hit == hit && self.display.contains_key(&l.id))
+                        .any(|l| l.hit == hit && self.display.get(&l.id).is_some_and(|d| d.selectable))
                 }) {
                     self.display_drag = None;
                     return;
@@ -350,16 +356,15 @@ impl<S> Runtime<S> {
                 self.sync_display_ranges();
             }
             Event::Release(p, Button::Left) => {
-                if self.display_drag.as_ref().is_none_or(|drag| self.documents.get(&drag.doc).is_none_or(|ed| ed.selection().is_empty())) {
-                    if let Some((hit, url)) = self.display_link(p.at) { self.queue.push(super::Action::Link(hit, url)); }
-                }
+                if self.link_down.take().is_some_and(|down| self.display_link(p.at) == Some(down)) && self.display_drag.as_ref().is_none_or(|drag| self.documents.get(&drag.doc).is_none_or(|ed| ed.selection().is_empty()))
+                    && let Some((hit, url)) = self.display_link(p.at) { self.queue.push(super::Action::Link(hit, url)); }
                 self.display_drag = None;
             }
             Event::Release(..)
             | Event::Cancelled
             | Event::CaptureLost
             | Event::Leave
-            | Event::Deactivated => self.display_drag = None,
+            | Event::Deactivated => { self.display_drag = None; self.link_down = None; },
             _ => {}
         }
     }
@@ -397,7 +402,14 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
             color: ink,
         }); }
     }
-    if let Some(rich) = &d.rich { ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme))); }
+    if let Some(rich) = &d.rich {
+        ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme)));
+        for (i, fragment) in rich.fragments.iter().enumerate().filter(|(_, f)| f.run.link.is_some()) {
+            f.list.hits.push(crate::Hit { id: (d.id as u32).wrapping_add(0x80000000).wrapping_add(i as u32),
+                rect: fragment.rect.offset(rect.left, rect.top), role: crate::Role::Link,
+                label: fragment.run.text.clone(), enabled: true, actionable: false, checked: None });
+        }
+    }
     f.push(Op::Clipped {
         rect,
         ops: ops.into(),
