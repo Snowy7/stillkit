@@ -455,7 +455,8 @@ impl Hit {
     pub fn contains(&self,p:Point)->bool { self.rect.contains(p) && self.shape.as_ref().is_none_or(|s|s.contains(p)) }
 
     /// A hit item that is actionable exactly when it is enabled (every control). Set
-    /// `actionable: false` on an enabled one for plain announced content.
+    /// `actionable: false` on an enabled one for plain announced content. Hosts build hits
+    /// with this rather than a struct literal, so a new field never breaks them.
     pub fn new(
         id: HitId,
         rect: Rect,
