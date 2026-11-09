@@ -4,6 +4,7 @@
 
 ### Added
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
+- Stable-id editor TabStrip with reorder, overflow, close and tear-out intents; composable PopupList listbox.
 - Controlled nested SplitView panes with captured resizing, collapse/reset and keyboard range semantics.
 - el styling for dense tools: `border`, `edges` (a design px of light and shade inside a box's top and bottom, following its corners), `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.

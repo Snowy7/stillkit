@@ -420,3 +420,17 @@ and Home reset; axis arrows step by 10 px (Shift: 1); Enter collapses/restores.
 The splitter exposes an accessible range and resize cursor. Give the trailing pane
 room by choosing limits appropriate to the host's minimum window size.
 
+`TabStrip` accepts stable-id `Tab` values and emits `TabEvent` intents. Apply reorder
+immediately to the model; keyed neighbours animate through the runtime. Tabs include
+icons, titles, dirty dots and close actions, a scrollable rail, all-tabs menu and new
+button. Arrows/Home/End select and reveal tabs; middle-click requests close. The app
+owns unsaved-document policy. Forward Ctrl+Tab through `TabStripState::shortcut`
+before Runtime (which reserves Tab for focus traversal). Forward Ctrl+Shift+Tab too.
+A release more than 24 px vertically outside a tab emits `TornOut(id)`; the app moves
+the document to another window. The kit does not create windows or transfer state.
+
+
+`PopupList`/`PopupItem` supply bounded listbox content for completion popovers.
+The app filters rows, supplies stable ids/selection and applies picks; disabled rows
+stay announced but are skipped by keyboard navigation. Compose it with `el::popover`
+and `take_focus()` when keyboard focus should leave the triggering editor.
