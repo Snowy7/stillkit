@@ -5,6 +5,7 @@
 - Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
 
 ### Added
+- Matched element flights across parents carry geometry, radius, fill and opacity with interruptible springs and reduced motion.
 - Component story browser (including ColorPicker), headless story baselines and a runnable ten-minute settings guide.
 - Opt-in F12 element inspector and native look-file reloads, with no inspection code in ordinary builds.
 - Draw-time translation, scaling and transform origins; native arbitrary rotations of text, images and boxes, with precise transformed hits.

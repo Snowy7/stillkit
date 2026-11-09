@@ -201,6 +201,23 @@ view never runs for animation, and `Runtime::animating()` says whether anything 
   a spring repaints identical lists, which the surface does not draw. Damage during an
   animation covers only the ops that moved (`tests/el_motion.rs` checks the knob and the card).
 
+## Matched flights
+
+Use `.flight("hero")` on one element in each consecutive view to carry its current
+rectangle, radius, fill and opacity into a newly mounted element, even under a
+different parent. Flight keys must be unique across a view; ambiguous pairs do
+not fly. Ordinary `.key` values still determine input identity. Flights use the
+element's motion or the theme layout spring. Retargeting carries velocity; reduced
+motion and instant updates snap geometry, with reduced motion fading colours.
+The destination receives input and owns the content throughout the flight.
+
+Flights follow a surface-coordinate path until settled, then ride their destination
+parent. Ancestor clips still apply; this does not lift content above other parents
+or transfer native child windows. Affine ancestor transforms are applied during
+painting, rather than included in the matched rectangle. No worker or timer is
+created. Two optional string pointers (element and target) and a track flag are
+retained even without flights; matching allocates no map or permanent cache.
+
 ## Rotation and spinners
 
 ```rust
