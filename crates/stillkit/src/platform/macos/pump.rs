@@ -107,7 +107,12 @@ fn dispatch(mtm: MainThreadMarker, until: Option<Option<Instant>>) {
         Some(Some(at)) => NSDate::dateWithTimeIntervalSinceNow(at.saturating_duration_since(Instant::now()).as_secs_f64()),
     };
     while let Some(event) = app.nextEventMatchingMask_untilDate_inMode_dequeue(NSEventMask::Any, Some(&date), mode, true) {
-        app.sendEvent(&event);
+        // A Waker's event only ends the wait.
+        let wake = event.r#type() == objc2_app_kit::NSEventType::ApplicationDefined
+            && event.subtype().0 == super::host::WAKE_SUBTYPE;
+        if !wake {
+            app.sendEvent(&event);
+        }
         date = NSDate::distantPast();
     }
     app.updateWindows();
@@ -140,4 +145,5 @@ pub(super) fn wait(limit: Option<Duration>) {
     let until = [WAKE.get(), next_frame(), limit.map(|l| Instant::now() + l)].into_iter().flatten().min();
     dispatch(mtm, Some(until));
     tick();
+    crate::waker::rearm();
 }

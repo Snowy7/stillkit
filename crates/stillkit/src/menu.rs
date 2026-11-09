@@ -55,6 +55,8 @@ pub fn set_style(tokens: Option<Tokens>) {
 /// One item of a menu; `C` is what choosing it does.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entry<C> {
+    /// A muted section label, skipped by pointer and keyboard navigation.
+    Header(String),
     /// Separator.
     Separator,
     /// Action.
@@ -139,7 +141,7 @@ impl<C> Entry<C> {
     /// This item with `icon` in its leading column.
     pub fn with_icon(self, icon: MenuIcon) -> Self {
         match self {
-            Self::Separator => Self::Separator,
+            Self::Separator | Self::Header(_) => self,
             Self::Iconic { item, .. } => Self::Iconic { icon, item },
             item => Self::Iconic {
                 icon,
@@ -177,6 +179,7 @@ impl<C> Entry<C> {
     pub fn label(&self) -> &str {
         match self.plain() {
             Self::Action { label, .. } | Self::Submenu { label, .. } => label,
+            Self::Header(label) => label,
             _ => "",
         }
     }
@@ -244,7 +247,7 @@ pub fn layout<C>(items: &[Entry<C>], tokens: &Tokens, scale: f32, text: &mut Tex
             } else {
                 text.measure(item.label(), &label)
             };
-            let height = if separator { m.separator } else { m.row };
+            let height = if separator { m.separator } else if matches!(item,Entry::Header(_)) { m.row * 0.8 } else { m.row };
             let row = Row {
                 top,
                 height,
@@ -283,6 +286,56 @@ pub fn place(size: (i32, i32), anchor: (i32, i32), work: Edges) -> (i32, i32) {
         x.clamp(work.0, (work.2 - w).max(work.0)),
         y.clamp(work.1, (work.3 - h).max(work.1)),
     )
+}
+
+/// Which side of an avoided surface receives an attached popup.
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum Side {
+    /// Above a bottom bar.
+    Above,
+    /// Below a top bar.
+    Below,
+    /// Left of a right bar.
+    Left,
+    /// Right of a left bar.
+    Right,
+}
+
+/// Physical screen geometry for a popup attached to an icon, outside its bar.
+#[derive(Debug,Clone,Copy,PartialEq)]
+pub struct Attachment {
+    /// The icon or control to center on.
+    pub item: Rect,
+    /// Current visible bar bounds, including magnified content.
+    pub bar: Rect,
+    /// Direction away from the bar.
+    pub side: Side,
+    /// Physical pixel gap outside the bar.
+    pub gap: i32,
+}
+
+impl Attachment {
+    /// Available space on the requested side; the popup never flips back over its bar.
+    pub fn work(self, work: Edges) -> Edges {
+        let (mut l,mut t,mut r,mut b)=work;
+        match self.side {
+            Side::Above => b=b.min(self.bar.top.floor() as i32-self.gap),
+            Side::Below => t=t.max(self.bar.bottom.ceil() as i32+self.gap),
+            Side::Left => r=r.min(self.bar.left.floor() as i32-self.gap),
+            Side::Right => l=l.max(self.bar.right.ceil() as i32+self.gap),
+        }
+        (l,t,r.max(l+1),b.max(t+1))
+    }
+}
+
+/// Place a panel body, keeping its shadow inside the work area and clear of the attached bar.
+pub fn place_attached(size: (i32,i32), attachment: Attachment, work: Edges, shadow: i32) -> (i32,i32) {
+    let (l,t,r,b)=attachment.work(work);
+    let (w,h)=size;
+    let center=((attachment.item.left+attachment.item.right)/2.0,(attachment.item.top+attachment.item.bottom)/2.0);
+    let x=match attachment.side {Side::Right=>l+shadow,Side::Left=>r-shadow-w,_=>(center.0-w as f32/2.0).round() as i32};
+    let y=match attachment.side {Side::Below=>t+shadow,Side::Above=>b-shadow-h,_=>(center.1-h as f32/2.0).round() as i32};
+    (x.clamp(l+shadow,(r-shadow-w).max(l+shadow)),y.clamp(t+shadow,(b-shadow-h).max(t+shadow)))
 }
 
 /// Where a submenu goes: against the right edge of its parent (`parent` is the parent's body),
@@ -385,6 +438,12 @@ pub fn view_animated<C>(
             });
             continue;
         }
+        if let Entry::Header(label)=item {
+            // Section headings read like Windows 11 jump lists: semibold secondary ink, not disabled ink.
+            let mut style=label_style.clone();style.size*=0.86;style.weight=600;
+            ops.push(Op::Text {rect:Rect::new(body.left+m.pad+8.0*s,top+(row.height-row.label.1*0.86)/2.0,(body.width()-2.0*m.pad-16.0*s).max(1.0),row.label.1),text:label.as_str().into(),style,color:c.text.with_alpha(c.text.a*0.72)});
+            continue;
+        }
         let selectable = item.selectable();
         // Every row keeps its highlight op (transparent at rest), so moving the hover only
         // redraws the two rows it left and entered.
@@ -475,7 +534,7 @@ pub fn view_animated<C>(
             rect: Rect::new(
                 body.left + m.pad + m.gutter,
                 center_y - row.label.1 / 2.0,
-                row.label.0,
+                row.label.0.min((body.width()-2.0*m.pad-m.gutter-m.gap-m.arrow).max(1.0)),
                 row.label.1,
             ),
             text: item.label().into(),
@@ -566,6 +625,9 @@ impl<C> Panel<C> {
 
 /// The open menu, if any, and the windows it reuses.
 pub struct Menu<C> {
+    width: Option<f32>,
+    attachment: Option<Attachment>,
+    no_activate: bool,
     name: Arc<str>,
     tokens: Tokens,
     panels: Vec<Panel<C>>,
@@ -584,6 +646,9 @@ impl<C: Clone> Menu<C> {
     /// technology calls the menu.
     pub fn new(name: &str) -> Result<Self> {
         let mut menu = Self {
+            width: None,
+            attachment: None,
+            no_activate: false,
             name: name.into(),
             tokens: Tokens::default(),
             panels: Vec::new(),
@@ -623,8 +688,22 @@ impl<C: Clone> Menu<C> {
         screen: Screen,
         tokens: &Tokens,
     ) -> Result<()> {
+        self.open_at(ui,items,anchor,screen,tokens,None)
+    }
+
+    /// A fixed body width in design pixels. Long labels are rendered with an ellipsis.
+    pub fn set_width(&mut self,width:Option<f32>) { self.width=width.map(|w|w.max(100.0)); }
+
+    /// Open beside a bar, centered on its item and constrained to the requested side.
+    pub fn open_attached(&mut self,ui:&mut Ui,items:Vec<Entry<C>>,attachment:Attachment,screen:Screen,tokens:&Tokens)->Result<()> {
+        let anchor=((attachment.item.left+attachment.item.right) as i32/2,(attachment.item.top+attachment.item.bottom) as i32/2);
+        self.open_at(ui,items,anchor,screen,tokens,Some(attachment))
+    }
+
+    fn open_at(&mut self,ui:&mut Ui,items:Vec<Entry<C>>,anchor:(i32,i32),screen:Screen,tokens:&Tokens,attachment:Option<Attachment>)->Result<()> {
         let started = std::time::Instant::now();
         self.close();
+        self.attachment=attachment;
         self.interaction_timings = self
             .own_interaction
             .or_else(|| INTERACTION_MOTION.with(std::cell::Cell::get));
@@ -656,8 +735,9 @@ impl<C: Clone> Menu<C> {
             tokens.scale
         };
         let scale = screen.dpi.max(96) as f32 / 96.0 * content_scale.clamp(0.5, 2.0);
+        let shadow=margin(&self.tokens,scale) as i32;
         let opened = self.push_panel(ui, items, None, scale, |size| {
-            place(size, anchor, screen.work)
+            attachment.map_or_else(||place(size, anchor, screen.work),|a|place_attached(size,a,screen.work,shadow))
         });
         if let Err(e) = opened {
             self.close();
@@ -667,7 +747,7 @@ impl<C: Clone> Menu<C> {
         let drawn = started.elapsed();
         root.show();
         let shown = started.elapsed();
-        let how = root.take_focus();
+        let how = if self.no_activate { "no-activate" } else { root.take_focus() };
         log::debug!(
             "menu: drawn {drawn:.1?}, shown {shown:.1?}, focused {:.1?} ({how})",
             started.elapsed()
@@ -685,6 +765,54 @@ impl<C: Clone> Menu<C> {
         !self.panels.is_empty()
     }
 
+    /// Keep pooled panels non-activating, for embedded menus and internal visual fixtures.
+    pub fn set_no_activate(&mut self, value: bool) {
+        self.no_activate = value;
+        #[cfg(target_os = "windows")]
+        for surface in self.pool.iter().map(|(s,_)| s).chain(self.panels.iter().map(|p| &p.surface)) {
+            surface.set_no_activate(value);
+        }
+    }
+
+    /// Replace asynchronously loaded rows/icons without hiding, refocusing or replaying open
+    /// motion. Existing submenus retain their content window during icon-only updates.
+    pub fn update_entries(&mut self, ui: &mut Ui, items: Vec<Entry<C>>) -> Result<()> {
+        if self.panels.is_empty() { return Ok(()); }
+        let mut next = items;
+        for index in 0..self.panels.len() {
+            if index > 0 {
+                let row = self.panels[index].opened_by.unwrap();
+                let Some(Entry::Submenu { items, .. }) = self.panels[index-1].items.get(row).map(Entry::plain) else {
+                    while self.panels.len() > index { self.close_innermost(); }
+                    break;
+                };
+                next = items.clone();
+            }
+            let p = &mut self.panels[index];
+            let same_rows = p.items.iter().map(Entry::label).eq(next.iter().map(Entry::label));
+            p.items = std::mem::take(&mut next);
+            if !same_rows { p.hover = None; }
+            let mut layout = layout(&p.items, &self.tokens, p.layout.scale, &mut ui.text);
+            if index==0 && let Some(width)=self.width {layout.width=width*p.layout.scale;}
+            p.natural = layout.clone();
+            let work = screen_at(p.origin.0,p.origin.1).work;
+            let available=if index==0 {self.attachment.map_or(work,|a|a.work(work))}else{work};
+            layout.height = layout.height.min(((available.3-available.1) as f32 - 2.0*margin(&self.tokens,layout.scale)).max(1.0));
+            layout.width=layout.width.min(((available.2-available.0) as f32-2.0*margin(&self.tokens,layout.scale)).max(1.0));
+            if index==0 && let Some(attachment)=self.attachment {p.origin=place_attached(layout.size(),attachment,work,margin(&self.tokens,layout.scale) as i32);}
+            p.layout = layout;
+            self.redraw_checked(ui,index)?;
+        }
+        Ok(())
+    }
+
+    /// Follow an attached bar's current rendered bounds without replaying opening motion.
+    pub fn reanchor(&mut self,ui:&mut Ui,attachment:Attachment)->Result<()> {
+        if self.attachment==Some(attachment) || self.panels.is_empty(){return Ok(());}
+        self.attachment=Some(attachment);
+        self.update_entries(ui,self.panels[0].items.clone())
+    }
+
     /// Is the screen point on one of the open panels?
     pub fn contains(&self, x: i32, y: i32) -> bool {
         self.panels.iter().any(|p| p.contains(x, y))
@@ -693,6 +821,11 @@ impl<C: Clone> Menu<C> {
     /// Does `id` belong to one of the open panels?
     pub fn owns(&self, id: SurfaceId) -> bool {
         self.panels.iter().any(|p| p.surface.id() == id)
+    }
+
+    /// Read-only access to open panels, for host integration and window-scoped diagnostics.
+    pub fn surfaces(&self) -> impl Iterator<Item = &Surface> {
+        self.panels.iter().map(|p| &p.surface)
     }
 
     /// Handles an event for one of the menu's surfaces. Returns what it came to, if anything.
@@ -1035,15 +1168,17 @@ impl<C: Clone> Menu<C> {
         place: impl Fn((i32, i32)) -> (i32, i32),
     ) -> Result<()> {
         let mut layout = layout(&items, &self.tokens, scale, &mut ui.text);
+        if opened_by.is_none() && let Some(width)=self.width {layout.width=width*scale;}
         let at = place(layout.size());
         let work = screen_at(at.0, at.1).work;
+        let work=if opened_by.is_none(){self.attachment.map_or(work,|a|a.work(work))}else{work};
         let natural = layout.clone();
         layout.height = layout
             .height
-            .min((work.3 - work.1) as f32 - 2.0 * margin(&self.tokens, scale));
+            .min(((work.3 - work.1) as f32 - 2.0 * margin(&self.tokens, scale)).max(1.0));
         layout.width = layout
             .width
-            .min((work.2 - work.0) as f32 - 2.0 * margin(&self.tokens, scale));
+            .min(((work.2 - work.0) as f32 - 2.0 * margin(&self.tokens, scale)).max(1.0));
         let origin = place(layout.size());
         let surface = self.take(opened_by.is_some())?;
         self.panels.push(Panel {
@@ -1067,6 +1202,10 @@ impl<C: Clone> Menu<C> {
         });
         self.redraw_checked(ui, self.panels.len() - 1)?;
         let p = self.panels.last_mut().unwrap();
+        if crate::glass::synchronous() {
+            p.surface.set_alpha(255)?;
+            return Ok(());
+        }
         if let Some(configured) = self.open_motion {
             p.surface.set_alpha(255)?;
             if configured.timing.enabled {
@@ -1131,13 +1270,16 @@ impl<C: Clone> Menu<C> {
         }
         let edge = margin(&self.tokens, p.layout.scale) as i32;
         let (w, h) = p.layout.size();
-        let list = view_animated(
+        let mut list = view_animated(
             &p.items,
             &p.layout,
             p.hover,
             &self.tokens,
             p.interaction.as_ref(),
         );
+        for op in &mut list.ops {
+            if let Op::Text {rect,text,style,..}=op { *text=ui.text.fit(text,style,rect.width()); }
+        }
         let at = (p.origin.0 - edge, p.origin.1 - edge);
         let size = ((w + 2 * edge) as u32, (h + 2 * edge) as u32);
         p.surface.set_glass_style(self.tokens.glass_style);
@@ -1181,7 +1323,7 @@ impl<C: Clone> Menu<C> {
 
     fn create(&self, submenu: bool) -> Result<Surface> {
         Surface::new_deferred_accessibility(
-            Kind::Popup { activate: !submenu },
+            Kind::Popup { activate: !submenu && !self.no_activate },
             &self.name,
             Role::Menu,
         )
@@ -1191,6 +1333,42 @@ impl<C: Clone> Menu<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn section_headers_are_muted_labels_without_pointer_or_keyboard_targets() {
+        let mut ui=Ui::new().unwrap();let tokens=Tokens::default();
+        let entries=vec![Entry::Header("Pinned".into()),Entry::action("Folder",1),Entry::Header("Tasks".into()),Entry::action("New window",2)];
+        let layout=layout(&entries,&tokens,1.0,&mut ui.text);
+        let list=view(&entries,&layout,Some(0),&tokens);
+        assert!(!entries[0].selectable());
+        assert_eq!(list.hits.iter().map(|h|h.id).collect::<Vec<_>>(),[1,3]);
+        assert_eq!(focus::step(&list.hits,None,1),Some(1));
+        assert_eq!(focus::step(&list.hits,Some(1),1),Some(3));
+        assert!(list.focus.is_none());
+        assert!(layout.rows[0].height<layout.rows[1].height);
+    }
+
+    #[test]
+    fn attached_menus_clear_each_bar_edge_and_clamp_with_their_shadow() {
+        let work=(-1000,-200,0,800);let size=(280,420);let shadow=14;let gap=6;
+        for (side,bar) in [
+            (Side::Above,Rect::new(-900.0,720.0,800.0,80.0)),
+            (Side::Below,Rect::new(-900.0,-200.0,800.0,80.0)),
+            (Side::Right,Rect::new(-1000.0,-100.0,80.0,800.0)),
+            (Side::Left,Rect::new(-80.0,-100.0,80.0,800.0)),
+        ] {
+            let attachment=Attachment{item:bar,bar,side,gap};
+            let (x,y)=place_attached(size,attachment,work,shadow);
+            assert!(x-shadow>=work.0 && y-shadow>=work.1);
+            assert!(x+size.0+shadow<=work.2 && y+size.1+shadow<=work.3);
+            match side {
+                Side::Above=>assert!(y+size.1+shadow<=bar.top as i32-gap),
+                Side::Below=>assert!(y-shadow>=bar.bottom as i32+gap),
+                Side::Left=>assert!(x+size.0+shadow<=bar.left as i32-gap),
+                Side::Right=>assert!(x-shadow>=bar.right as i32+gap),
+            }
+        }
+    }
 
     #[test]
     fn long_menus_fit_the_monitor_and_keyboard_selection_scrolls_into_view() {

@@ -41,6 +41,7 @@ pub struct Frame<'a> {
     /// Input.
     pub input: &'a Interaction,
     motion: Option<&'a crate::interact::motion::InteractionMotion>,
+    surface: Option<(Rect, f32)>,
 }
 
 /// A button's emphasis.
@@ -142,6 +143,7 @@ impl<'a> Frame<'a> {
             list: DisplayList::default(),
             input,
             motion: None,
+            surface: None,
         }
     }
 
@@ -233,7 +235,19 @@ impl<'a> Frame<'a> {
             .map_or(color, |motion| {
                 motion.wash(id, self.theme.color.hover, self.theme.color.pressed, color)
             });
-        self.fill(rect, radius, color);
+        // Edge controls share the body's contour. Interior controls retain the cheap fill
+        // path, including toolbar, tab and sidebar washes.
+        let fill = Op::Fill { rect, radius, color };
+        if let Some((body, corner)) = self.surface
+            && (rect.left < body.left || rect.top < body.top
+                || rect.right > body.right || rect.bottom > body.bottom
+                || ((rect.left < body.left + corner || rect.right > body.right - corner)
+                    && (rect.top < body.top + corner || rect.bottom > body.bottom - corner)))
+        {
+            self.push(Op::RoundedClipped { rect: body, radius: corner, ops: vec![fill].into() });
+        } else {
+            self.push(fill);
+        }
     }
 
     /// The keyboard focus ring of `id` just outside `rect` (always pushed, transparent unless
@@ -267,6 +281,7 @@ impl<'a> Frame<'a> {
     /// [`Frame::surface`] at `radius` device px instead of the theme's: a bar strip (0), an
     /// island or a dock plate whose corners come from its own config.
     pub fn surface_shaped(&mut self, rect: Rect, radius: f32, glass_available: bool) -> Option<Glass> {
+        self.surface = Some((rect, radius));
         match self.theme.glass.filter(|_| glass_available) {
             Some(material) => {
                 self.fill(rect, radius, Rgba::HIT);
@@ -1182,6 +1197,32 @@ mod tests {
 
     fn theme() -> Theme {
         Theme::new(Style::Liquid, Scheme::Dark, SYSTEM_BLUE)
+    }
+
+    #[test]
+    fn edge_washes_share_the_surface_corner_without_damaging_the_whole_window() {
+        let mut ui = crate::Ui::new().unwrap();
+        let t = theme();
+        let body = Rect::new(4.0, 4.0, 320.0, 200.0);
+        let button = Rect::new(278.0, 4.0, 46.0, 46.0);
+        let draw = |ui: &mut crate::Ui, input: &Interaction| {
+            let mut f = Frame::new(&mut ui.text, &t, 1.0, input);
+            f.surface_shaped(body, 24.0, true);
+            f.wash(1, button, 4.0, true);
+            f.list
+        };
+        let rest = draw(&mut ui, &Interaction::default());
+        for input in [Interaction { hover: Some(1), ..Default::default() },
+            Interaction { pressed: Some(1), hover: Some(1), ..Default::default() }] {
+            let list = draw(&mut ui, &input);
+            let image = crate::render(&mut ui, &list, 330, 210).unwrap();
+            assert_eq!(image.pixel(323, 4)[3], 0, "top-right corner is transparent");
+            assert_eq!(image.pixel(325, 25)[3], 0, "nothing escapes the right edge");
+            assert!(image.pixel(300, 30)[3] > 1, "wash remains inside the body");
+            let damage = list.damage(&rest).unwrap();
+            assert!(damage.width() <= 48.0 && damage.height() <= 48.0);
+            assert_eq!(list.damage(&list), None);
+        }
     }
 
     #[test]

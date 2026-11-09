@@ -25,6 +25,7 @@ pub use platform::current::compose;
 #[doc(hidden)]
 pub mod controls;
 pub mod damage;
+pub mod dialog;
 pub mod el;
 pub mod focus;
 pub mod geom;
@@ -55,6 +56,7 @@ pub use platform::current::text_field;
 pub mod theme;
 mod tokens;
 pub mod transition;
+mod waker;
 use platform::current::watch;
 
 pub use app_window::{Chrome, Cursor, set_modal_hook};
@@ -69,12 +71,15 @@ pub use render::{Image, TextMode, TextQuality, Ui, render};
 pub use scene::{DisplayList, Hit, HitId, Op};
 pub use scroll::Scroll;
 pub use surface::AnimationFrames;
-pub use surface::{Button, Event, Kind, Pointer, Surface, SurfaceId, next_event, queue_event};
+pub use surface::{Button, Event, Kind, Pointer, Surface, SurfaceId, next_event, queue_event, take_dropped_files};
+pub use platform::NativeHandle;
+pub use platform::Caption;
 pub use text::{Text, TextStyle, VARIABLE};
 pub use text_field::TextField;
 pub use theme::{Palette, Scheme, ShadowLevel, SoftShadow, Style, TextRole, Theme};
-pub use tokens::{Colors, Ink, Material, MenuMetrics, Step, Tokens, Typeface};
+pub use tokens::{Colors, Ink, Material, MenuMetrics, Step, Tokens, Typeface, WINDOW_CORNER_RADIUS};
 pub use watch::FileWatch;
+pub use waker::{Waker, waker};
 
 /// Accessibility roles for [`Hit`] items.
 pub use accesskit::Role;

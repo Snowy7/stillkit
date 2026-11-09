@@ -149,6 +149,14 @@ pub fn available() -> bool {
     backdrop().is_some_and(|b| b.available())
 }
 
+/// Whether the current CPU backdrop presents synchronously with its content.
+pub fn synchronous() -> bool {
+    #[cfg(target_os = "windows")]
+    { backdrop().is_some_and(|b| b.synchronous()) }
+    #[cfg(not(target_os = "windows"))]
+    { false }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

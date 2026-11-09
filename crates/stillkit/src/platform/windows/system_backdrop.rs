@@ -4,8 +4,7 @@
 //! loads here (`tests/no_gpu_driver.rs`).
 //!
 //! Each surface with glass gets a frost window directly under it, the size of its body: layered
-//! with a fully transparent bitmap (click-through, and moved by a position-only
-//! `UpdateLayeredWindow`), never activated, topmost when the surface is. Its
+//! with constant alpha initialized once (click-through, geometry moved with `SetWindowPos`), never activated, topmost when the surface is. Its
 //! [`DesktopWindowTarget`] holds one visual clipped to the body's rounded rect: the blur and, over
 //! it, the material's tint. It is placed before every move of its surface (as the engine's glass
 //! windows are), and put back under it when the surface's z-order changes
@@ -33,7 +32,7 @@ use windows::System::DispatcherQueueController;
 use windows::UI::Color;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::UI::Composition::{CompositionColorBrush, Compositor, ContainerVisual, SpriteVisual};
-use windows::Win32::Foundation::{CO_E_NOTINITIALIZED, COLORREF, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{CO_E_NOTINITIALIZED, COLORREF, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_HOSTBACKDROPBRUSH, DwmSetWindowAttribute};
 use windows::Win32::System::Com::CoIncrementMTAUsage;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -48,9 +47,10 @@ use windows::Win32::System::WinRT::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, GW_HWNDNEXT, GWL_EXSTYLE, GetWindow,
     GetWindowLongPtrW, HTTRANSPARENT,
-    MA_NOACTIVATE, RegisterClassW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SetWindowPos,
-    ShowWindow, ULW_ALPHA, UpdateLayeredWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_NCHITTEST,
+    MA_NOACTIVATE, RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_SHOWWINDOW, SWP_HIDEWINDOW, SWP_NOZORDER, SetWindowPos,
+    BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos, SetLayeredWindowAttributes, LWA_ALPHA,
+    ShowWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_NCHITTEST,
     WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
 };
@@ -232,8 +232,6 @@ impl SystemBackdrop {
         frost.material(material)?;
         self.check(Step::Place)?;
         frost.place(&live.compositor, client, shape, radius)?;
-        // SAFETY: our own window, shown without activation.
-        let _ = unsafe { ShowWindow(frost.window.0, SW_SHOWNOACTIVATE) };
         frost.open = true;
         Ok(())
     }
@@ -284,6 +282,28 @@ impl SystemBackdrop {
 }
 
 impl Backdrop for SystemBackdrop {
+    fn synchronous(&self) -> bool { self.available() }
+
+    fn visibility(&self, client: HWND, shown: bool) -> bool {
+        let Some(window) = self.window(client) else { return false; };
+        let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER
+            | if shown { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW };
+        // SAFETY: both windows belong to this UI thread. One deferred batch changes visibility.
+        unsafe {
+            let result = BeginDeferWindowPos(2)
+                .and_then(|batch| DeferWindowPos(batch, client, None, 0, 0, 0, 0, flags))
+                .and_then(|batch| DeferWindowPos(batch, window, None, 0, 0, 0, 0, flags))
+                .and_then(|batch| EndDeferWindowPos(batch));
+            result.is_ok()
+        }
+    }
+
+    fn opacity(&self, client: HWND, alpha: u8) {
+        if let Ok(live) = self.live.try_borrow()
+            && let Some(frost) = live.as_ref().and_then(|l| l.frosts.get(&(client.0 as isize))) {
+            let _ = frost.visuals.body.SetOpacity(f32::from(alpha) / 255.0);
+        }
+    }
     fn available(&self) -> bool {
         supported() && transparency() && self.usable()
     }
@@ -357,10 +377,7 @@ impl Frost {
         }
     }
 
-    /// Moves the frost window to `shape` (screen px), directly under `client`, and clips it to
-    /// the rounded body. A move of the same size is a position-only `UpdateLayeredWindow`,
-    /// 0.2 ms against 0.5 ms for `SetWindowPos` (`backdrop_spike movebench`); a new size gives
-    /// the window a transparent bitmap of that size first, and remakes the clip.
+    /// Changes geometry and clip without resetting the retained composition tree.
     fn place(&self, compositor: &Compositor, client: HWND, shape: Shape, radius: f32) -> Result<()> {
         let (w, h) = (shape.width as f32, shape.height as f32);
         let r = radius.clamp(0.0, w.min(h) / 2.0);
@@ -371,20 +388,11 @@ impl Frost {
             self.clip.set(Some((shape.width, shape.height, r)));
         }
         let window = self.window.0;
-        let at = POINT { x: shape.x, y: shape.y };
-        if resized {
-            // A new size: a fully transparent layered bitmap of that size, so later moves can be
-            // position-only.
-            transparent(window, at, (shape.width, shape.height))?;
-        } else {
-            // SAFETY: our own layered window; only its position changes.
-            unsafe { UpdateLayeredWindow(window, None, Some(&at), None, None, None, COLORREF(0), Some(&BLEND), ULW_ALPHA) }
-                .context("moving the frost window")?;
-        }
-        if !directly_under(window, client) {
-            // SAFETY: two windows of this thread; z-order only.
-            unsafe { SetWindowPos(window, Some(client), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }?;
-        }
+        // Updating a layered bitmap invalidates the host backdrop's composition. The frost
+        // has no bitmap: one alpha attribute at creation, then geometry-only window changes.
+        let flags = SWP_NOACTIVATE | if resized { Default::default() } else { SWP_NOSIZE };
+        // SAFETY: only our frost is positioned; neither window is activated.
+        unsafe { SetWindowPos(window, Some(client), shape.x, shape.y, shape.width, shape.height, flags) }?;
         Ok(())
     }
 
@@ -457,65 +465,9 @@ fn create_window(topmost: bool) -> Result<Window> {
         if topmost {
             ex |= WS_EX_TOPMOST;
         }
-        CreateWindowExW(ex, class, w!("frost"), WS_POPUP, 0, 0, 1, 1, None, None, Some(instance.into()), None)
-            .map(Window)
-            .context("frost window")
-    }
-}
-
-/// Per-pixel alpha, the bitmap as it is (a transparent one).
-const BLEND: windows::Win32::Graphics::Gdi::BLENDFUNCTION = windows::Win32::Graphics::Gdi::BLENDFUNCTION {
-    BlendOp: windows::Win32::Graphics::Gdi::AC_SRC_OVER as u8,
-    BlendFlags: 0,
-    SourceConstantAlpha: 255,
-    AlphaFormat: windows::Win32::Graphics::Gdi::AC_SRC_ALPHA as u8,
-};
-
-/// Gives the layered `window` a fully transparent bitmap of `size` at `at`. The bitmap is freed
-/// at once: DWM keeps its own copy, out of this process.
-fn transparent(window: HWND, at: POINT, size: (i32, i32)) -> Result<()> {
-    use windows::Win32::Foundation::SIZE;
-    use windows::Win32::Graphics::Gdi::{
-        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, SelectObject,
-    };
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: size.0,
-            biHeight: -size.1,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    // SAFETY: GDI objects made and released here; a new DIB section is zeroed (transparent).
-    unsafe {
-        let dc = CreateCompatibleDC(None);
-        let mut bits = std::ptr::null_mut();
-        let bitmap = CreateDIBSection(Some(dc), &info, DIB_RGB_COLORS, &mut bits, None, 0);
-        let result = bitmap.as_ref().map_err(Clone::clone).and_then(|&bitmap| {
-            let old = SelectObject(dc, bitmap.into());
-            let r = UpdateLayeredWindow(
-                window,
-                None,
-                Some(&at),
-                Some(&SIZE { cx: size.0, cy: size.1 }),
-                Some(dc),
-                Some(&POINT::default()),
-                COLORREF(0),
-                Some(&BLEND),
-                ULW_ALPHA,
-            );
-            SelectObject(dc, old);
-            r
-        });
-        if let Ok(bitmap) = bitmap {
-            let _ = DeleteObject(bitmap.into());
-        }
-        let _ = DeleteDC(dc);
-        result.context("sizing the frost window")
+        let window = Window(CreateWindowExW(ex, class, w!("frost"), WS_POPUP, 0, 0, 1, 1, None, None, Some(instance.into()), None).context("frost window")?);
+        SetLayeredWindowAttributes(window.0, COLORREF(0), 255, LWA_ALPHA)?;
+        Ok(window)
     }
 }
 

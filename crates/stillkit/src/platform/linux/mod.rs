@@ -2,6 +2,7 @@
 mod a11y;
 mod a11y_bus;
 pub mod app_window;
+pub(crate) mod dialog;
 /// Glass services.
 pub mod glass;
 #[cfg(feature = "gpu")]

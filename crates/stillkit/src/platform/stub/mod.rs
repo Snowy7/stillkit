@@ -1,6 +1,7 @@
 //! Compile-only backend. Native services are unavailable until a backend is installed.
 /// Glass.
 pub mod glass;
+pub(crate) mod dialog;
 /// Caret.
 pub mod caret;
 /// Host.
@@ -82,4 +83,9 @@ impl super::Backend for Backend {
     type Text = Text;
     type Window = Surface;
     type TextInput = TextField;
+}
+/// No system clipboard here: a process-local one.
+pub mod clipboard {
+    /// The system clipboard (process-local on this platform).
+    pub type System = crate::el::MemoryClipboard;
 }

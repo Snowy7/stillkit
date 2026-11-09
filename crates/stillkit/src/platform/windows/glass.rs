@@ -6,6 +6,12 @@ use windows::Win32::Foundation::HWND;
 pub trait Backdrop {
     /// Whether glass can show now (the engine runs). Views draw a fill of their own when not.
     fn available(&self) -> bool;
+    /// Native frost is ready with the content; it needs no engine capture delay.
+    fn synchronous(&self) -> bool { false }
+    /// Atomically shows or hides a content/frost pair. False leaves showing to the surface.
+    fn visibility(&self, _client: HWND, _shown: bool) -> bool { false }
+    /// Match the opacity of a native frost to its content window.
+    fn opacity(&self, _client: HWND, _alpha: u8) {}
     /// Creates the glass under `client`; `false` when it was refused.
     fn open(&self, client: HWND, shape: Shape, radius: f32, material: &GlassMaterial) -> bool;
     /// Opens with optional optics; old backdrops can continue implementing only `open`.

@@ -153,3 +153,26 @@ pub(crate) mod keys {
     pub const ESCAPE: u16 = 0x1b;
     pub const RETURN: u16 = 0x0d;
 }
+
+/// A native layer's handle ([`Surface::native_layer`](crate::Surface::native_layer)), for the
+/// host's own GPU API. It stays valid until the layer is released or its surface dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NativeHandle {
+    /// A `CAMetalLayer *` (macOS): Metal presents to it, Vulkan through VK_EXT_metal_surface.
+    /// Set its `drawableSize` to the placed rect's device size.
+    Metal(*mut std::ffi::c_void),
+    /// A child `HWND` (Windows) covering the placed rect: a swapchain for its client area.
+    Hwnd(isize),
+}
+
+/// How tall an app window's title area is where the system draws the window controls
+/// ([`Surface::set_caption`](crate::Surface::set_caption); macOS: the traffic lights).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Caption {
+    /// The system's standard title bar (32 design px on macOS 26+).
+    #[default]
+    Standard,
+    /// A taller, compact-toolbar title area (40 design px on macOS 26+), with the controls
+    /// centred in it: for an app's own title bar holding menus and tabs.
+    Compact,
+}

@@ -76,10 +76,31 @@ fn pump(millis: u32) {
             DispatchMessageW(&msg);
         }
     }
+    crate::waker::rearm();
 }
 
 /// Whether the user asked for less motion (Settings > Accessibility > Visual effects >
 /// Animation effects off, `SPI_GETCLIENTAREAANIMATION`).
 pub fn reduced_motion() -> bool {
     !super::screen::animations_enabled()
+}
+
+/// The [`Waker`](crate::Waker)'s native half: a thread message posted to the UI thread, which
+/// ends `MsgWaitForMultipleObjectsEx`. Dispatching it does nothing (it has no window), and a
+/// modal loop that drops it returns through the pump, which re-arms the waker anyway.
+pub(crate) struct Poster(u32);
+
+impl Poster {
+    pub(crate) fn new() -> Self {
+        // SAFETY: plain query of the calling thread's ID.
+        Self(unsafe { windows::Win32::System::Threading::GetCurrentThreadId() })
+    }
+
+    pub(crate) fn post(&self) {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_APP};
+        // SAFETY: posts a message with no pointers to a thread ID; failure (the thread
+        // ended) only means nobody waits any more.
+        let _ = unsafe { PostThreadMessageW(self.0, WM_APP + 0x5741, WPARAM(0), LPARAM(0)) };
+    }
 }

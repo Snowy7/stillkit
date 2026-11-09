@@ -134,6 +134,7 @@ impl Turn {
                 Op::RoundedClipped { rect: self.bounds(rect), radius, ops: self.ops(ops.to_vec()).into() }
             }
             Op::Clip { rect } => Op::Clip { rect: self.bounds(rect) },
+            Op::Hole { rect } => Op::Hole { rect: self.bounds(rect) },
             Op::Unclip => Op::Unclip,
         });
     }
