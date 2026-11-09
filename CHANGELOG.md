@@ -18,6 +18,7 @@
 - el styling for dense tools: `border`, `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `Surface::set_caption(Caption::Compact)` (a 40-point title area with the macOS traffic lights centred) and `Surface::system_controls()` (their rect, so an app's own title bar leaves them room).
 - `Event::KeyUp`: a key going up on macOS, Windows and Linux, for held-key input such as fly navigation.
+- `El::focus_ring(false)`: an element that leaves showing focus to its container (`focus_within`), so a field inside a search box is not ringed twice.
 - Real soft shadows (`Op::SoftShadow`) with elevation levels per look, and Windows system backdrop frost for CPU surfaces.
 - Kit text components (text, secure and search fields, text area, combobox, command palette) and Linux Vulkan/Vello Hybrid GPU rendering and glass.
 - Portable process `Identity` and Wayland app_id, preserving Windows window class names.
