@@ -1392,7 +1392,7 @@ impl<S> Runtime<S> {
             phase,
             button,
             at: design(at),
-            local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+            local: { let p=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at)); Point::new((p.x-rect.left)/s,(p.y-rect.top)/s) },
             delta: Point::new((at.x - last.x) / s, (at.y - last.y) / s),
             origin: design(origin),
             size: (rect.width() / s, rect.height() / s),
@@ -2235,6 +2235,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             shadow: if look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
             angle: el.anim.rotate,
+            transform: el.anim.transform.unwrap_or([0.,0.,1.,1.,0.5,0.5]),
             motion,
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
@@ -2645,18 +2646,15 @@ fn paint_el<S>(
     if controls && !el.quiet {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
     }
-    // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
+    // Paint and hits share one affine scope; layout stays upright.
     let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
-    if angle != 0.0 {
-        let c = rect.center();
-        let turn = super::rotate::Turn::new(Point::new(c.x.round(), c.y.round()), angle);
-        if !turn.none() {
-            let drawn = f.list.ops.split_off(start);
-            f.list.ops.extend(turn.ops(drawn));
-            for h in &mut f.list.hits[hits..] {
-                h.rect = turn.bounds(h.rect);
-            }
-        }
+    let [x,y,sx,sy,ox,oy] = pose.transform;
+    let origin = Point::new(rect.left + rect.width()*ox, rect.top + rect.height()*oy);
+    let transform = crate::Transform::new(origin,angle,(sx,sy),(x*f.s*pose.xf.s,y*f.s*pose.xf.s));
+    if transform != crate::Transform::IDENTITY {
+        let drawn = f.list.ops.split_off(start);
+        f.push(Op::Transformed { transform, ops:drawn.into() });
+        for h in &mut f.list.hits[hits..] { h.transform(transform); }
     }
     if pose.opacity < 1.0 {
         fade(&mut f.list.ops[start..], pose.opacity);
@@ -2813,7 +2811,7 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::Shadow { color, .. }
             | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
             Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
-            Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
+            Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
             Op::TextField { .. } | Op::Clip { .. } | Op::Hole { .. } | Op::Unclip => {}
         }
     }
@@ -2823,6 +2821,7 @@ fn fade(ops: &mut [Op], by: f32) {
 /// hover, press and focus, only when it has a handler or is `focusable`.
 fn hit<S>(el: &El<S>, id: HitId, rect: Rect) -> Hit {
     Hit {
+        shape: None,
         id,
         rect,
         role: role_of(el),

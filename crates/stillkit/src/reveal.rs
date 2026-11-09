@@ -129,6 +129,7 @@ impl Snapshot {
                 .hits
                 .iter()
                 .map(|hit| Hit {
+                    shape: None,
                     rect: rect(hit.rect),
                     ..hit.clone()
                 })

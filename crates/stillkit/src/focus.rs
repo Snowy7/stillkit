@@ -27,6 +27,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, &enabled)| Hit {
+                shape: None,
                 id: i as HitId * 10,
                 rect: Rect::default(),
                 role: accesskit::Role::MenuItem,

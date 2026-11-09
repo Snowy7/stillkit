@@ -577,7 +577,7 @@ impl Painter {
             for op in ops {
                 match op {
                     Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
-                    Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
+                    Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
                     _ => {}
                 }
             }
@@ -592,13 +592,7 @@ impl Painter {
         self.images.borrow_mut().clear();
     }
 
-    /// The translation icons draw on top of.
-    fn base(&self) -> (f32, f32) {
-        #[cfg(feature = "gpu")]
-        return self.base.get();
-        #[cfg(not(feature = "gpu"))]
-        (0.0, 0.0)
-    }
+
 }
 
 impl Canvas {
@@ -801,6 +795,15 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
+                Op::Transformed { transform, ops } => {
+                    let mut saved = windows_numerics::Matrix3x2::identity();
+                    t.GetTransform(&mut saved);
+                    let [a,b,c,d,x,y] = transform.0;
+                    let local = windows_numerics::Matrix3x2 { M11:a,M12:b,M21:c,M22:d,M31:x,M32:y };
+                    t.SetTransform(&(local * saved));
+                    if let Some(inverse) = transform.inverse() { self.ops(text,ops,inverse.bounds(damage).inflate(1.0)); }
+                    t.SetTransform(&saved);
+                }
                 Op::Hole { rect } => {
                     // Clear ignores blending: the clip bounds it to the hole.
                     t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
@@ -1382,20 +1385,21 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             self.brush.SetColor(&color(c));
-            let (bx, by) = self.base();
-            t.SetTransform(&windows_numerics::Matrix3x2 {
+            let mut saved = windows_numerics::Matrix3x2::identity();
+            t.GetTransform(&mut saved);
+            t.SetTransform(&(windows_numerics::Matrix3x2 {
                 M11: scale,
                 M12: 0.0,
                 M21: 0.0,
                 M22: scale,
-                M31: rect.left + bx,
-                M32: rect.top + by,
-            });
+                M31: rect.left,
+                M32: rect.top,
+            } * saved));
             if icon.filled() {
                 t.FillGeometry(&*geometry, &self.brush, None);
             }
             t.DrawGeometry(&*geometry, &self.brush, weight / scale, &self.round);
-            t.SetTransform(&windows_numerics::Matrix3x2::translation(bx, by));
+            t.SetTransform(&saved);
         }
     }
 

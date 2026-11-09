@@ -123,6 +123,7 @@ impl Canvas {
             &mut self.resources,
             &mut ui.text,
             &list.ops,
+            Affine::translate((-(area.x as f64), -(area.y as f64))),
             &mut |resources, pix| {
                 let id = self.renderer.upload_image(
                     resources,

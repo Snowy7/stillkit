@@ -210,6 +210,7 @@ impl MonthGrid {
             }
             label(list, cell, &date.day.to_string(), font, text);
             list.hits.push(Hit {
+                shape: None,
                 id: base + date.day,
                 rect: cell,
                 role: Role::Button,

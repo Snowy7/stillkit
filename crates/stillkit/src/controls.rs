@@ -649,6 +649,7 @@ impl<'a, A: Clone> Builder<'a, A> {
         });
         let id = self.targets.len() as u32;
         self.list.hits.push(Hit {
+            shape: None,
             id,
             rect: visible.unwrap_or(Rect::new(rect.left, rect.top, 0.0, 0.0)),
             role,

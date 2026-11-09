@@ -46,6 +46,7 @@ pub(crate) struct Target {
     pub value: f32,
     /// Its turn about its centre, radians ([`super::El::rotate`]).
     pub angle: f32,
+    pub transform: [f32; 6],
     /// Its own or an ancestor's spring; `None` lands at once.
     pub motion: Option<Spring>,
     /// What presence moves along: its motion, or the theme's open spring.
@@ -110,6 +111,7 @@ pub(crate) struct Pose {
     pub value: f32,
     /// Its turn about its centre now, radians.
     pub angle: f32,
+    pub transform: [f32; 6],
 }
 
 impl Pose {
@@ -225,6 +227,7 @@ struct Track {
     shadow: Prop<1>,
     value: Prop<1>,
     angle: Prop<1>,
+    transform: Prop<6>,
     /// 1 shown, 0 away.
     presence: Prop<1>,
     transition: Option<Transition>,
@@ -251,6 +254,7 @@ impl Track {
             shadow: Prop::at([target.shadow]),
             value: Prop::at([target.value]),
             angle: Prop::at([target.angle]),
+            transform: Prop::at(target.transform),
             presence: Prop::at([1.0]),
             transition: target.transition,
             open: target.open,
@@ -278,6 +282,7 @@ impl Track {
         self.shadow.set([target.shadow], fade, t);
         self.value.set([target.value], spatial, t);
         self.angle.set([target.angle], spatial, t);
+        self.transform.set(target.transform, spatial, t);
         self.transition = target.transition;
         self.open = target.open;
         if self.leaving {
@@ -307,6 +312,7 @@ impl Track {
             self.shadow.settle(t, color),
             self.value.settle(t, 1.0 / 2048.0),
             self.angle.settle(t, 1.0 / 1024.0),
+            self.transform.settle(t, 0.001),
             self.presence.settle(t, color),
         ]
         .contains(&true)
@@ -324,6 +330,7 @@ impl Track {
             || self.shadow.moving.is_some()
             || self.value.moving.is_some()
             || self.angle.moving.is_some()
+            || self.transform.moving.is_some()
             || self.presence.moving.is_some()
     }
 }
@@ -432,6 +439,7 @@ impl Animator {
                     shadow: target.shadow,
                     value: target.value,
                     angle: target.angle,
+                    transform: target.transform,
                 },
             };
             out.push(Pose {
@@ -475,6 +483,7 @@ impl Animator {
                 None => track.value.target[0],
             },
             // To a thousandth of a radian, so a slow tail repaints nothing new.
+            transform: track.transform.value(t),
             angle: match track.angle.moving {
                 Some(_) => (track.angle.value(t)[0] * 1000.0).round() / 1000.0,
                 None => track.angle.target[0],
