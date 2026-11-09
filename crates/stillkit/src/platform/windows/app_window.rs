@@ -20,11 +20,13 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWMWCP_DONOTROUND,
 };
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BeginPaint, CreateSolidBrush, DIB_RGB_COLORS,
     DeleteObject, EndPaint, FillRect, GetDC, PAINTSTRUCT, ReleaseDC, ScreenToClient,
-    SetDIBitsToDevice,
+    SetDIBitsToDevice, ClientToScreen, MonitorFromWindow, GetMonitorInfoW, MONITORINFO,
+    MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
@@ -42,7 +44,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
     WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
     WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
-    WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_THEMECHANGED, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+    WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_THEMECHANGED, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
 };
 use windows::core::HSTRING;
 
@@ -114,6 +116,7 @@ pub(crate) struct AppShared {
     sizing: Cell<bool>,
     /// The caption button pressed (an `HT*` code), until it's released.
     pressed: Cell<u32>,
+    square: Cell<Option<bool>>,
 }
 
 impl AppShared {
@@ -133,6 +136,7 @@ impl AppShared {
             cursor: Cell::new(Cursor::Arrow),
             sizing: Cell::new(false),
             pressed: Cell::new(0),
+            square: Cell::new(None),
         }
     }
 }
@@ -223,6 +227,42 @@ fn scale_of(hwnd: HWND) -> f32 {
     if dpi == 0 { 1.0 } else { dpi as f32 / 96.0 }
 }
 
+/// The app's outer contour in device pixels. Use the same value for alpha content,
+/// glass and caption clips. A maximized or monitor-edge window has square corners.
+pub fn corner_radius(hwnd: HWND) -> f32 {
+    // SAFETY: read-only geometry queries on the supplied HWND and its nearest monitor.
+    unsafe {
+        if IsZoomed(hwnd).as_bool() {
+            return 0.0;
+        }
+        let mut rect = RECT::default();
+        let mut origin = POINT::default();
+        let mut monitor = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if GetClientRect(hwnd, &mut rect).is_ok()
+            && ClientToScreen(hwnd, &mut origin).as_bool()
+            && GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut monitor).as_bool()
+            && [monitor.rcWork, monitor.rcMonitor].iter().any(|edge| {
+                origin.x <= edge.left || origin.y <= edge.top
+                    || origin.x + rect.right >= edge.right || origin.y + rect.bottom >= edge.bottom
+            })
+        {
+            return 0.0;
+        }
+    }
+    crate::tokens::WINDOW_CORNER_RADIUS * scale_of(hwnd)
+}
+
+fn sync_corners(app: &AppShared, hwnd: HWND) {
+    let square = corner_radius(hwnd) == 0.0;
+    if app.square.get() == Some(square) { return; }
+    let preference = if square { DWMWCP_DONOTROUND } else { DWMWCP_ROUND };
+    // SAFETY: one correctly sized DWM attribute on this app's own window.
+    if unsafe { DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+        (&raw const preference).cast(), size_of_val(&preference) as u32) }.is_ok() {
+        app.square.set(Some(square));
+    }
+}
+
 fn client_point(hwnd: HWND, lparam: LPARAM) -> Point {
     let mut p = POINT {
         x: i32::from(lparam.0 as i16),
@@ -289,6 +329,11 @@ pub(crate) fn message(
     lparam: LPARAM,
 ) -> Option<LRESULT> {
     match msg {
+        WM_WINDOWPOSCHANGED => {
+            sync_corners(app, hwnd);
+            push(id, Event::SettingChanged);
+            None
+        }
         WM_NCCALCSIZE if wparam.0 != 0 => {
             // SAFETY: with wparam TRUE, lparam is a live NCCALCSIZE_PARAMS. Windows computes
             // the standard frame; we take back the caption (the top stays where it was).

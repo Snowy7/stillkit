@@ -523,7 +523,7 @@ impl Theme {
             material: crate::Material {
                 tint: self.color.surface,
             },
-            radius: Radii::concentric(self.radius.surface, 6.0, 8.0),
+            radius: crate::tokens::WINDOW_CORNER_RADIUS,
             border: self.border.is_some(),
             glass: self.glass,
             ..base

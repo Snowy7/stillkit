@@ -8,6 +8,9 @@ use std::sync::Arc;
 use crate::geom::Rgba;
 use crate::text::TextStyle;
 
+/// Windows 11 top-level windows, menus and flyouts, in logical pixels (96 DPI).
+pub const WINDOW_CORNER_RADIUS: f32 = 8.0;
+
 #[derive(Debug, Clone, PartialEq)]
 /// Tokens.
 pub struct Tokens {
@@ -49,7 +52,7 @@ impl Default for Tokens {
             material: Material {
                 tint: Rgba::rgb8([0x16, 0x18, 0x1d], 0.94),
             },
-            radius: 10.0,
+            radius: WINDOW_CORNER_RADIUS,
             border: true,
             shadow: true,
             scale: 1.0,
