@@ -28,7 +28,11 @@ fn raster(
     sigma: f32,
     mask: Option<(Rect, f32, f32)>,
 ) -> Result<Arc<Image>> {
-    let sigma = if sigma.is_finite() {sigma.clamp(0.0,64.0)} else {0.0};
+    let sigma = if sigma.is_finite() {
+        sigma.clamp(0.0, 64.0)
+    } else {
+        0.0
+    };
     if let Some(image) = CACHE.with(|c| {
         c.borrow()
             .iter()
@@ -60,7 +64,9 @@ fn raster(
         let i = y as usize * width as usize * 4;
         pixels[i..i + row.len()].copy_from_slice(row);
     })?;
-    let original = mask.map(|_| pixels.clone());
+    let original = mask
+        .filter(|(_, radius, opacity)| *radius > 0.0 || *opacity < 1.0)
+        .map(|_| pixels.clone());
     boxes(&mut pixels, width as usize, height as usize, sigma);
     if let (Some((bounds, radius, opacity)), Some(original)) = (mask, original) {
         let radius = radius.clamp(0.0, bounds.width().min(bounds.height()) * 0.5);
@@ -72,7 +78,11 @@ fn raster(
                 let dy = (rect.top + y as f32 + 0.5 - (bounds.top + bounds.bottom) * 0.5).abs()
                     - bounds.height() * 0.5
                     + radius;
-                let distance = dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - radius;
+                let distance = if dx > 0.0 && dy > 0.0 {
+                    (dx * dx + dy * dy).sqrt() - radius
+                } else {
+                    dx.max(dy) - radius
+                };
                 let amount = (0.5 - distance).clamp(0.0, 1.0) * opacity;
                 let i = ((y * width + x) * 4) as usize;
                 for channel in 0..4 {
@@ -244,7 +254,7 @@ fn walk(
         match op {
             Op::Blurred { sigma, ops } if native => {
                 out.push(Op::Blurred {
-                    sigma: sigma.clamp(0.0,64.0),
+                    sigma: sigma.clamp(0.0, 64.0),
                     ops: walk(text, ops, &[], op.bounds(), native)?.into(),
                 });
             }
@@ -269,7 +279,7 @@ fn walk(
                 let source: Vec<_> = behind.iter().chain(&out).cloned().collect();
                 // Source-over is exact for an opaque backdrop. Preserve alpha with the
                 // software replacement path when that cannot be established from the list.
-                let input=rect.inflate(reach(*sigma));
+                let input = rect.inflate(reach(*sigma));
                 let opaque=source.iter().any(|op| matches!(op,Op::Fill{rect,radius,color} if *radius==0.0 && color.a==1.0 && rect.left<=input.left && rect.top<=input.top && rect.right>=input.right && rect.bottom>=input.bottom))
                     && source.iter().all(|op| !matches!(op,Op::Hole{..}|Op::Clipped{..}|Op::RoundedClipped{..}|Op::Transformed{..}));
                 if native && *opacity == 1.0 && opaque {
@@ -277,7 +287,7 @@ fn walk(
                         rect: *rect,
                         radius: *radius,
                         ops: vec![Op::Blurred {
-                            sigma: sigma.clamp(0.0,64.0),
+                            sigma: sigma.clamp(0.0, 64.0),
                             ops: source.into(),
                         }]
                         .into(),

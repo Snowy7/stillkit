@@ -121,11 +121,18 @@ fn cpu_blur_cost() {
         for backdrop in [false, true] {
             let mut samples = Vec::new();
             for i in 0..120 {
-                let source: Arc<[Op]> = vec![Op::Fill {
-                    rect: Rect::new(0.0, 0.0, w as f32 / 2.0, h as f32),
-                    radius: 0.0,
-                    color: Rgba::new(i as f32 / 120.0, 0.2, 0.8, 1.0),
-                }]
+                let source: Arc<[Op]> = vec![
+                    Op::Fill {
+                        rect: Rect::new(0.0, 0.0, w as f32 / 2.0, h as f32),
+                        radius: 0.0,
+                        color: Rgba::new(i as f32 / 120.0, 0.2, 0.8, 1.0),
+                    },
+                    Op::Fill {
+                        rect: Rect::new(w as f32 / 2.0, 0.0, w as f32 / 2.0, h as f32),
+                        radius: 0.0,
+                        color: Rgba::new(0.8, 0.2, i as f32 / 120.0, 1.0),
+                    },
+                ]
                 .into();
                 let ops = if backdrop {
                     let mut ops = source.to_vec();
@@ -205,9 +212,19 @@ fn partial_cpu_updates_equal_fresh_filters() {
 fn native_gpu_filters_mix_pixels_inside_the_mask() {
     let mut ui = stillkit::Ui::new().unwrap();
     for backdrop in [false, true] {
+        let mut list = scene(backdrop, 4.0);
+        if backdrop {
+            list.ops.insert(
+                0,
+                Op::Fill {
+                    rect: Rect::new(-100.0, -100.0, 300.0, 300.0),
+                    radius: 0.0,
+                    color: Rgba::new(0.1, 0.1, 0.1, 1.0),
+                },
+            );
+        }
         let Some(image) =
-            stillkit::platform::windows::gpu::render(&mut ui, &scene(backdrop, 4.0), 100, 100)
-                .unwrap()
+            stillkit::platform::windows::gpu::render(&mut ui, &list, 100, 100).unwrap()
         else {
             return;
         };
@@ -221,9 +238,24 @@ fn native_gpu_filters_mix_pixels_inside_the_mask() {
 
 #[test]
 fn a_uniform_translucent_backdrop_keeps_its_alpha() {
-    let mut ui=stillkit::Ui::new().unwrap();
-    let list=DisplayList {ops:vec![Op::Fill{rect:Rect::new(0.0,0.0,100.0,100.0),radius:0.0,color:Rgba::new(0.2,0.4,0.6,0.5)},Op::BackdropBlur{rect:Rect::new(20.0,20.0,60.0,60.0),radius:12.0,sigma:2.0,opacity:0.5}],..Default::default()};
-    let image=stillkit::render(&mut ui,&list,100,100).unwrap();
-    assert_eq!(image.pixel(50,50),image.pixel(10,50));
-    assert_eq!(image.pixel(20,20),image.pixel(10,50));
+    let mut ui = stillkit::Ui::new().unwrap();
+    let list = DisplayList {
+        ops: vec![
+            Op::Fill {
+                rect: Rect::new(0.0, 0.0, 100.0, 100.0),
+                radius: 0.0,
+                color: Rgba::new(0.2, 0.4, 0.6, 0.5),
+            },
+            Op::BackdropBlur {
+                rect: Rect::new(20.0, 20.0, 60.0, 60.0),
+                radius: 12.0,
+                sigma: 2.0,
+                opacity: 0.5,
+            },
+        ],
+        ..Default::default()
+    };
+    let image = stillkit::render(&mut ui, &list, 100, 100).unwrap();
+    assert_eq!(image.pixel(50, 50), image.pixel(10, 50));
+    assert_eq!(image.pixel(20, 20), image.pixel(10, 50));
 }
