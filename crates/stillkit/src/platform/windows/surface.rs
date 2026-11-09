@@ -369,9 +369,14 @@ impl Surface {
         if let Kind::App { min } = kind {
             let ex = if gpu { layered } else { WINDOW_EX_STYLE::default() };
             let hwnd = crate::app_window::create(name, Some(wndproc), ex)?;
-            // Files dropped from Explorer arrive as WM_DROPFILES.
+            // Files dropped from Explorer arrive as WM_DROPFILES. WS_EX_ACCEPTFILES is all
+            // DragAcceptFiles sets; setting it here keeps shell32.dll out until a drop lands.
             // SAFETY: the window this call just made.
-            unsafe { windows::Win32::UI::Shell::DragAcceptFiles(hwnd, true) };
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::WS_EX_ACCEPTFILES;
+                let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_ACCEPTFILES.0 as isize);
+            }
             let app = crate::app_window::AppShared::new(min);
             return Ok(Self::adopt(hwnd, kind, name, role, deferred, Some(app), gpu));
         }
@@ -1555,23 +1560,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_MOUSELEAVE => push(id, Event::Leave),
         windows::Win32::UI::WindowsAndMessaging::WM_DROPFILES => {
-            use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, DragQueryPoint, HDROP};
-            let drop = HDROP(wparam.0 as *mut _);
-            let mut at = POINT::default();
             // SAFETY: the HDROP this message carries, read then released once.
-            let paths = unsafe {
-                let _ = DragQueryPoint(drop, &mut at);
-                let count = DragQueryFileW(drop, u32::MAX, None);
-                let paths = (0..count)
-                    .map(|i| {
-                        let mut buf = vec![0u16; DragQueryFileW(drop, i, None) as usize + 1];
-                        let len = DragQueryFileW(drop, i, Some(&mut buf)) as usize;
-                        std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]))
-                    })
-                    .collect();
-                DragFinish(drop);
-                paths
-            };
+            let Some((at, paths)) = (unsafe { dropped_files(wparam.0 as *mut _) }) else { return LRESULT(0) };
             set_dropped_files(paths);
             let (ox, oy) = shared.origin.get();
             push(id, Event::FilesDropped(Pointer { at: Point::new(at.x as f32, at.y as f32), screen: (ox + at.x, oy + at.y) }));
@@ -1813,6 +1803,39 @@ pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
     DROPPED.with_borrow_mut(std::mem::take)
 }
 
+/// Reads and releases a `WM_DROPFILES` drop: where it landed (client px) and its paths.
+/// shell32.dll's drop functions are looked up on the first drop, not imported: a static import
+/// would map shell32 into every stillkit process at start (rule: nothing loads until asked).
+///
+/// # Safety
+/// `drop` is the `HDROP` a `WM_DROPFILES` message carried, not yet finished.
+unsafe fn dropped_files(drop: *mut core::ffi::c_void) -> Option<(POINT, Vec<std::path::PathBuf>)> {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LOAD_LIBRARY_SEARCH_SYSTEM32, LoadLibraryExW};
+    use windows::core::{s, w};
+    type QueryFile = unsafe extern "system" fn(*mut core::ffi::c_void, u32, *mut u16, u32) -> u32;
+    type QueryPoint = unsafe extern "system" fn(*mut core::ffi::c_void, *mut POINT) -> i32;
+    type Finish = unsafe extern "system" fn(*mut core::ffi::c_void);
+    // SAFETY: system32's shell32 and its documented exports, called with their signatures on
+    // the caller's live HDROP, which DragFinish releases last.
+    unsafe {
+        let shell = LoadLibraryExW(w!("shell32.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok()?;
+        let query: QueryFile = std::mem::transmute(GetProcAddress(shell, s!("DragQueryFileW"))?);
+        let point: QueryPoint = std::mem::transmute(GetProcAddress(shell, s!("DragQueryPoint"))?);
+        let finish: Finish = std::mem::transmute(GetProcAddress(shell, s!("DragFinish"))?);
+        let mut at = POINT::default();
+        point(drop, &mut at);
+        let paths = (0..query(drop, u32::MAX, std::ptr::null_mut(), 0))
+            .map(|i| {
+                let mut buf = vec![0u16; query(drop, i, std::ptr::null_mut(), 0) as usize + 1];
+                let len = query(drop, i, buf.as_mut_ptr(), buf.len() as u32) as usize;
+                std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]))
+            })
+            .collect();
+        finish(drop);
+        Some((at, paths))
+    }
+}
+
 /// Keeps dropped paths for [`take_dropped_files`].
 #[allow(dead_code)]
 pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
@@ -1827,5 +1850,36 @@ impl Surface {
     /// Where the system draws the window controls: nowhere here (apps draw their own).
     pub fn system_controls(&self) -> Option<crate::Rect> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::System::Memory::{GMEM_MOVEABLE, GMEM_ZEROINIT, GlobalAlloc, GlobalLock, GlobalUnlock};
+
+    /// A drop as Explorer builds it: a `DROPFILES` header, then nul-separated wide paths.
+    #[test]
+    fn a_drop_reads_its_point_and_paths_through_the_lazy_shell32_calls() {
+        let paths = [r"C:\one.txt", r"D:\a folder\two"];
+        let mut wide: Vec<u16> = paths.iter().flat_map(|p| p.encode_utf16().chain([0])).collect();
+        wide.push(0);
+        const HEADER: usize = 20; // pFiles, pt, fNC, fWide
+        // SAFETY: a fresh allocation sized for the header and paths, filled while locked; the
+        // reader's DragFinish frees it.
+        let drop = unsafe {
+            let global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, HEADER + wide.len() * 2).unwrap();
+            let bytes = GlobalLock(global).cast::<u8>();
+            bytes.cast::<u32>().write_unaligned(HEADER as u32);
+            bytes.add(4).cast::<POINT>().write_unaligned(POINT { x: 12, y: 34 });
+            bytes.add(16).cast::<i32>().write_unaligned(1);
+            std::ptr::copy_nonoverlapping(wide.as_ptr().cast::<u8>(), bytes.add(HEADER), wide.len() * 2);
+            let _ = GlobalUnlock(global);
+            global.0
+        };
+        // SAFETY: an unfinished HDROP made above.
+        let (at, read) = unsafe { super::dropped_files(drop) }.expect("shell32's drop functions");
+        assert_eq!((at.x, at.y), (12, 34));
+        assert_eq!(read, paths.map(std::path::PathBuf::from));
     }
 }
