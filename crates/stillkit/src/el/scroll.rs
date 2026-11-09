@@ -57,6 +57,13 @@ impl ScrollView {
     }
 
     /// Whether the content rests at its end (or cannot scroll).
+    /// Moves where it is and where it heads by `by` device px together, keeping any flight in
+    /// progress: content above the view changed size, and the view follows so nothing on
+    /// screen moves.
+    pub fn slide(&mut self, by: f32) {
+        self.offset.target[0] = (self.offset.target[0] + by).clamp(0.0, self.max);
+    }
+
     pub fn at_end(&self) -> bool {
         self.offset.target[0] >= self.max - 0.5
     }

@@ -434,3 +434,57 @@ the document to another window. The kit does not create windows or transfer stat
 The app filters rows, supplies stable ids/selection and applies picks; disabled rows
 stay announced but are skipped by keyboard navigation. Compose it with `el::popover`
 and `take_focus()` when keyboard focus should leave the triggering editor.
+
+### Virtual tables
+
+For large data, keep a `TableModel` in app state and build with `VirtualTable::new(key, &state, model)`.
+`set_rows` supplies stable keys and type-ahead labels only when the order changes;
+the custom cell callback runs only for the built range. Columns retain their widths
+with min/max bounds and a header drag handle. The header stays above the scrolling
+body. The sort callback applies your comparator and calls `set_rows` with the result.
+`selection.multi = true` enables Ctrl toggles and Shift ranges. Up/Down, Home/End,
+PageUp/PageDown, type-ahead and Enter operate over the whole model, including rows
+that have never been built. `reveal(key)` scrolls to an unbuilt row. Grid, row and
+cell semantics include complete counts and indexes. Width persistence across process
+launches belongs to the app; the model retains widths across view runs.
+
+```rust
+VirtualTable::new("records", &s.table, |s: &mut State| &mut s.table)
+    .label("Records")
+    .height(420.)
+    .cell(|row, col| text(format!("{row}:{col}")))
+    .on_open(|s, key| s.opened = key.to_string())
+    .on_sort(|s, (col, dir)| { /* reorder s.table for col and dir */ })
+    .build()
+```
+
+Only the key, borrowed model and mutable model accessor are required. The label defaults
+to the key. Without `height`, the control grows to fill available height; constrain its
+parent. Paging moves ten rows without an explicit height. The default cells show row
+labels in the first column. `on_sort` enables sortable headers; without it, header presses
+do nothing. `on_open` enables Enter opening; otherwise Enter is unhandled. Columns use
+fixed design-pixel widths with no horizontal scroll; the header does not scroll sideways.
+
+### Virtual trees
+
+`TreeModel::new(nodes)` caches flattened visibility; `VirtualTree::new(key, &state, model).build()` builds only
+rows near sight. Left/Right collapse, expand and move to parents or first children;
+Up/Down, Home/End, paging and type-ahead use visible order. Set `selection.multi` for
+Ctrl and Shift selection. `reveal(key)` opens the complete ancestor path, selects the
+node and scrolls to it. `filter` keeps matching labels and ancestors; `clear_filter`
+keeps current expansion state. `sort_natural` orders sibling filenames by numeric
+runs without integer overflow. Each tree item reports level, sibling count and position.
+
+```rust
+VirtualTree::new("files", &s.tree, |s: &mut State| &mut s.tree)
+    .label("Project files")
+    .height(390.)
+    .on_open(|s, key| s.opened = key.to_string())
+    .build()
+```
+
+The tree uses the same label and height defaults as the table. Leaf opening is off
+without `on_open`; Enter/Space still toggle branches.
+
+Run `cargo run -p stillkit-kit --example data_grid` for a 100,000-row table alongside
+a file-like tree, with resizing, sorting, reveal and filtering.

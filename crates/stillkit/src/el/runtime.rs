@@ -71,7 +71,7 @@ struct Capture {
 }
 
 enum Action<S> {
-    Press(HitId),
+    Press(HitId, Modifiers),
     Drag(HitId, f32, f32),
     /// The pointer's story on an element with `on_pointer`.
     Pointer(HitId, super::element::PointerEvent),
@@ -221,6 +221,7 @@ pub struct Runtime<S> {
     dragging: Option<HitId>,
     /// Scroll views by identity.
     scrolls: HashMap<u64, ScrollView>,
+    variable_rows: bool,
     /// Whether a scroll view glides or its scrollbar shows (frames keep coming).
     scrolling: bool,
     /// Keys to scroll into view once the layout is current.
@@ -347,6 +348,7 @@ impl<S: 'static> Runtime<S> {
             queue: Vec::new(),
             dragging: None,
             scrolls: HashMap::new(),
+            variable_rows: false,
             scrolling: false,
             reveal: Vec::new(),
             followed: false,
@@ -450,7 +452,11 @@ impl<S> Runtime<S> {
         }
         let scrolled = self.tick_scrolls() || std::mem::take(&mut self.followed);
         // A virtual list scrolled past what it built: build again, in this frame.
-        if scrolled && self.virtual_stale() {
+        for _ in 0..3 {
+            if !scrolled || !(self.virtual_stale() || self.stale_view) {
+                break;
+            }
+            self.stale_view = false;
             let before = keyed(&self.root, &self.laid, &self.theme);
             self.views += 1;
             let root = self.run_view();
@@ -574,7 +580,7 @@ impl<S> Runtime<S> {
                     self.stale_view = true;
                     continue;
                 }
-                Action::Press(hit)
+                Action::Press(hit, _)
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
@@ -588,9 +594,15 @@ impl<S> Runtime<S> {
             let Some(el) = element(&self.root, &self.laid, hit) else {
                 continue;
             };
+            tx.mods = match &action {
+                Action::Press(_, mods) => *mods,
+                Action::Pointer(_, event) => event.mods,
+                Action::Wheel(_, event) => event.mods,
+                _ => Modifiers::NONE,
+            };
             let state = &mut self.state;
             match action {
-                Action::Press(_) => match &el.on_press {
+                Action::Press(_, _) => match &el.on_press {
                     Some(handler) => handler(state, &mut tx),
                     None => continue,
                 },
@@ -739,6 +751,7 @@ impl<S> Runtime<S> {
         self.targets = targets;
         self.sync_fields();
         self.sync_scrolls();
+        self.measure_virtual_rows();
         self.sync_timers();
         if !self.layers.is_empty() || !self.shown.is_empty() {
             self.follow_layers();
@@ -764,9 +777,11 @@ impl<S> Runtime<S> {
         let t = self.anim.t;
         let mut seen = HashSet::new();
         let mut followed = false;
+        let mut variable_rows = false;
         let areas: HashMap<u64, (f32, f32)> =
             self.fields.keys().filter_map(|&id| Some((id, self.field_extent(id)?))).collect();
         each(&self.root, &self.laid, &mut |el, i, _| {
+            variable_rows |= el.virt.as_ref().is_some_and(|v| v.variable.is_some());
             let field = areas.get(&self.laid[i].id).copied();
             let axis = el.scrolls().or(field.map(|_| Axis::Vertical));
             if let (Some(axis), Some(extent)) = (axis, self.laid[i].extent.or(field)) {
@@ -786,6 +801,7 @@ impl<S> Runtime<S> {
         });
         self.scrolls.retain(|id, _| seen.contains(id));
         self.followed |= followed;
+        self.variable_rows = variable_rows;
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
@@ -1050,7 +1066,7 @@ impl<S> Runtime<S> {
         }
         let before = self.ix.clone();
         if let Response::Activate(hit) = self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), event) {
-            self.queue.push(Action::Press(hit));
+            self.queue.push(Action::Press(hit, self.held));
         }
         self.pointer_input(event);
         if !self.fields.is_empty()
@@ -1091,8 +1107,56 @@ impl<S> Runtime<S> {
 
     /// Runs the view with each virtual list's scroll place in reach ([`super::virtual_list`]).
     fn run_view(&mut self) -> El<S> {
+        if self.variable_rows {
+            let flat = flatten(&self.root);
+            for (i, el) in flat.iter().enumerate() {
+                if let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) {
+                    let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit)).and_then(|mut j| {
+                        loop {
+                            let parent = self.laid[j].parent?;
+                            if parent == i { return flat[j].key.clone(); }
+                            j = parent;
+                        }
+                    });
+                    if let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)) {
+                        rows.prepare(view.offset(self.anim.t) / self.scale, focused);
+                    }
+                }
+            }
+        }
         let places = self.virtual_places();
         super::virtualize::with_viewports(places, || (self.view)(&self.state))
+    }
+
+    /// Measures built rows and keeps the keyed anchor still.
+    fn measure_virtual_rows(&mut self) {
+        if !self.variable_rows {
+            return;
+        }
+        let flat = flatten(&self.root);
+        for (i, el) in flat.iter().enumerate() {
+            let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) else { continue };
+            let mut changed = false;
+            for (j, child) in flat.iter().enumerate().skip(i + 1) {
+                if self.laid[j].parent == Some(i) && let Some(key) = &child.key {
+                    changed |= rows.measure(key, self.laid[j].rect.height() / self.scale);
+                }
+            }
+            if let Some(view) = self.scrolls.get_mut(&self.laid[i].id) {
+                let anchored = rows.offset() * self.scale;
+                if rows.take_jump() {
+                    view.to(anchored, None, self.anim.t);
+                } else {
+                    // Rows above the anchor were measured: follow them without ending a
+                    // scroll that is still moving.
+                    let drift = anchored - view.offset(self.anim.t);
+                    if drift.abs() >= 0.5 {
+                        view.slide(drift);
+                    }
+                }
+            }
+            self.stale_view |= changed;
+        }
     }
 
     /// Each keyed virtual list's offset and viewport now, design px.
@@ -1117,6 +1181,7 @@ impl<S> Runtime<S> {
             if let Some(v) = &el.virt
                 && let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id))
             {
+                if let Some(rows) = &v.variable { rows.track(view.offset(t) / s); }
                 stale |= v.stale(view.offset(t) / s, view.viewport / s);
             }
         });
@@ -1452,7 +1517,7 @@ impl<S> Runtime<S> {
             Intent::Focus(hit, press) => {
                 self.focus_hit(hit);
                 if press {
-                    self.queue.push(Action::Press(hit));
+                    self.queue.push(Action::Press(hit, self.mods));
                 }
             }
             Intent::Scroll(index, to) => {
@@ -2172,6 +2237,7 @@ fn semantics_of<S>(el: &El<S>, id: HitId, rel: Option<&Relation>, out: &mut Vec<
         invalid: s.invalid,
         // Keys resolve once the whole list is painted (`Runtime::paint`).
         active_descendant: None,
+        collection: s.collection.clone(),
     };
     if detail != Detail::default() || s.active.is_some() {
         out.push((id, Semantics::Detail(detail)));

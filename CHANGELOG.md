@@ -2,11 +2,15 @@
 
 ## [Unreleased]
 
+- Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
+
 ### Added
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - Stable-id editor TabStrip with reorder, overflow, close and tear-out intents; composable PopupList listbox.
 - Controlled nested SplitView panes with captured resizing, collapse/reset and keyboard range semantics.
+- Cached virtual trees with deep reveal, ancestor-preserving filters, desktop selection, full tree keyboard navigation and natural filename sorting; add the `data_grid` example.
+- Virtual table model with custom cells, persistent column resizing, sorting, desktop selection, full-model keyboard navigation and grid metadata.
 - el styling for dense tools: `border`, `edges` (a design px of light and shade inside a box's top and bottom, following its corners), `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
@@ -33,6 +37,7 @@
 - 0.1 metadata groundwork and Windows/Linux CI with an advisory macOS cross-check.
 
 ### Changed
+- Replace positional virtual table/tree constructors with `VirtualTable` and `VirtualTree` builders; default to growing height with optional cell, open and sort callbacks.
 - Display-list damage trims the unchanged start and end before comparing, so an inserted or removed op damages only itself; macOS CPU surfaces repaint each disjoint damaged region alone.
 - Interaction motion has one implementation; `interact::motion` remains a compatibility re-export.
 

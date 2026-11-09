@@ -1152,15 +1152,19 @@ pub use tooltip::Tooltip;
 // Layout and data
 mod chart;
 mod data;
+mod virtual_data;
+pub use virtual_data::{
+    DataSelection, TableColumn, TableModel, TreeModel, VirtualTable, VirtualTree, natural_cmp,
+};
+mod color;
 mod feedback;
 mod navigation;
-mod color;
 mod stepper;
 pub use chart::{Chart, ChartSeries, QuotaBar};
+pub use color::{ColorPicker, Hsva};
 pub use data::{ScrollView, SortDirection, Table, Tree, TreeNode};
 pub use feedback::{Avatar, Ring, Skeleton, Spinner};
 pub use navigation::{Accordion, Disclosure, Sidebar, Tabs, Toolbar};
-pub use color::{ColorPicker, Hsva};
 pub use stepper::Stepper;
 
 // Text

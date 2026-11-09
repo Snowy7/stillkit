@@ -58,3 +58,14 @@ fn main() -> anyhow::Result<()> {
 
 
 [All guides](../../README.md#guides) | [Element reference](../el.md)
+
+Large datasets use `VirtualTable::new(key, &state, model).build()` with app-owned `TableModel`; only visible cells are built. See the kit README for selection, sorting and bounded column widths.
+
+`VirtualTree::new(key, &state, model).build()` uses cached `TreeModel` visibility for file-like trees. Deep reveal opens ancestors; filtering retains paths to matches. The `data_grid` example combines both controls with 100,000 table rows.
+
+Virtual data builders require only a key, borrowed model and mutable model accessor.
+Use `.label(..)`, `.height(..)`, table `.cell(..)`, `.on_open(..)` and table `.on_sort(..)`
+before `.build()`. Without a height they fill available parent height (paging defaults
+to ten rows); without handlers, opening and sorting are off. Default table cells show
+row labels in column zero. Tree branches still toggle on Enter/Space without `on_open`.
+Table columns have fixed widths, no horizontal scroll, and a header that does not scroll sideways.

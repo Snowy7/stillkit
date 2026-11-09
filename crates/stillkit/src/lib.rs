@@ -15,7 +15,7 @@ mod a11y;
 pub mod platform;
 mod identity;
 pub use identity::{Identity, set_identity};
-pub use a11y::{AccessibilityAction, Detail, FieldText, Semantics, TextLine};
+pub use a11y::{Collection, AccessibilityAction, Detail, FieldText, Semantics, TextLine};
 pub use platform::current::app_window;
 pub mod calendar;
 pub mod chart;

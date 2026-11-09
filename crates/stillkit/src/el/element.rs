@@ -168,8 +168,8 @@ impl Tx {
         self.instant = true;
     }
 
-    /// The modifier keys held with the key an [`El::on_key`] handler is looking at (none for a
-    /// press or a timer).
+    /// The modifiers captured with this key, press, pointer or wheel action.
+    /// Timers and other programmatic actions carry none.
     pub fn modifiers(&self) -> Modifiers {
         self.mods
     }
@@ -729,6 +729,8 @@ pub(crate) struct Sem {
     pub invalid: bool,
     /// The key of the descendant it shows as active ([`El::active_descendant`]).
     pub active: Option<Key>,
+    pub collection: Option<Box<crate::a11y::Collection>>,
+
 }
 
 /// A roving focus group ([`El::focus_group`]).
@@ -1251,7 +1253,42 @@ impl<S> El<S> {
         self
     }
 
-    /// For the members of a list, tab bar or segmented control: whether this one is chosen.
+    /// Total rows, including virtual rows.
+    pub fn row_count(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).row_count = Some(value);
+        self
+    }
+    /// Total columns.
+    pub fn column_count(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).column_count = Some(value);
+        self
+    }
+    /// Zero-based row index in the complete model.
+    pub fn row_index(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).row_index = Some(value);
+        self
+    }
+    /// Zero-based column index.
+    pub fn column_index(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).column_index = Some(value);
+        self
+    }
+    /// One-based tree depth.
+    pub fn level(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).level = Some(value);
+        self
+    }
+    /// Number of siblings.
+    pub fn size_of_set(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).size_of_set = Some(value);
+        self
+    }
+    /// One-based sibling position.
+    pub fn position_in_set(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).position_in_set = Some(value);
+        self
+    }
+    /// Whether this member is chosen.
     /// A focus group's Tab lands on its selected (or checked) member.
     pub fn selected(mut self, selected: bool) -> Self {
         self.sem.selected = Some(selected);

@@ -561,3 +561,14 @@ use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x,
   changes at once on a theme switch; its strength springs).
 - Damage is positional: when an exit ends, the ops after it shift, so that one frame redraws
   from the leaving element down.
+
+### Measured virtual rows
+
+Keep a `VirtualRows` in app state, call `set_keys` when the order changes, and use
+`variable_list("messages", &state.rows, |i| message(&state.items[i]))`. Natural row
+heights are measured after layout and cached by key; `new(24.)` supplies the estimate.
+Measurements use prefix sums, so scrolling does not walk the dataset. The keyed
+anchor survives prepends and measurements above the viewport. `rows.reveal(key)`
+inside an app update builds and reveals an unmounted row. Focused rows remain built.
+Call `invalidate()` after changing the available width or font. Fixed-height
+`virtual_list` keeps its arithmetic path and has no measurement cache.
