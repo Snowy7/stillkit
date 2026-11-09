@@ -515,3 +515,18 @@ use the same runtime: `frame(dt)`, `pointer_down/up/move(x, y)`, `right_click(x,
   changes at once on a theme switch; its strength springs).
 - Damage is positional: when an exit ends, the ops after it shift, so that one frame redraws
   from the leaving element down.
+
+## Selectable documents
+
+`text("Version 1.0").selectable()` enables drag selection, double-click words,
+triple-click paragraphs, Shift-click extension, Ctrl+A and Ctrl+C (Command+A/C
+also work). Selection uses `token::SELECTION` and exposes character ranges to
+assistive technology. It does not run the view or start a caret timer.
+
+Use `col().selectable().children(...)` for a document: its display text shares
+one selection and copies in tree reading order, with a newline between elements.
+Text fields retain their independent editing state; interactive controls are excluded.
+Descendants added before or after `.selectable()` participate. Give dynamic documents stable element keys.
+Selectable labels wrap fully by default; `.wrap(n)` still limits visible lines.
+The window host uses `el::SystemClipboard`; headless runtimes can inject a
+`Clipboard` with `Runtime::set_clipboard`.

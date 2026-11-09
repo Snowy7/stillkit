@@ -762,6 +762,7 @@ pub struct El<S> {
     pub(crate) virt: Option<super::virtualize::Virt>,
     /// Draws no focus ring of its own ([`El::focus_ring`]).
     pub(crate) quiet: bool,
+    pub(crate) selectable: bool,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -804,6 +805,7 @@ fn new<S>(what: What) -> El<S> {
         virt: None,
         cascade: false,
         quiet: false,
+        selectable: false,
         children: Vec::new(),
     }
 }
@@ -923,15 +925,37 @@ impl<S> El<S> {
         self
     }
 
+    /// Makes display text selectable. A container joins descendants in reading order,
+    /// with a newline between elements. Fields keep their own editing selection.
+    /// Unwrapped labels become fully wrapped text.
+    pub fn selectable(mut self) -> Self {
+        if self.field().is_some() || self.on_press.is_some() || self.on_drag.is_some() || self.on_pointer.is_some() {
+            return self;
+        }
+        self.selectable = true;
+        if let What::Text { wrap, .. } = &mut self.what {
+            *wrap = Some(wrap.unwrap_or(usize::MAX));
+            self.sem.focusable = true;
+            self.cursor = Some(crate::Cursor::Text);
+        }
+        self.children = self.children.into_iter().map(El::selectable).collect();
+        self
+    }
+
     /// Child.
     pub fn child(mut self, child: El<S>) -> Self {
+        let child = if self.selectable { child.selectable() } else { child };
         self.children.push(child);
         self
     }
 
     /// Children.
     pub fn children(mut self, children: impl IntoIterator<Item = El<S>>) -> Self {
-        self.children.extend(children);
+        if self.selectable {
+            self.children.extend(children.into_iter().map(El::selectable));
+        } else {
+            self.children.extend(children);
+        }
         self
     }
 

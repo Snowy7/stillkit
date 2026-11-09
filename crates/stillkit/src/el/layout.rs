@@ -25,6 +25,7 @@ pub(crate) struct Measure {
     style: TextStyle,
     line: f32,
     wrap: Option<usize>,
+    selectable: bool,
 }
 
 struct Retained {
@@ -341,6 +342,13 @@ impl Measure {
             AvailableSpace::MaxContent => w.ceil(),
             AvailableSpace::MinContent => 0.0,
         });
+        if self.selectable {
+            let look = super::field::Look { style: self.style.clone(), line: self.line, ink: crate::Rgba::TRANSPARENT,
+                multiline: true, secure: false, rect: Rect::new(0.0, 0.0, width, 0.0), content: Rect::new(0.0, 0.0, width, 0.0) };
+            let shape = super::field::shape(text, &self.text, &look, Some(width.max(1.0)));
+            let widest = shape.lines.iter().flat_map(|l| l.stops.iter().map(|s| s.1)).fold(0.0, f32::max);
+            return (widest.ceil(), self.line * shape.lines.len().min(lines).max(1) as f32);
+        }
         let wrapped = text.lines(&self.text, &self.style, width.max(1.0), lines);
         let widest = wrapped
             .iter()
@@ -359,6 +367,7 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
             style: f.face.style(cx.theme, cx.s),
             line: f.face.line(cx.theme, cx.s) * rows as f32,
             wrap: None,
+            selectable: false,
         });
     }
     let What::Text { text, face, wrap } = &el.what else {
@@ -369,6 +378,7 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
         style: face.style(cx.theme, cx.s),
         line: face.line(cx.theme, cx.s),
         wrap: *wrap,
+        selectable: el.selectable,
     })
 }
 

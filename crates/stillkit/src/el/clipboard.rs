@@ -1,6 +1,6 @@
-//! The clipboard text fields cut, copy and paste through ([`super::Runtime::set_clipboard`]).
+//! The clipboard display text copies and fields cut, copy and paste through ([`super::Runtime::set_clipboard`]).
 //! A window host gives the runtime the system's (Wayland's `wl_data_device` on Linux; on
-//! Windows the focused field's RichEdit uses the system clipboard itself); headless runtimes
+//! Windows display text uses the system clipboard and the focused field's RichEdit uses it directly); headless runtimes
 //! and tests keep a [`Memory`] one, so a script never touches the user's clipboard.
 
 /// Plain text in and out of a clipboard.
