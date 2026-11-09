@@ -1,9 +1,12 @@
 use std::time::Duration;
 use stillkit::el::{El, KeyCode, Modifiers, Runtime};
 use stillkit::{Scheme, Semantics, Theme};
-use stillkit_kit::{Tree, TreeModel, TreeNode, natural_cmp};
+use stillkit_kit::{TreeModel, TreeNode, VirtualTree, natural_cmp};
 fn view(s: &TreeModel) -> El<TreeModel> {
-    Tree::virtual_rows("files", "Files", s, |s| s, 280., |_, _| {})
+    VirtualTree::new("files", s, |s| s)
+        .label("Files")
+        .height(280.)
+        .build()
 }
 fn rt() -> Runtime<TreeModel> {
     let model = TreeModel::new(vec![

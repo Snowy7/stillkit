@@ -1,22 +1,19 @@
 use std::time::Duration;
 use stillkit::el::{El, KeyCode, Modifiers, Runtime, text};
 use stillkit::{Scheme, Semantics, Theme};
-use stillkit_kit::{Table, TableColumn, TableModel};
+use stillkit_kit::{TableColumn, TableModel, VirtualTable};
 struct State {
     table: TableModel,
     opened: Option<String>,
 }
 fn view(s: &State) -> El<State> {
-    Table::virtual_rows(
-        "grid",
-        "Records",
-        &s.table,
-        |s| &mut s.table,
-        280.,
-        |r, c| text(format!("{r}:{c}")),
-        |s, k| s.opened = Some(k.to_string()),
-        |_, _| {},
-    )
+    VirtualTable::new("grid", &s.table, |s: &mut State| &mut s.table)
+        .label("Records")
+        .height(280.)
+        .cell(|r, c| text(format!("{r}:{c}")))
+        .on_open(|s, k| s.opened = Some(k.to_string()))
+        .on_sort(|_, _| {})
+        .build()
 }
 fn rt() -> Runtime<State> {
     let mut table = TableModel::new(vec![

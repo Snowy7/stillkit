@@ -178,22 +178,90 @@ impl TableModel {
         }
     }
 }
-impl<S: 'static> Table<S> {
-    /// Builds only visible rows with custom cells, a sticky header, bounded column drags,
-    /// desktop selection and keyboard navigation. `model` accesses app-owned state in handlers.
-    #[allow(clippy::too_many_arguments)]
-    pub fn virtual_rows(
+type CellBuilder<'a, S> = Box<dyn Fn(usize, usize) -> El<S> + 'a>;
+
+/// A virtual table over app-owned state with keyed selection.
+///
+/// ```
+/// use stillkit_kit::{TableModel, VirtualTable};
+/// fn view(s: &TableModel) -> stillkit::el::El<TableModel> {
+///     VirtualTable::new("records", s, |s| s)
+///         .label("Records")
+///         .height(420.)
+///         .on_open(|_, key| println!("{key}"))
+///         .build()
+/// }
+/// ```
+pub struct VirtualTable<'a, S> {
+    key: Arc<str>,
+    label: Arc<str>,
+    state: &'a TableModel,
+    model: fn(&mut S) -> &mut TableModel,
+    height: Option<f32>,
+    open: Option<Change<S, Arc<str>>>,
+    cell: Option<CellBuilder<'a, S>>,
+    sort: Option<Change<S, (usize, SortDirection)>>,
+}
+impl<'a, S: 'static> VirtualTable<'a, S> {
+    /// Borrows state for this view; `model` accesses it in event handlers.
+    /// Defaults to the key as label, filling available height, and no open action.
+    pub fn new(
         key: impl Into<Arc<str>>,
-        label: impl Into<Arc<str>>,
-        state: &TableModel,
+        state: &'a TableModel,
         model: fn(&mut S) -> &mut TableModel,
-        height: f32,
-        cell: impl Fn(usize, usize) -> El<S>,
-        open: impl Fn(&mut S, Arc<str>) + 'static,
-        sort: impl Fn(&mut S, (usize, SortDirection)) + 'static,
-    ) -> El<S> {
+    ) -> Self {
         let key = key.into();
-        let sort = Arc::new(sort);
+        Self {
+            label: key.clone(),
+            key,
+            state,
+            model,
+            height: None,
+            open: None,
+            cell: None,
+            sort: None,
+        }
+    }
+    /// Sets the accessible label (the key by default).
+    pub fn label(mut self, label: impl Into<Arc<str>>) -> Self {
+        self.label = label.into();
+        self
+    }
+    /// Sets the scrolling body's height in design pixels; otherwise it fills its parent.
+    /// Paging moves ten rows when no explicit height is given.
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+    /// Opens the cursor's row on Enter; without a handler, Enter is unhandled.
+    pub fn on_open(mut self, open: impl Fn(&mut S, Arc<str>) + 'static) -> Self {
+        self.open = Some(Arc::new(open));
+        self
+    }
+
+    /// Builds visible cells, borrowing app data if needed. By default only column zero shows the row label.
+    pub fn cell(mut self, cell: impl Fn(usize, usize) -> El<S> + 'a) -> Self {
+        self.cell = Some(Box::new(cell));
+        self
+    }
+    /// Enables header sorting; the handler applies the requested order to the model.
+    pub fn on_sort(mut self, sort: impl Fn(&mut S, (usize, SortDirection)) + 'static) -> Self {
+        self.sort = Some(Arc::new(sort));
+        self
+    }
+
+    /// Builds visible rows with desktop selection and keyboard navigation.
+    pub fn build(self) -> El<S> {
+        let Self {
+            key,
+            label,
+            state,
+            model,
+            height,
+            open,
+            cell,
+            sort,
+        } = self;
         let mut header = row().h(28.).role(Role::Row).row_index(0).fill(token::CARD);
         for (i, column) in state.columns.iter().enumerate() {
             let next = if state.sort == Some((i, SortDirection::Ascending)) {
@@ -230,25 +298,20 @@ impl<S: 'static> Table<S> {
                         false
                     }
                 });
-            header = header.child(
-                row()
-                    .w(column.width)
-                    .h(28.)
-                    .child(
-                        text(title)
-                            .grow(1.)
-                            .role(Role::ColumnHeader)
-                            .column_index(i)
-                            .key(format!("{key}/sort/{i}"))
-                            .on_press(move |s| {
-                                model(s).sort = Some((i, next));
-                                sort(s, (i, next));
-                            }),
-                    )
-                    .child(handle),
-            );
+            let mut title = text(title)
+                .grow(1.)
+                .role(Role::ColumnHeader)
+                .column_index(i)
+                .key(format!("{key}/sort/{i}"));
+            if let Some(sort) = sort {
+                title = title.on_press(move |s| {
+                    model(s).sort = Some((i, next));
+                    sort(s, (i, next));
+                });
+            }
+            header = header.child(row().w(column.width).h(28.).child(title).child(handle));
         }
-        let body = variable_list(format!("{key}/body"), &state.rows, |r| {
+        let mut body = variable_list(format!("{key}/body"), &state.rows, |r| {
             let id = state.keys[r].clone();
             let click_id = id.clone();
             let focus_key = key.clone();
@@ -271,7 +334,16 @@ impl<S: 'static> Table<S> {
                         .role(Role::Cell)
                         .row_index(r + 1)
                         .column_index(c)
-                        .child(cell(r, c)),
+                        .child(cell.as_ref().map_or_else(
+                            || {
+                                text(if c == 0 {
+                                    state.labels[r].clone()
+                                } else {
+                                    Arc::from("")
+                                })
+                            },
+                            |cell| cell(r, c),
+                        )),
                 );
             }
             line.on_press_with(move |s, tx| {
@@ -281,9 +353,13 @@ impl<S: 'static> Table<S> {
                 tx.focus(focus_key.clone());
             })
         })
-        .h(height)
         .role(Role::RowGroup);
-        let page = (height / 28.).floor().max(1.) as usize;
+        body = if let Some(height) = height {
+            body.h(height)
+        } else {
+            body.grow(1.).min_h(0.)
+        };
+        let page = (height.unwrap_or(280.) / 28.).floor().max(1.) as usize;
         let mut root = col()
             .key(key)
             .role(Role::Grid)
@@ -296,9 +372,15 @@ impl<S: 'static> Table<S> {
         if let Some(cursor) = &state.selection.cursor {
             root = root.active_descendant(cursor.clone());
         }
+        if height.is_none() {
+            root = root.grow(1.).min_h(0.);
+        }
         root.on_key(move |s, k, tx| {
             let m = model(s);
             if k == KeyCode::ENTER {
+                let Some(open) = &open else {
+                    return Handled::No;
+                };
                 let id = m.selection.cursor.clone();
                 if let Some(id) = id {
                     open(s, id);
@@ -619,18 +701,72 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     }
     a.len().cmp(&b.len())
 }
-impl<S: 'static> Tree<S> {
-    /// Builds cached visible rows with tree keyboard navigation and indexed semantics.
-    pub fn virtual_rows(
+/// A virtual tree over app-owned state with keyed selection.
+///
+/// ```
+/// use stillkit_kit::{TreeModel, VirtualTree};
+/// fn view(s: &TreeModel) -> stillkit::el::El<TreeModel> {
+///     VirtualTree::new("records", s, |s| s)
+///         .label("Records")
+///         .height(420.)
+///         .on_open(|_, key| println!("{key}"))
+///         .build()
+/// }
+/// ```
+pub struct VirtualTree<'a, S> {
+    key: Arc<str>,
+    label: Arc<str>,
+    state: &'a TreeModel,
+    model: fn(&mut S) -> &mut TreeModel,
+    height: Option<f32>,
+    open: Option<Change<S, Arc<str>>>,
+}
+impl<'a, S: 'static> VirtualTree<'a, S> {
+    /// Borrows state for this view; `model` accesses it in event handlers.
+    /// Defaults to the key as label, filling available height, and no open action.
+    pub fn new(
         key: impl Into<Arc<str>>,
-        label: impl Into<Arc<str>>,
-        state: &TreeModel,
+        state: &'a TreeModel,
         model: fn(&mut S) -> &mut TreeModel,
-        height: f32,
-        open: impl Fn(&mut S, Arc<str>) + 'static,
-    ) -> El<S> {
+    ) -> Self {
         let key = key.into();
-        let body = variable_list(format!("{key}/body"), &state.rows, |r| {
+        Self {
+            label: key.clone(),
+            key,
+            state,
+            model,
+            height: None,
+            open: None,
+        }
+    }
+    /// Sets the accessible label (the key by default).
+    pub fn label(mut self, label: impl Into<Arc<str>>) -> Self {
+        self.label = label.into();
+        self
+    }
+    /// Sets the scrolling body's height in design pixels; otherwise it fills its parent.
+    /// Paging moves ten rows when no explicit height is given.
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+    /// Enables opening the cursor's row; tree branches toggle even without a handler.
+    pub fn on_open(mut self, open: impl Fn(&mut S, Arc<str>) + 'static) -> Self {
+        self.open = Some(Arc::new(open));
+        self
+    }
+
+    /// Builds visible rows with desktop selection and keyboard navigation.
+    pub fn build(self) -> El<S> {
+        let Self {
+            key,
+            label,
+            state,
+            model,
+            height,
+            open,
+        } = self;
+        let mut body = variable_list(format!("{key}/body"), &state.rows, |r| {
             let i = state.visible[r];
             let n = &state.nodes[i];
             let selected = state.selection.selected.contains(&n.key);
@@ -676,9 +812,13 @@ impl<S: 'static> Tree<S> {
                         tx.focus(focus_key.clone());
                     }
                 })
-        })
-        .h(height);
-        let page = (height / 28.).floor().max(1.) as usize;
+        });
+        body = if let Some(height) = height {
+            body.h(height)
+        } else {
+            body.grow(1.).min_h(0.)
+        };
+        let page = (height.unwrap_or(280.) / 28.).floor().max(1.) as usize;
         let mut root = col()
             .key(key)
             .role(Role::Tree)
@@ -688,10 +828,24 @@ impl<S: 'static> Tree<S> {
         if let Some(cursor) = &state.selection.cursor {
             root = root.active_descendant(cursor.clone());
         }
+        if height.is_none() {
+            root = root.grow(1.).min_h(0.);
+        }
         root.on_key(move |s, k, tx| {
             let m = model(s);
             if k == KeyCode::ENTER || k == KeyCode::SPACE {
-                if let Some(id) = m.activate() {
+                let branch = m
+                    .selection
+                    .cursor
+                    .as_ref()
+                    .and_then(|key| m.nodes.iter().position(|n| &n.key == key))
+                    .is_some_and(|i| m.branch(i));
+                if !branch && open.is_none() {
+                    return Handled::No;
+                }
+                if let Some(id) = m.activate()
+                    && let Some(open) = &open
+                {
                     open(s, id);
                 }
                 return Handled::Yes;
