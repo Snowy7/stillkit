@@ -45,3 +45,25 @@ fn dragging_the_square_previews_then_commits() {
     assert!(picks[..picks.len() - 1].iter().all(|done| !done), "moves preview");
     assert_eq!(picks.last(), Some(&true), "the release commits");
 }
+
+#[test]
+fn the_keyboard_steps_each_part_and_commits() {
+    const RIGHT: u16 = 0x27;
+    let theme = Theme::new(Style::Solid, Scheme::Dark, stillkit::theme::SYSTEM_BLUE);
+    let mut rt = Runtime::new(State::default(), view, theme, (260, 260), 1.).unwrap();
+    rt.frame(Duration::ZERO);
+    let start = Hsva::from_rgba(Rgba::new(0.8, 0.1, 0.1, 1.));
+    // Tab reaches the square first: Right adds saturation.
+    rt.tab(false);
+    rt.key(RIGHT);
+    rt.frame(Duration::from_millis(16));
+    let c = rt.state().color.expect("the square stepped");
+    assert!(c.saturation > start.saturation && c.value == start.value, "{c:?}");
+    // Then the hue strip, a slider: Right adds a degree.
+    rt.tab(false);
+    rt.key(RIGHT);
+    rt.frame(Duration::from_millis(16));
+    let stepped = rt.state().color.unwrap();
+    assert!((stepped.hue - (c.hue + 1.)).abs() < 0.01, "{stepped:?}");
+    assert!(rt.state().picks.iter().all(|done| *done), "keys commit: {:?}", rt.state().picks);
+}

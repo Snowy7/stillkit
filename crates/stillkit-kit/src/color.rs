@@ -1,6 +1,6 @@
 use super::*;
 use stillkit::Image;
-use stillkit::el::{PointerEvent, PointerPhase, image};
+use stillkit::el::{Handled, KeyCode, PointerEvent, PointerPhase, image};
 
 /// A colour as hue (degrees), saturation, value and alpha (0 to 1): the [`ColorPicker`]'s
 /// model. Keep it in your state while the picker is open, so the hue survives greys and
@@ -81,6 +81,7 @@ enum Part {
 }
 
 impl<S: 'static> ColorPicker<S> {
+    /// A picker showing `color`, which the caller keeps in its state.
     pub fn new(color: Hsva) -> Self {
         Self {
             color,
@@ -99,14 +100,18 @@ impl<S: 'static> ColorPicker<S> {
         self.width = width.max(80.);
         self
     }
+    /// Runs on every pick with `done` false (preview it) and once more with `done` true when
+    /// the drag ends or a key steps the colour (commit it).
     pub fn on_change(mut self, f: impl Fn(&mut S, Hsva, bool) + 'static) -> Self {
         self.change = Some(Arc::new(f));
         self
     }
+    /// The picker: drag any part, or focus it and use the keys. The square takes Left/Right for
+    /// saturation and Up/Down for brightness; the strips step like sliders.
     pub fn build(self) -> El<S> {
         let (w, c) = (self.width, self.color);
         let h = (w * 0.75).round();
-        let square = self
+        let mut square = self
             .area(Part::Square, h)
             .child(image(square(c.hue)).w(w).h(h).radius(6.))
             .child(knob(c.rgba().with_alpha(1.)).absolute(c.saturation * w - 7., (1. - c.value) * h - 7.))
@@ -115,24 +120,47 @@ impl<S: 'static> ColorPicker<S> {
                 "Saturation {:.0}%, brightness {:.0}%",
                 c.saturation * 100.,
                 c.value * 100.
-            ));
-        let hue = self
+            ))
+            .focusable();
+        let mut hue = self
             .area(Part::Hue, 12.)
             .child(image(hue_strip()).w(w).h(12.).radius(6.))
             .child(knob(Hsva { saturation: 1., value: 1., alpha: 1., ..c }.rgba()).absolute(c.hue / 360. * w - 7., -1.))
             .role(Role::Slider)
+            .range(0., 360., 1., f64::from(c.hue))
             .label(format!("Hue {:.0}°", c.hue));
-        let mut out = col().w(w).gap(10.).child(square).child(hue);
-        if self.alpha {
-            out = out.child(
-                self.area(Part::Alpha, 12.)
-                    .child(image(alpha_strip(c.rgba())).w(w).h(12.).radius(6.))
-                    .child(knob(c.rgba().with_alpha(1.)).absolute(c.alpha * w - 7., -1.))
-                    .role(Role::Slider)
-                    .label(format!("Opacity {:.0}%", c.alpha * 100.)),
-            );
+        let mut alpha = self.alpha.then(|| {
+            self.area(Part::Alpha, 12.)
+                .child(image(alpha_strip(c.rgba())).w(w).h(12.).radius(6.))
+                .child(knob(c.rgba().with_alpha(1.)).absolute(c.alpha * w - 7., -1.))
+                .role(Role::Slider)
+                .range(0., 1., 0.01, f64::from(c.alpha))
+                .label(format!("Opacity {:.0}%", c.alpha * 100.))
+        });
+        if let Some(f) = self.change {
+            let g = f.clone();
+            square = square.on_key(move |s, key, _| {
+                const STEP: f32 = 0.01;
+                let (ds, dv) = match key {
+                    KeyCode::LEFT => (-STEP, 0.),
+                    KeyCode::RIGHT => (STEP, 0.),
+                    KeyCode::UP => (0., STEP),
+                    KeyCode::DOWN => (0., -STEP),
+                    _ => return Handled::No,
+                };
+                let next = Hsva {
+                    saturation: (c.saturation + ds).clamp(0., 1.),
+                    value: (c.value + dv).clamp(0., 1.),
+                    ..c
+                };
+                g(s, next, true);
+                Handled::Yes
+            });
+            let g = f.clone();
+            hue = hue.on_step(move |s, delta| g(s, Hsva { hue: (c.hue + delta as f32).clamp(0., 359.999), ..c }, true));
+            alpha = alpha.map(|a| a.on_step(move |s, delta| f(s, Hsva { alpha: (c.alpha + delta as f32).clamp(0., 1.), ..c }, true)));
         }
-        out
+        col().w(w).gap(10.).child(square).child(hue).children(alpha)
     }
 
     /// A dragged area `h` tall: presses and moves pick from where the pointer is.
