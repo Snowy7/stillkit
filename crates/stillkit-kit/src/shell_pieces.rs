@@ -86,7 +86,7 @@ fn modifier(vk: u16) -> bool {
     matches!(vk, 0x10..=0x12 | 0x5b..=0x5c | 0xa0..=0xa5)
 }
 
-/// Recording state. Forward host events through `handle` while recording.
+/// Recording state. Forward host events through `handle` before Runtime.
 #[derive(Clone, Debug, Default)]
 pub struct ShortcutRecorderState {
     /// The accepted chord, suitable for app settings.
