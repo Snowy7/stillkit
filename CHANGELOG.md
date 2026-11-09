@@ -6,6 +6,7 @@
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
 - `stillkit::dialog`: native folder/file pickers, save panel and error alert (macOS, Windows; Linux has no portal client yet).
+- `el::SystemClipboard`: the system clipboard on every platform (Windows now has one outside fields).
 - `Runtime::touch`: host bookkeeping on the state (draining outgoing requests) without running the view.
 - `El::cascade_ink`: opt-in ink inheritance, so labels and icons follow their control's colour and hover look.
 - el file drops: `on_drop_files` and a `dropping` state look on the innermost target.
