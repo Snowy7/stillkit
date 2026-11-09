@@ -60,6 +60,25 @@ impl<S> Runtime<S> {
             let What::Text { text, face, wrap } = &el.what else {
                 continue;
             };
+            // Controls keep their input even when added after `selectable()`.
+            let mut ancestor = Some(i);
+            let mut excluded = false;
+            while let Some(at) = ancestor {
+                let node = flat[at];
+                if node.sem.disabled
+                    || node.field().is_some()
+                    || node.on_press.is_some()
+                    || node.on_drag.is_some()
+                    || node.on_pointer.is_some()
+                {
+                    excluded = true;
+                    break;
+                }
+                ancestor = self.laid[at].parent;
+            }
+            if excluded {
+                continue;
+            }
             let l = self.laid[i];
             let mut root = i;
             while let Some(parent) = self.laid[root].parent.filter(|&p| flat[p].selectable) {
@@ -180,7 +199,9 @@ impl<S> Runtime<S> {
                 {
                     return None;
                 }
-                let distance = (rect.top - p.y).max(0.0) + (p.y - rect.bottom).max(0.0);
+                let dx = (rect.left - p.x).max(0.0) + (p.x - rect.right).max(0.0);
+                let dy = (rect.top - p.y).max(0.0) + (p.y - rect.bottom).max(0.0);
+                let distance = dx * dx + dy * dy;
                 let line = ((p.y - rect.top) / d.field.shape.line.max(1.0))
                     .floor()
                     .max(0.0) as usize;
@@ -212,7 +233,13 @@ impl<S> Runtime<S> {
                     self.display_drag = None;
                     return;
                 }
-                let Some((doc, at)) = self.display_at(p.at, None) else {
+                let pressed = self
+                    .ix
+                    .pressed
+                    .and_then(|hit| self.laid.iter().find(|l| l.hit == hit))
+                    .and_then(|l| self.display.get(&l.id))
+                    .map(|d| d.doc);
+                let Some((doc, at)) = self.display_at(p.at, pressed) else {
                     self.display_drag = None;
                     return;
                 };
@@ -297,7 +324,12 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
         if a < b {
             let x = line.x(a);
             ops.push(Op::Fill {
-                rect: Rect::new(left + x, top, (line.x(b) - x).abs(), look.line),
+                rect: Rect::new(
+                    left + x.min(line.x(b)),
+                    top,
+                    (line.x(b) - x).abs(),
+                    look.line,
+                ),
                 radius: 0.0,
                 color: token::SELECTION.resolve(f.theme),
             });

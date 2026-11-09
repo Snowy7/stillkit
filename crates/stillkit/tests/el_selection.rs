@@ -218,3 +218,55 @@ fn native_double_click_marker_selects_a_word_without_counting_a_third_press() {
     rt.key_with(KeyCode::of('C').0, Modifiers::CTRL);
     assert_eq!(&*board.0.borrow(), "hello world");
 }
+
+#[test]
+fn controls_added_after_selectable_exclude_their_labels() {
+    let mut rt = Runtime::new(
+        0u32,
+        |_| {
+            el::col().selectable().child(
+                el::col()
+                    .selectable()
+                    .key("control")
+                    .on_press(|s: &mut u32| *s += 1)
+                    .child(el::text("Action").key("label")),
+            )
+        },
+        Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
+        (240, 140),
+        1.0,
+    )
+    .unwrap();
+    assert!(rt.click("control"));
+    rt.frame(Duration::ZERO);
+    assert_eq!(*rt.state(), 1);
+    assert_eq!(rt.presented("label").unwrap().selection, None);
+}
+
+#[test]
+fn drag_targets_the_nearest_column() {
+    let mut rt = Runtime::new(
+        (),
+        |_| {
+            el::row()
+                .selectable()
+                .gap(20.0)
+                .child(el::text("first").key("a").w(80.0))
+                .child(el::text("second").key("b").w(80.0))
+        },
+        Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
+        (240, 140),
+        1.0,
+    )
+    .unwrap();
+    let board = Board::default();
+    rt.set_clipboard(board.clone());
+    rt.frame(Duration::ZERO);
+    let a = rt.presented("a").unwrap().rect;
+    let b = rt.presented("b").unwrap().rect;
+    rt.pointer_down(a.left, a.top + 3.0);
+    rt.pointer_move(b.right - 1.0, b.top + 3.0);
+    rt.pointer_up(b.right - 1.0, b.top + 3.0);
+    rt.key_with(KeyCode::of('C').0, Modifiers::CTRL);
+    assert_eq!(&*board.0.borrow(), "first\nsecond");
+}
