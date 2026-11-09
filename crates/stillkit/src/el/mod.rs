@@ -57,7 +57,7 @@ pub mod token;
 
 pub use element::{
     Align, ArcStart, Axis, El, Handled, Justify, Key, KeyCode, Len, Modifiers, Motion, Orientation, Paint,
-    Face, Painter, PointerEvent, PointerPhase, TextAlign, Transition, Tx, WheelEvent, arc, col, el, grid, icon, image, paint, row, text, text_area,
+    Face, Painter, PointerEvent, native, PointerPhase, TextAlign, Transition, Tx, WheelEvent, arc, col, el, grid, icon, image, paint, row, text, text_area,
     text_input,
 };
 pub use crate::platform::current::host::reduced_motion;

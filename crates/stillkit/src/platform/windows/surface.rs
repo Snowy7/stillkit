@@ -1651,3 +1651,116 @@ fn default_render() -> crate::platform::Render {
     #[cfg(not(feature = "gpu"))]
     crate::platform::Render::Cpu
 }
+
+thread_local! {
+    /// Native layers by (parent window, name): child windows and where they were last placed.
+    static NATIVES: RefCell<std::collections::HashMap<(isize, String), (isize, Option<crate::Rect>)>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// A native layer's window procedure: transparent to hit testing, so the pointer reaches the
+/// surface (which routes it like any other input) and its DirectComposition content on top.
+unsafe extern "system" fn native_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{HTTRANSPARENT, WM_NCHITTEST};
+    if msg == WM_NCHITTEST {
+        return LRESULT(HTTRANSPARENT as isize);
+    }
+    // SAFETY: the default procedure for this window's own messages.
+    unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+impl Surface {
+    /// The native layer `name`, made on first use: a child window under the surface's content
+    /// where the host presents with its own GPU device (a Vulkan or DXGI swapchain for the
+    /// child's client area). It shows where the content is transparent ([`crate::Op::Hole`],
+    /// drawn by [`crate::el::native`]) once placed. The surface must render on the GPU
+    /// ([`Render::Gpu`](crate::platform::Render::Gpu), the `gpu` feature): its
+    /// DirectComposition content is composed over child windows; a CPU (layered) surface can't
+    /// show one, and this fails.
+    pub fn native_layer(&self, name: &str) -> Result<crate::NativeHandle> {
+        use windows::Win32::UI::WindowsAndMessaging::{WS_CHILD, WS_CLIPSIBLINGS};
+        use windows::core::w;
+        let parent = self.hwnd.0 as isize;
+        if let Some(child) = NATIVES.with_borrow(|n| n.get(&(parent, name.to_owned())).map(|(c, _)| *c)) {
+            return Ok(crate::NativeHandle::Hwnd(child));
+        }
+        anyhow::ensure!(
+            self.render() == crate::platform::Render::Gpu,
+            "native layers need a GPU surface on Windows (Render::Gpu): a layered CPU window can't show child windows"
+        );
+        // SAFETY: plain Win32 class registration and child window creation on this thread.
+        let child = unsafe {
+            let class = WNDCLASSEXW {
+                cbSize: size_of::<WNDCLASSEXW>() as u32,
+                lpfnWndProc: Some(native_proc),
+                hInstance: GetModuleHandleW(None)?.into(),
+                lpszClassName: w!("StillkitNativeLayer"),
+                ..Default::default()
+            };
+            if RegisterClassExW(&class) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
+                return Err(windows::core::Error::from_thread()).context("RegisterClassExW");
+            }
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                w!("StillkitNativeLayer"),
+                w!(""),
+                WS_CHILD | WS_CLIPSIBLINGS,
+                0,
+                0,
+                1,
+                1,
+                Some(self.hwnd),
+                None,
+                Some(GetModuleHandleW(None)?.into()),
+                None,
+            )?
+        };
+        let child = child.0 as isize;
+        NATIVES.with_borrow_mut(|n| n.insert((parent, name.to_owned()), (child, None)));
+        Ok(crate::NativeHandle::Hwnd(child))
+    }
+
+    /// Shows native layer `name` at `rect` (device px from the client's top-left), or hides it
+    /// (`None`). Unchanged rects cost nothing; unknown names are ignored.
+    pub fn place_native_layer(&self, name: &str, rect: Option<crate::Rect>) {
+        use windows::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SW_SHOWNA, SetWindowPos};
+        let key = (self.hwnd.0 as isize, name.to_owned());
+        let Some(child) = NATIVES.with_borrow_mut(|n| {
+            let entry = n.get_mut(&key)?;
+            (entry.1 != rect).then(|| {
+                entry.1 = rect;
+                entry.0
+            })
+        }) else {
+            return;
+        };
+        let child = HWND(child as *mut _);
+        // SAFETY: a live child window of this surface.
+        unsafe {
+            match rect {
+                Some(r) => {
+                    let _ = SetWindowPos(
+                        child,
+                        None,
+                        r.left.round() as i32,
+                        r.top.round() as i32,
+                        r.width().round().max(1.0) as i32,
+                        r.height().round().max(1.0) as i32,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                    let _ = ShowWindow(child, SW_SHOWNA);
+                }
+                None => {
+                    let _ = ShowWindow(child, SW_HIDE);
+                }
+            }
+        }
+    }
+
+    /// Removes native layer `name`; its handle is invalid afterwards.
+    pub fn release_native_layer(&self, name: &str) {
+        if let Some((child, _)) = NATIVES.with_borrow_mut(|n| n.remove(&(self.hwnd.0 as isize, name.to_owned()))) {
+            // SAFETY: a child window this surface made.
+            let _ = unsafe { DestroyWindow(HWND(child as *mut _)) };
+        }
+    }
+}

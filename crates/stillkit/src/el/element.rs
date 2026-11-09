@@ -561,6 +561,8 @@ pub(crate) enum What {
     Image(Arc<Image>),
     Paint(Painter),
     Arc(ArcLook),
+    /// [`native`]: a hole showing the host's native layer of this name.
+    Native(Key),
 }
 
 #[derive(Default, Clone, Copy)]
@@ -848,6 +850,17 @@ pub fn text_area<S>(key: impl Into<Key>) -> El<S> {
 /// A vector icon filling a square box, [`super::token::ICON`] across unless sized.
 pub fn icon<S>(icon: Icon) -> El<S> {
     new(What::Icon(icon))
+}
+
+/// A window onto a native layer the host draws with its own GPU device (a 3D viewport, a
+/// video): the element clears its box to transparent ([`crate::Op::Hole`]) and
+/// [`Runtime::natives`](super::Runtime::natives) reports where it shows, so the host places
+/// the surface's layer `name` there ([`crate::Surface::native_layer`]). It has no size of
+/// its own (size it, or `grow`). Anything drawn after it, such as overlays and children,
+/// draws over the layer; give it `on_pointer`, `on_wheel`, `focusable` and `on_key` for
+/// its input.
+pub fn native<S>(name: impl Into<Key>) -> El<S> {
+    new(What::Native(name.into()))
 }
 
 /// A bitmap, at its own size in device pixels unless sized.
