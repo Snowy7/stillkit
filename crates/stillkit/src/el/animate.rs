@@ -27,6 +27,7 @@ pub(crate) const REDUCED_FADE: Spring = Spring::apple(0.15, 0.0);
 pub(crate) struct Target {
     /// Left, top, right, bottom, from the parent's top-left.
     pub rel: [f32; 4],
+    pub flight: Option<super::element::Key>,
     pub fill: Option<Rgba>,
     pub fill_gradient: Option<std::sync::Arc<crate::paint::Gradient>>,
     pub border_gradient: Option<std::sync::Arc<crate::paint::Gradient>>,
@@ -213,6 +214,7 @@ impl<const N: usize> Prop<N> {
 #[derive(Debug, Clone)]
 struct Track {
     rect: Prop<4>,
+    screen: bool,
     fill_gradient: Option<Box<GradientTrack>>,
     border_gradient: Option<Box<GradientTrack>>,
     /// Premultiplied OKLab, and the exact colour it rests on.
@@ -241,6 +243,7 @@ impl Track {
     fn at(target: &Target) -> Self {
         Self {
             rect: Prop::at(target.rel),
+            screen: false,
             fill_gradient: target.fill_gradient.as_deref().map(|g| Box::new(GradientTrack::at(g))),
             border_gradient: target.border_gradient.as_deref().map(|g| Box::new(GradientTrack::at(g))),
             fill: Prop::at(oklab(target.fill)),
@@ -268,7 +271,7 @@ impl Track {
         let motion = target.motion.filter(|_| mode == Mode::Animate);
         let spatial = motion.filter(|_| !reduced);
         let fade = motion.map(|m| if reduced { REDUCED_FADE } else { m.calm() });
-        self.rect.set(target.rel, spatial, t);
+        if !self.screen { self.rect.set(target.rel, spatial, t); }
         gradient_retarget(&mut self.fill_gradient, target.fill_gradient.as_deref(), fade, t);
         gradient_retarget(&mut self.border_gradient, target.border_gradient.as_deref(), fade, t);
         self.fill.set(oklab(target.fill), fade, t);
@@ -287,6 +290,7 @@ impl Track {
         if self.transform.is_some() || target.transform.is_some() {
             self.transform.get_or_insert_with(||Box::new(Prop::at([0.,0.,1.,1.,0.5,0.5]))).set(target.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]),spatial,t);
         }
+        if spatial.is_none() { self.land_spatial(); }
         self.transition = target.transition;
         self.open = target.open;
         if self.leaving {
@@ -294,6 +298,14 @@ impl Track {
             let spring = (mode == Mode::Animate).then(|| self.presence_spring(reduced));
             self.presence.set([1.0], spring, t);
         }
+    }
+
+    fn land_spatial(&mut self) {
+        self.rect.moving = None;
+        self.radius.moving = None;
+        self.value.moving = None;
+        self.angle.moving = None;
+        if let Some(transform) = &mut self.transform { transform.moving = None; }
     }
 
     fn presence_spring(&self, reduced: bool) -> Spring {
@@ -359,9 +371,15 @@ impl Animator {
             fresh[i] = !prev.contains(&l.id);
             if let Some(track) = self.tracks.get_mut(&l.id) {
                 track.retarget(target, mode, reduced, t);
+                if track.screen {
+                    let r = l.rect;
+                    let spring = target.motion.filter(|_| mode == Mode::Animate && !reduced);
+                    track.rect.set([r.left, r.top, r.right, r.bottom], spring, t);
+                    if spring.is_none() { track.rect.moving = None; }
+                }
                 continue;
             }
-            if target.motion.is_none() && target.transition.is_none() {
+            if target.motion.is_none() && target.transition.is_none() && target.flight.is_none() {
                 continue;
             }
             let mut track = Track::at(target);
@@ -375,6 +393,35 @@ impl Animator {
             }
             self.tracks.insert(l.id, track);
         }
+    }
+
+    /// Transfers departing flight tracks before ordinary retained tracks are pruned.
+    pub fn match_flights(&mut self, old: (&[Laid], &[Target], &[Pose]), laid: &[Laid], targets: &[Target], mode: Mode) -> Vec<u64> {
+        let mut matched = Vec::new();
+        if mode != Mode::Animate { return matched; }
+        let (previous, old_targets, poses) = old;
+        for (to, target) in laid.iter().zip(targets) {
+            let Some(key) = &target.flight else { continue };
+            // Ambiguous keys never choose an arbitrary source or destination.
+            if targets.iter().filter(|t| t.flight.as_ref() == Some(key)).count() != 1 { continue; }
+            let mut sources = old_targets.iter().enumerate().filter(|(_, t)| t.flight.as_ref() == Some(key));
+            let Some((i, _)) = sources.next() else { continue };
+            if sources.next().is_some() || laid.iter().any(|l| l.id == previous[i].id) { continue; }
+            let Some(pose) = poses.get(i) else { continue };
+            let Some(mut track) = self.tracks.remove(&previous[i].id) else { continue };
+            let sampled = track.rect.value(self.t);
+            let r = pose.rect;
+            let current = [r.left, r.top, r.right, r.bottom];
+            for (target, (current, sampled)) in track.rect.target.iter_mut().zip(current.into_iter().zip(sampled)) {
+                *target += current - sampled;
+            }
+            track.screen = true;
+            track.presence = Prop::at([1.0]);
+            track.leaving = false;
+            self.tracks.insert(to.id, track);
+            matched.push(previous[i].id);
+        }
+        matched
     }
 
     /// Starts element `id`'s exit, if it has a transition to exit by.
@@ -410,6 +457,11 @@ impl Animator {
         left
     }
 
+    /// Lands spatial motion without invalidating layout or disturbing scroll anchors.
+    pub fn land_spatial(&mut self) {
+        for track in self.tracks.values_mut() { track.land_spatial(); }
+    }
+
     /// Whether anything moves (the host keeps frames coming while it does).
     pub fn moving(&self) -> bool {
         self.tracks.values().any(Track::moving)
@@ -426,7 +478,15 @@ impl Animator {
                 (Point::new(pose.local.left - by.x, pose.local.top - by.y), pose.xf)
             });
             let pose = match self.tracks.get(&l.id) {
-                Some(track) => self.pose(track, origin, xf),
+                Some(track) => {
+                    if track.screen && track.rect.moving.is_some() {
+                        self.pose(track, Point::new(0.0, 0.0), Xf::ID)
+                    } else if track.screen {
+                        let mut pose = self.pose(track, origin, xf);
+                        pose.local = offset(target.rel, origin);
+                        pose
+                    } else { self.pose(track, origin, xf) }
+                },
                 None => Pose {
                     rect: Rect::default(),
                     local: offset(target.rel, origin),

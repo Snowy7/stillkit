@@ -795,11 +795,12 @@ impl<S> Runtime<S> {
             }
         });
         let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.states_on);
+        let matched = self.anim.match_flights((&self.laid, &self.targets, &self.poses), &laid, &targets, mode);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
             && mode == Mode::Animate
         {
-            self.leave(old, &ids);
+            self.leave(old, &ids, &matched);
         }
         // Ghosts go when their parent does, or when they come back.
         self.ghosts.retain(|g| ids.contains(&g.parent) && !ids.contains(&g.id));
@@ -867,7 +868,7 @@ impl<S> Runtime<S> {
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
-    fn leave(&mut self, mut old: El<S>, ids: &HashSet<u64>) {
+    fn leave(&mut self, mut old: El<S>, ids: &HashSet<u64>, matched: &[u64]) {
         let leaving: HashSet<u64> = self
             .laid
             .iter()
@@ -885,13 +886,13 @@ impl<S> Runtime<S> {
         let mut taken = Vec::new();
         take(&mut old, &self.laid, &mut 0, &leaving, &mut taken);
         for (start, index, el) in taken {
-            self.exit(start, index, el);
+            self.exit(start, index, el, matched);
         }
     }
 
     /// Keeps `el`, which left from place `index` among its parent's children and was laid out
     /// at `start`, drawn as a ghost until its exit settles (if it has a transition).
-    fn exit(&mut self, start: usize, index: usize, el: El<S>) {
+    fn exit(&mut self, start: usize, index: usize, el: El<S>, matched: &[u64]) {
         let len = count(&el);
         let me = self.laid[start];
         let (Some(parent), Some(shown)) = (me.parent, self.poses.get(start..start + len)) else {
@@ -908,6 +909,10 @@ impl<S> Runtime<S> {
                 ..p.clone()
             })
             .collect();
+        // Matched descendants now belong to their destination, even while a parent exits.
+        for (pose, laid) in frozen.iter_mut().zip(&self.laid[start..start + len]) {
+            if matched.contains(&laid.id) { pose.opacity = 0.0; }
+        }
         // It leaves from its own opacity, not from wherever its entrance was.
         frozen[0].opacity = self.targets[start].opacity;
         self.ghosts.push(Ghost {
@@ -1876,6 +1881,7 @@ impl<S> Runtime<S> {
     pub fn set_reduced_motion(&mut self, reduced: bool) {
         if reduced != self.anim.reduced {
             self.anim.reduced = reduced;
+            if reduced { self.anim.land_spatial(); }
             // Spinners stop or start.
             self.stale_paint = true;
         }
@@ -2238,6 +2244,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
         let passed = (el.cascade || inherited.is_some()).then_some(ink);
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
+            flight: el.flight.clone(),
             fill: look.fill.map(|p| p.resolve(theme)),
             fill_gradient: look.fill.and_then(|p| p.gradient()).map(Arc::new),
             border_gradient: look.border.and_then(|b| b.paint.gradient()).map(Arc::new),
@@ -2255,7 +2262,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             value,
             angle: el.anim.rotate,
             transform: el.anim.transform.clone(),
-            motion,
+            motion: motion.or_else(|| (el.flight.is_some() && !instant).then_some(theme.motion.layout)),
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
                 slide: (t.slide.0 * s, t.slide.1 * s),
@@ -2442,6 +2449,10 @@ fn paint_el<S>(
     group: Option<usize>,
 ) {
     let (Some(&me), Some(pose)) = (laid.get(*i), poses.get(*i)) else { return };
+    if !live && pose.opacity <= 0.0 {
+        *i += count(el);
+        return;
+    }
     let index = *i;
     *i += 1;
     let (theme, s, rect) = (f.theme, f.s, pose.rect);

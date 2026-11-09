@@ -770,6 +770,7 @@ type LinkHandler<S> = Arc<dyn Fn(&mut S, &str)>;
 pub struct El<S> {
     pub(crate) what: What,
     pub(crate) key: Option<Key>,
+    pub(crate) flight: Option<Key>,
     pub(crate) sizing: Sizing,
     pub(crate) look: Look,
     pub(crate) sem: Sem,
@@ -818,6 +819,7 @@ fn new<S>(what: What) -> El<S> {
     El {
         what,
         key: None,
+        flight: None,
         sizing: Sizing::default(),
         look: Look {
             fill: None,
@@ -972,6 +974,14 @@ impl<S> El<S> {
     /// siblings come and go; give one to everything a script, test or animation refers to.
     pub fn key(mut self, key: impl Into<Key>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    /// Matches a departing element across parents in consecutive views.
+    /// Geometry, radius, fill and opacity spring from its current pose.
+    /// Use a unique flight key per view; ordinary keys still control input identity.
+    pub fn flight(mut self, key: impl Into<Key>) -> Self {
+        self.flight = Some(key.into());
         self
     }
 
