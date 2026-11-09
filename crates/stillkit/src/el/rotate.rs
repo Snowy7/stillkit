@@ -84,6 +84,10 @@ impl Turn {
     fn op(&self, op: Op, out: &mut Vec<Op>) {
         let circle = |r: Rect, radius: f32| (r.width() - r.height()).abs() < 0.5 && radius >= r.width() / 2.0 - 0.5;
         out.push(match op {
+            Op::Gradient { rect, radius, width, mut gradient } => {
+                gradient.angle = gradient.angle.map(|a| a + self.angle);
+                Op::Gradient { rect: self.rect(rect, false), radius, width, gradient }
+            },
             Op::Arc { center, radius, start, sweep, width, color } => Op::Arc {
                 center: self.point(center),
                 radius,

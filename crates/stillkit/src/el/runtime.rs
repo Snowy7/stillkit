@@ -827,7 +827,7 @@ impl<S> Runtime<S> {
             .iter()
             .map(|p| Pose {
                 local: p.local.offset(-origin.x, -origin.y),
-                ..*p
+                ..p.clone()
             })
             .collect();
         // It leaves from its own opacity, not from wherever its entrance was.
@@ -909,7 +909,7 @@ impl<S> Runtime<S> {
                             let by = scrolled.get(&p).copied().unwrap_or(Point::new(0.0, 0.0));
                             let parent = Pose {
                                 local: self.poses[p].local.offset(-by.x, -by.y),
-                                ..self.poses[p]
+                                ..self.poses[p].clone()
                             };
                             self.anim.ghost(g.id, &g.frozen, &parent)
                         })
@@ -2087,6 +2087,8 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
             fill: look.fill.map(|p| p.resolve(theme)),
+            fill_gradient: look.fill.and_then(|p| p.gradient()).map(Arc::new),
+            border_gradient: look.border.and_then(|b| b.paint.gradient()).map(Arc::new),
             border: look.border.map(|b| b.paint.resolve(theme)),
             border_width: look.border.map_or(0.0, |b| (b.width.resolve(theme) * s).max(0.0)),
             edges: look.edges.map(|(top, bottom)| [top.resolve(theme), bottom.resolve(theme)]),
@@ -2282,7 +2284,7 @@ fn paint_el<S>(
     live: bool,
     group: Option<usize>,
 ) {
-    let (Some(&me), Some(&pose)) = (laid.get(*i), poses.get(*i)) else { return };
+    let (Some(&me), Some(pose)) = (laid.get(*i), poses.get(*i)) else { return };
     let index = *i;
     *i += 1;
     let (theme, s, rect) = (f.theme, f.s, pose.rect);
@@ -2321,7 +2323,9 @@ fn paint_el<S>(
             });
         }
     }
-    if let Some(fill) = pose.fill {
+    if let Some(gradient) = &pose.fill_gradient {
+        f.push(Op::Gradient { rect, radius, width: 0.0, gradient: (**gradient).clone() });
+    } else if let Some(fill) = pose.fill {
         f.fill(rect, radius, fill);
     }
     // Edges: the box's shape in the edge colour, clipped to one design px at its top and at
@@ -2343,7 +2347,10 @@ fn paint_el<S>(
         let wash = if enabled { w.feedback.wash(me.hit, w.t, c.hover, c.pressed) } else { Rgba::TRANSPARENT };
         f.fill(rect, radius, wash);
     }
-    if let Some(color) = pose.border.filter(|c| c.a > 0.0 && pose.border_width > 0.0) {
+    if let Some(gradient) = pose.border_gradient.as_ref().filter(|_| pose.border_width > 0.0) {
+        let bw = (pose.border_width * pose.xf.s).max(1.0);
+        f.push(Op::Gradient { rect: rect.inflate(-bw / 2.0), radius: (radius - bw / 2.0).max(0.0), width: bw, gradient: (**gradient).clone() });
+    } else if let Some(color) = pose.border.filter(|c| c.a > 0.0 && pose.border_width > 0.0) {
         let bw = (pose.border_width * pose.xf.s).max(1.0);
         f.push(Op::Stroke {
             rect: rect.inflate(-bw / 2.0),
@@ -2647,6 +2654,7 @@ fn stroke_arc(f: &mut Frame, center: Point, radius: f32, width: f32, start: f32,
 fn fade(ops: &mut [Op], by: f32) {
     for op in ops {
         match op {
+            Op::Gradient { gradient, .. } => gradient.fade(by),
             Op::Continuous { color, .. }
             | Op::Emphasis { color, .. }
             | Op::Arc { color, .. }
