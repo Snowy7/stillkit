@@ -4,6 +4,7 @@
 
 ### Added
 - Display text and containers can opt into document selection, keyboard copy and accessible text ranges.
+- `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - el styling for dense tools: `border`, `edges` (a design px of light and shade inside a box's top and bottom, following its corners), `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
@@ -30,6 +31,7 @@
 - 0.1 metadata groundwork and Windows/Linux CI with an advisory macOS cross-check.
 
 ### Changed
+- Display-list damage trims the unchanged start and end before comparing, so an inserted or removed op damages only itself; macOS CPU surfaces repaint each disjoint damaged region alone.
 - Interaction motion has one implementation; `interact::motion` remains a compatibility re-export.
 
 ### Preview, planned for 0.2
@@ -40,7 +42,7 @@
 A draft inventory, not a published release. The target is a real small Windows/Wayland app built from these docs with el + kit, CPU or GPU.
 
 ### Added
-- Native surfaces extracted from mypaper with history and MIT licensing.
+- Native surfaces extracted from Glaze with history and MIT licensing.
 - Keyed declarative elements, flex/grid layout, damage-only redraw and snap/tree/script tooling.
 - Spring layout/colour/presence motion, reduced motion and idle ticker shutdown.
 - Independent theme parts, five light/dark presets, mix diagnostics and TOML/JSON loading.

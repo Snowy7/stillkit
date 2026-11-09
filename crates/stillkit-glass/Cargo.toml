@@ -1,5 +1,5 @@
 # Liquid Glass for stillkit: liquid-rust by al1h3n (MIT OR Apache-2.0), adopted with the changes
-# mypaper made to it. See CREDITS.md. The GPU lives here and only here: stillkit's UI crates
+# Glaze made to it. See CREDITS.md. The GPU lives here and only here: stillkit's UI crates
 # stay CPU-only, and apps run this renderer in a separate glass host process.
 [package]
 name = "stillkit-glass"

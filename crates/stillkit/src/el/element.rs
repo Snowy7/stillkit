@@ -1163,7 +1163,8 @@ impl<S> El<S> {
         self
     }
 
-    /// Selects a field's whole text whenever it gets focus (a search or rename field).
+    /// Selects a field's whole text whenever it gets focus (a search or rename field), the
+    /// click that focuses it included; clicks after that place the caret.
     pub fn select_all_on_focus(mut self) -> Self {
         self.spec(|f| f.select_all = true);
         self
@@ -1185,7 +1186,10 @@ impl<S> El<S> {
     }
 
     /// Runs on `&mut S` with a field's text when Enter goes down in a [`text_input`] (Ctrl+Enter
-    /// in a [`text_area`]). Without it, Enter goes on to the field's ancestors.
+    /// in a [`text_area`]). Without it, Enter goes on to the field's ancestors. A field with a
+    /// [`value`](Self::value) and this but no [`on_input`](Self::on_input) is typed, then
+    /// committed: it keeps what is typed while it has focus, and shows its value again when
+    /// focus leaves without Enter (Unity's delayed fields).
     pub fn on_submit(mut self, handler: impl Fn(&mut S, &str) + 'static) -> Self {
         self.on_submit = Some(Box::new(handler));
         self

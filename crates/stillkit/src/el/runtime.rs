@@ -1068,8 +1068,9 @@ impl<S> Runtime<S> {
         if !self.fields.is_empty()
             && matches!(event, Event::Press(..) | Event::Move(_) | Event::Release(..) | Event::CaptureLost | Event::Cancelled | Event::Leave)
         {
+            let typing = self.typing;
             self.sync_focus();
-            self.field_pointer(event);
+            self.field_pointer(event, self.typing != typing);
         }
         match *event {
             Event::Press(p, Button::Left) => {

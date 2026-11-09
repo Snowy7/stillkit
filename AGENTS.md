@@ -1,6 +1,6 @@
 # stillkit: rules for agents
 
-stillkit is a native UI library, extracted from mypaper (`D:\Coding\projects\desktop\wallpaper`, whose
+stillkit is a native UI library, extracted from Glaze (`D:\Coding\projects\desktop\wallpaper`, whose
 shell, Studio and Files are built on it). The plan, with phases and decisions, is
 `plans/ui-library-extraction.html` (published at https://faca9c667eb799c7.snist.dev).
 
@@ -13,8 +13,8 @@ shell, Studio and Files are built on it). The plan, with phases and decisions, i
    feature. `tests/no_gpu_driver.rs` checks CPU mode, `tests/gpu_driver.rs` GPU mode. A GPU
    device costs 30–250 MB (docs/ui.md, "Render modes"), so take it only for glass or heavy
    animation, and keep small surfaces on the CPU beside it.
-5. **Every mode works, and mypaper never pays for it.** CPU alone, GPU alone, and both in one
-   process (per surface). mypaper runs CPU mode; its numbers must not get worse.
+5. **Every mode works, and Glaze never pays for it.** CPU alone, GPU alone, and both in one
+   process (per surface). Glaze runs CPU mode; its numbers must not get worse.
 2. **Nothing changes, nothing is drawn.** A frame is compared with the one on screen and only the
    changed bounds are redrawn; an identical frame costs one comparison.
 3. **Zero idle work.** No timers or tickers while nothing moves; the frame ticker runs only while
@@ -27,7 +27,7 @@ shell, Studio and Files are built on it). The plan, with phases and decisions, i
   needless wrappers. Keep it simple; build only what a phase needs.
 - Short doc comments on public items say how they are used. Keep comments in sync with changes.
 - Tests are focused: behaviour and goldens, not smoke tests.
-- `mypaper` uses this crate as `mypaper_ui` (a renamed dependency) at about 1,000 call sites. Don't
+- `Glaze` uses this crate as `glaze_ui` (a renamed dependency) at about 1,000 call sites. Don't
   break public paths without a compatibility re-export, unless your brief says otherwise.
 
 ## Commands
@@ -40,9 +40,9 @@ cargo run --release -p stillkit --example gallery      # docs/media/native/kit-*
 STILLKIT_BLESS=1 cargo test -p stillkit --features golden   # rewrite goldens, then look at them
 ```
 
-Use your own `CARGO_TARGET_DIR` under `C:\mypaper-targets\stillkit\` when you work beside others.
-Don't run the mypaper app or deploy it. mypaper builds this checkout through a local `[patch]`
-(its `.cargo/config.toml`), so a broken commit here breaks mypaper's next build.
+Use your own `CARGO_TARGET_DIR` under `D:\stillkit-targets\` when you work beside others (never C:).
+Don't run the Glaze app or deploy it. Glaze builds this checkout through a local `[patch]`
+(its `.cargo/config.toml`), so a broken commit here breaks Glaze's next build.
 
 ## Git
 

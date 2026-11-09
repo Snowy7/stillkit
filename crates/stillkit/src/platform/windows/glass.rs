@@ -45,7 +45,7 @@ thread_local! {
 }
 
 /// Sends this thread's glass requests to `backdrop` from now on. An installed backdrop always
-/// wins over the built-in system one, available or not (mypaper's engine).
+/// wins over the built-in system one, available or not (Glaze's engine).
 pub fn install(backdrop: Rc<dyn Backdrop>) {
     BACKDROP.with_borrow_mut(|b| *b = Some(backdrop));
 }
