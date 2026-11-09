@@ -217,6 +217,9 @@ or transfer native child windows. Affine ancestor transforms are applied during
 painting, rather than included in the matched rectangle. No worker or timer is
 created. Two optional string pointers (element and target) and a track flag are
 retained even without flights; matching allocates no map or permanent cache.
+Measured 64-bit Windows LLVM type layouts: each retained target grows from 208 to
+224 bytes; animation tracks stay at 768 bytes compared with the transforms branch.
+The element also carries its optional flight key. Keys allocate only when used.
 
 ## Rotation and spinners
 
