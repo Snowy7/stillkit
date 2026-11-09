@@ -25,8 +25,8 @@ jobs:
         with:
           workspaces: ". -> D:\\stillkit-targets\\O"
       # GPU integration tests are feature-gated: compile/lint GPU code, never run it here.
-      - run: cargo test --workspace --features stillkit/golden,stillkit/serde
-      - run: cargo clippy --workspace --all-targets --features stillkit/golden,stillkit/serde,stillkit/gpu -- -D warnings
+      - run: cargo test --workspace --features stillkit/golden,stillkit/serde,stillkit-kit/markdown
+      - run: cargo clippy --workspace --all-targets --features stillkit/golden,stillkit/serde,stillkit/gpu,stillkit-kit/markdown -- -D warnings
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -37,7 +37,7 @@ jobs:
       - name: Install repository toolchain
         run: rustup show
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --features stillkit/golden,stillkit/serde
+      - run: cargo test --workspace --features stillkit/golden,stillkit/serde,stillkit-kit/markdown
   check-macos:
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -51,4 +51,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: macos-check
-      - run: cargo check --workspace --target aarch64-apple-darwin
+      - run: cargo check --workspace --target aarch64-apple-darwin --features stillkit-kit/markdown
