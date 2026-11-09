@@ -6,6 +6,7 @@
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - Stable-id editor TabStrip with reorder, overflow, close and tear-out intents; composable PopupList listbox.
 - Controlled nested SplitView panes with captured resizing, collapse/reset and keyboard range semantics.
+- App-shell kit: controlled nested SplitView, reorderable/tear-out-event TabStrip, native-hit-tested WindowTitlebar, ShortcutRecorder/Keybind, delayed interactive HoverCard, RollingText, sidebar sections/rows/headers and Page; editor example and headless behavior checks.
 - el styling for dense tools: `border`, `edges` (a design px of light and shade inside a box's top and bottom, following its corners), `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
@@ -44,6 +45,8 @@ A draft inventory, not a published release. The target is a real small Windows/W
 
 ### Added
 - Native surfaces extracted from Glaze with history and MIT licensing.
+- App-shell kit: controlled nested SplitView, reorderable/tear-out-event TabStrip, native-hit-tested WindowTitlebar, ShortcutRecorder/Keybind, delayed interactive HoverCard, RollingText, sidebar sections/rows/headers and Page; editor example and headless behavior checks.
+- Native surfaces extracted from mypaper with history and MIT licensing.
 - Keyed declarative elements, flex/grid layout, damage-only redraw and snap/tree/script tooling.
 - Spring layout/colour/presence motion, reduced motion and idle ticker shutdown.
 - Independent theme parts, five light/dark presets, mix diagnostics and TOML/JSON loading.

@@ -408,7 +408,6 @@ No changes were made under `crates/stillkit`, and no branch was pushed or merged
 Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
 reuses the text gallery's overlay module to avoid duplicate module loading.
 
-
 ## App shells
 
 `SplitView::new(key, &state, access, first, second)` composes two controlled panes.
@@ -429,6 +428,40 @@ before Runtime (which reserves Tab for focus traversal). Forward Ctrl+Shift+Tab 
 A release more than 24 px vertically outside a tab emits `TornOut(id)`; the app moves
 the document to another window. The kit does not create windows or transfer state.
 
+`WindowTitlebar` provides leading, tabs and trailing slots. After layout and DPI
+changes, call `WindowTitlebar::sync_chrome(&surface, &runtime, key)`. It registers
+caption/minimize/maximize/close bounds with the existing platform hit tester;
+Windows supplies dragging, double-click maximize and HTMAXBUTTON snap hover.
+Keyboard/assistive caption activation emits `WindowAction` for the host to apply.
+On macOS set `Caption::Compact` and pass `Surface::system_controls().right / scale`
+to `system_inset`. No platform APIs, threads or imports are added by these builders.
+
+`ShortcutRecorder` renders `ShortcutRecorderState` as keycaps. Its accessible name
+is the action being bound. Before Runtime, forward Key **and KeyUp** through
+`state.handle(event, modifiers)` while recording; consume events it uses. Escape
+cancels, Backspace/Delete clears, and deactivation cancels. Persist `chord`; the app
+validates conflicts and registers shortcuts. `Keybind` displays keycap labels alone.
+
+`HoverCard` wraps interactive rich content in a non-modal popover. Feed pointer
+and leave/deactivation/Escape events to `HoverCardState::handle`, using logical
+anchor/card bounds and the window scale. Its 500 ms entry delay has one host wake:
+include `deadline()` alongside `Runtime::wake_at`, then call `advance(now)`.
+Pointer transfer into the card keeps it open; dismissal clears the deadline.
+Use `enter(now)` for keyboard-focus entry, or a keyboard-activatable trigger to open
+it directly. The example demonstrates the host wiring without a polling timer.
+
+`RollingText` slides/fades a replaced complete text run (including shaped Unicode),
+using retained presence and the runtime's reduced-motion policy. Unlike Rune's
+per-grapheme LCS matching, it replaces the whole run and keeps no global cache.
+`SidebarHeader`/`SidebarSection` provide controlled collapse and counts;
+`SidebarRow` provides icons, selection and counts. Wrap rows in a vertical focus
+group for arrow navigation. `Page` places a heading, toolbar and flexible content.
+All components use theme tokens and shared contrast helpers for the five looks.
+
+`cargo run -p stillkit-kit --example app_shell` opens an editor shell. Add
+`--snap-dir PATH` to export all ten look/scheme combinations without a window.
+`tests/app_shell.rs` covers resize capture/cancel/reset, keyboard limits, tab
+reorder/tear-out/close, shortcut key-up, delayed hover transfer, collapse and idle.
 
 `PopupList`/`PopupItem` supply bounded listbox content for completion popovers.
 The app filters rows, supplies stable ids/selection and applies picks; disabled rows
