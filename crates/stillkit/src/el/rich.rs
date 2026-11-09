@@ -199,7 +199,11 @@ pub(crate) fn layout(
     let mut drawn = String::new();
     for run in runs {
         let style = run.style(base, scale);
-        for piece in run.text.split_word_bounds() {
+        for piece in pieces(&run.text) {
+            if piece == "\r" {
+                offset += 1;
+                continue;
+            }
             if piece.contains('\n') {
                 for c in piece.chars() {
                     if c == '\n' {
@@ -222,7 +226,7 @@ pub(crate) fn layout(
             }
             let w = crate::platform::current::caret::attributed(text, piece, &style, run.italic).0;
             let pieces: Vec<&str> = if w > width.max(1.0) {
-                piece.graphemes(true).collect()
+                break_word(text, piece, &style, run.italic, width, x)
             } else {
                 vec![piece]
             };
@@ -326,4 +330,74 @@ pub(crate) fn bounds(
         super::element::TextAlign::End => rect.right - width,
     };
     fragment.rect.offset(left, rect.top)
+}
+
+// Keep punctuation with its word; hard breaks remain separate from their preceding text.
+fn pieces(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (at, c) in text.char_indices() {
+        if c == '\n' || c == '\r' {
+            if start < at {
+                out.push(&text[start..at]);
+            }
+            out.push(&text[at..at + 1]);
+            start = at + 1;
+        } else if c.is_whitespace() && c != '\u{a0}' && c != '\u{202f}' {
+            let end = at + c.len_utf8();
+            out.push(&text[start..end]);
+            start = end;
+        }
+    }
+    if start < text.len() {
+        out.push(&text[start..]);
+    }
+    out
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn punctuation_stays_attached_and_hard_breaks_keep_their_offsets() {
+        assert_eq!(
+            pieces("let answer = 42;\nnext"),
+            ["let ", "answer ", "= ", "42;", "\n", "next"]
+        );
+        assert_eq!(pieces("hello, world!"), ["hello, ", "world!"]);
+    }
+}
+
+// Shape each resulting line as a whole, preserving ligatures and joining inside long words.
+fn break_word<'a>(
+    text: &mut Text,
+    word: &'a str,
+    style: &TextStyle,
+    italic: bool,
+    width: f32,
+    used: f32,
+) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let first = word.graphemes(true).next().unwrap_or("");
+    let first_width = crate::platform::current::caret::attributed(text, first, style, italic).0;
+    let used = if first_width > width - used {
+        0.0
+    } else {
+        used
+    };
+    let (mut start, mut previous) = (0, 0);
+    for (at, grapheme) in word.grapheme_indices(true) {
+        let end = at + grapheme.len();
+        let room = if out.is_empty() { width - used } else { width }.max(1.0);
+        let advance =
+            crate::platform::current::caret::attributed(text, &word[start..end], style, italic).0;
+        if advance > room && previous > start {
+            out.push(&word[start..previous]);
+            start = previous;
+        }
+        previous = end;
+    }
+    if start < word.len() {
+        out.push(&word[start..]);
+    }
+    out
 }
