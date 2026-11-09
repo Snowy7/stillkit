@@ -50,6 +50,8 @@ mod json;
 mod layout;
 mod overlay;
 mod png;
+mod virtualize;
+pub use virtualize::virtual_list;
 mod runtime;
 mod rotate;
 mod scroll;
@@ -57,11 +59,14 @@ pub mod token;
 
 pub use element::{
     Align, ArcStart, Axis, El, Handled, Justify, Key, KeyCode, Len, Modifiers, Motion, Orientation, Paint,
-    Face, Painter, TextAlign, Transition, Tx, arc, col, el, grid, icon, image, paint, row, text, text_area,
+    Face, Painter, PointerEvent, native, PointerPhase, TextAlign, Transition, Tx, WheelEvent, arc, col, el, grid, icon, image, paint, row, text, text_area,
     text_input,
 };
 pub use crate::platform::current::host::reduced_motion;
 pub use clipboard::{Clipboard, Memory as MemoryClipboard};
+/// The system clipboard: copy and paste with other apps outside fields (`set_clipboard`, or
+/// an app's own "Copy" action).
+pub use crate::platform::current::clipboard::System as SystemClipboard;
 pub use host::{App, Input, Script, run};
 /// What a trigger opens, as [`crate::Detail::popup`] tells assistive technology.
 pub use accesskit::HasPopup;

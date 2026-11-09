@@ -54,3 +54,46 @@ pub fn wait_for(timeout: std::time::Duration) {
 pub fn reduced_motion() -> bool {
     NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }
+
+/// The [`Waker`](crate::Waker)'s native half: an application-defined `NSEvent` posted to
+/// AppKit's queue, which ends `nextEventMatchingMask`'s wait. Made on the main thread.
+pub(crate) struct Poster(Option<std::ptr::NonNull<objc2_app_kit::NSApplication>>);
+
+// SAFETY: the pointer is the process's shared NSApplication, which lives forever, and the only
+// call made through it off the main thread is `postEvent:atStart:`, which AppKit documents as
+// safe from subthreads.
+unsafe impl Send for Poster {}
+// SAFETY: as above; posting needs no exclusive access.
+unsafe impl Sync for Poster {}
+
+impl Poster {
+    pub(crate) fn new() -> Self {
+        let app = objc2::MainThreadMarker::new().map(objc2_app_kit::NSApplication::sharedApplication);
+        // Retained::into_raw keeps the shared app retained for the process's life.
+        Self(app.and_then(|app| std::ptr::NonNull::new(objc2::rc::Retained::into_raw(app))))
+    }
+
+    pub(crate) fn post(&self) {
+        use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
+        let Some(app) = self.0 else { return };
+        let Some(event) = NSEvent::otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2(
+            NSEventType::ApplicationDefined,
+            objc2_foundation::NSPoint::ZERO,
+            NSEventModifierFlags::empty(),
+            0.0,
+            0,
+            None,
+            WAKE_SUBTYPE,
+            0,
+            0,
+        ) else {
+            return;
+        };
+        // SAFETY: see `Poster`'s Send/Sync: the shared app is alive, and posting is
+        // documented thread-safe.
+        unsafe { app.as_ref() }.postEvent_atStart(&event, false);
+    }
+}
+
+/// The subtype of the waker's application-defined event; the pump drops these.
+pub(super) const WAKE_SUBTYPE: i16 = 0x5741;

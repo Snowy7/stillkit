@@ -304,3 +304,33 @@ fn a_cells_hit_lets_presses_through_to_its_row_and_stays_announced() {
     rt.frame(FRAME);
     assert_eq!(rt.presented("row").unwrap().state, stillkit::interact::State::Hover);
 }
+
+/// A visible stroke drawn just outside `rect`: a focus ring showing around it.
+fn ring_shown(rt: &Runtime<S>, rect: Rect) -> bool {
+    rt.list().ops.iter().any(|op| match op {
+        Op::Stroke { rect: r, color, .. } => r.left < rect.left && r.right > rect.right && (r.top - rect.top).abs() < 8.0 && color.a > 0.0,
+        _ => false,
+    })
+}
+
+fn search_well(quiet: bool) -> El<S> {
+    row().key("well").pad(6.0).fill(Rgba::rgb8([40, 40, 40], 1.0)).focus_within(|e| e.fill(Rgba::rgb8([30, 50, 90], 1.0))).child(
+        text_input("query").w(160.0).h(24.0).value("").focus_ring(!quiet).on_input(|s: &mut S, t| s.query = t.to_owned()),
+    )
+}
+
+#[test]
+fn a_field_inside_a_focus_within_box_can_leave_the_ring_to_it() {
+    for quiet in [false, true] {
+        let view = if quiet { |_: &S| col().pad(20.0).child(search_well(true)) } else { |_: &S| col().pad(20.0).child(search_well(false)) };
+        let mut rt = runtime(view);
+        rt.frame(Duration::ZERO);
+        let field = rt.find("query").unwrap();
+        rt.pointer_down(field.center().x, field.center().y);
+        rt.pointer_up(field.center().x, field.center().y);
+        for _ in 0..30 {
+            rt.frame(FRAME);
+        }
+        assert_eq!(ring_shown(&rt, field), !quiet, "quiet {quiet}: the field's own ring");
+    }
+}
