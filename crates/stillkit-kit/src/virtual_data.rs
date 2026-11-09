@@ -834,18 +834,10 @@ impl<'a, S: 'static> VirtualTree<'a, S> {
         root.on_key(move |s, k, tx| {
             let m = model(s);
             if k == KeyCode::ENTER || k == KeyCode::SPACE {
-                let branch = m
-                    .selection
-                    .cursor
-                    .as_ref()
-                    .and_then(|key| m.nodes.iter().position(|n| &n.key == key))
-                    .is_some_and(|i| m.branch(i));
-                if !branch && open.is_none() {
-                    return Handled::No;
-                }
-                if let Some(id) = m.activate()
-                    && let Some(open) = &open
-                {
+                if let Some(id) = m.activate() {
+                    let Some(open) = &open else {
+                        return Handled::No;
+                    };
                     open(s, id);
                 }
                 return Handled::Yes;
