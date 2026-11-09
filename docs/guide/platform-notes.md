@@ -57,3 +57,8 @@ coordinates; `Tray::open_menu` opens stillkit's own `Menu` there. The app routes
 surface events to the menu as usual. Wayland compositors control global placement;
 tray-menu placement is therefore compositor-dependent. macOS currently reports an
 unsupported NSStatusItem stub.
+
+`hotkey::Hotkey::new("CTRL+ALT+K".parse()?, "Open panel")` registers a global chord.
+Drain `activated()` after the wait. Drop unregisters it. Linux uses GlobalShortcuts,
+requires compositor support and may show a consent dialog (up to two minutes).
+The compositor chooses the actual trigger. macOS hotkeys are currently unsupported.

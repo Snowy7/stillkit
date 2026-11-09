@@ -12,3 +12,9 @@ impl Tray {
     }
 }
 
+pub(crate) struct Hotkey;
+impl Hotkey {
+ pub fn new(_:crate::hotkey::Chord,_:&str)->anyhow::Result<Self> { anyhow::bail!("global hotkeys are unsupported") }
+ pub fn activated(&mut self)->bool { false }
+}
+

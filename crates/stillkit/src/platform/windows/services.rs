@@ -331,3 +331,116 @@ mod tests {
     }
 }
 
+type RegisterHotkey = unsafe extern "system" fn(HWND, i32, u32, u32) -> i32;
+type UnregisterHotkey = unsafe extern "system" fn(HWND, i32) -> i32;
+pub(crate) struct Hotkey {
+    window: HWND,
+    pending: Box<std::cell::Cell<u32>>,
+    unregister: UnregisterHotkey,
+}
+impl Hotkey {
+    pub fn new(chord: crate::hotkey::Chord, _: &str) -> Result<Self> {
+        // SAFETY: signatures match RegisterHotKey and UnregisterHotKey; DLLs stay mapped.
+        let (register, unregister): (RegisterHotkey, UnregisterHotkey) = unsafe {
+            (
+                std::mem::transmute::<RawProcedure, RegisterHotkey>(procedure(
+                    w!("user32.dll"),
+                    s!("RegisterHotKey"),
+                )?),
+                std::mem::transmute::<RawProcedure, UnregisterHotkey>(procedure(
+                    w!("user32.dll"),
+                    s!("UnregisterHotKey"),
+                )?),
+            )
+        };
+        let class = w!("stillkit.services.hotkey.v1");
+        // SAFETY: a message-only window, never shown or activated.
+        let window = unsafe {
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(hotkey_proc),
+                lpszClassName: class,
+                ..Default::default()
+            });
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                class,
+                w!(""),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                Some(HWND_MESSAGE),
+                None,
+                None,
+                None,
+            )?
+        };
+        let mut hotkey = Self {
+            window,
+            pending: Box::default(),
+            unregister,
+        };
+        // SAFETY: pending's allocation stays stable until destruction clears userdata.
+        unsafe {
+            SetWindowLongPtrW(window, GWLP_USERDATA, (&raw mut *hotkey.pending) as isize);
+        }
+        // SAFETY: this window owns id 1; MOD_NOREPEAT prevents autorepeat activations.
+        ensure!(
+            // SAFETY: the live hidden window owns this registration.
+            unsafe { register(window, 1, chord.modifiers | 0x4000, chord.key) } != 0,
+            "hotkey registration failed or chord already owned"
+        );
+        Ok(hotkey)
+    }
+    pub fn activated(&mut self) -> bool {
+        let n = self.pending.get();
+        self.pending.set(n.saturating_sub(1));
+        n > 0
+    }
+}
+unsafe extern "system" fn hotkey_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if message == WM_HOTKEY {
+        // SAFETY: userdata belongs to the live Hotkey's boxed Cell.
+        let ptr =
+            unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) } as *const std::cell::Cell<u32>;
+        if !ptr.is_null() {
+            // SAFETY: drop clears userdata before destroying the allocation.
+            let pending = unsafe { &*ptr };
+            pending.set(pending.get().saturating_add(1));
+        }
+        return LRESULT(0);
+    }
+    // SAFETY: default processing for messages not owned here.
+    unsafe { DefWindowProcW(window, message, wparam, lparam) }
+}
+impl Drop for Hotkey {
+    fn drop(&mut self) {
+        // SAFETY: registration and hidden window are owned here.
+        unsafe {
+            (self.unregister)(self.window, 1);
+            SetWindowLongPtrW(self.window, GWLP_USERDATA, 0);
+            let _ = DestroyWindow(self.window);
+        }
+    }
+}
+
+#[cfg(test)]
+mod hotkey_tests {
+    use super::*;
+    #[test]
+    fn dropping_hotkey_releases_its_chord() -> Result<()> {
+        let chord = "CTRL+ALT+SHIFT+F24".parse::<crate::hotkey::Chord>()?;
+        let first = Hotkey::new(chord.clone(), "stillkit test")?;
+        assert!(Hotkey::new(chord.clone(), "conflicting test").is_err());
+        drop(first);
+        drop(Hotkey::new(chord, "released test")?);
+        Ok(())
+    }
+}
+
