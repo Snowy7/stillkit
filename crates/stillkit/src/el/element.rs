@@ -596,7 +596,7 @@ pub(crate) enum What {
     Text {
         text: Arc<str>,
         face: Face,
-        runs: Arc<[super::rich::Run]>,
+        runs: Vec<super::rich::Run>,
         /// Wrap into at most this many lines; `None` keeps one line (cut with an ellipsis).
         wrap: Option<usize>,
     },
@@ -881,7 +881,7 @@ pub fn grid<S>(columns: u16) -> El<S> {
 /// as tall as the role's line and may shrink, cut with an ellipsis.
 pub fn text<S>(text: impl Into<Arc<str>>) -> El<S> {
     new(What::Text {
-        runs: Arc::from([]),
+        runs: Vec::new(),
         text: text.into(),
         face: Face::default(),
         wrap: None,

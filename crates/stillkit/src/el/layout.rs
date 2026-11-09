@@ -26,7 +26,7 @@ pub(crate) struct Measure {
     line: f32,
     wrap: Option<usize>,
     selectable: bool,
-    runs: Arc<[super::rich::Run]>,
+    runs: Vec<super::rich::Run>,
     scale: f32,
 }
 
@@ -384,7 +384,7 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
             line: f.face.line(cx.theme, cx.s) * rows as f32,
             wrap: None,
             selectable: false,
-            runs: Arc::from([]),
+            runs: Vec::new(),
             scale: cx.s,
         });
     }

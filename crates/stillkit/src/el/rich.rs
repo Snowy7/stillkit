@@ -134,7 +134,7 @@ impl Run {
 }
 /// A wrapping attributed paragraph. Add `.selectable()` to join document selection.
 pub fn rich_text<S>(runs: impl IntoIterator<Item = Run>) -> El<S> {
-    let runs: Arc<[Run]> = runs.into_iter().collect();
+    let runs: Vec<Run> = runs.into_iter().collect();
     let plain: String = runs.iter().map(|r| &*r.text).collect();
     let mut el = super::text(plain);
     if let What::Text {

@@ -79,7 +79,7 @@ fn rich_runs_golden() {
         |_| {
             el::col().pad(16.0).child(
                 el::rich_text([
-                    Run::new("Native rich text ").bold(),
+                    Run::new("Native rich text ").bold().size(19.0),
                     Run::new("italic ").italic(),
                     Run::new("underline ").underline(),
                     Run::new("deleted ").strike(),
@@ -128,4 +128,12 @@ fn dragging_from_a_link_selects_without_opening_it() {
             .selection
             .is_some_and(|(a, b)| a != b)
     );
+}
+
+#[test]
+fn linked_runs_expose_the_link_role() {
+    let mut rt = Runtime::new((), |_| el::rich_text([Run::new("documentation").link("app:docs")])
+        .on_link(|_, _| {}), theme(), (200, 80), 1.0).unwrap();
+    rt.frame(Duration::ZERO);
+    assert!(rt.list().hits.iter().any(|h| h.role == stillkit::Role::Link && h.actionable));
 }
