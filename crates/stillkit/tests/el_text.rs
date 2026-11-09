@@ -82,6 +82,7 @@ fn view(s: &Form) -> El<Form> {
         .child(
             text_input("size")
                 .w(200.0)
+                .select_all_on_focus()
                 .value(s.size.as_str())
                 .on_submit(|s: &mut Form, t| s.size = t.into()),
         )
@@ -198,6 +199,7 @@ fn a_committing_field_keeps_typing_until_enter_and_reverts_when_left() {
     rt.update(|s| s.size = "12".into());
     rt.frame(FRAME);
     focus(&mut rt, "size");
+    assert_eq!(shown(&rt, "size").1, (0, 2), "the focusing click selects it all");
     rt.key(KeyCode::END.0);
     rt.type_text("5");
     rt.frame(FRAME);
