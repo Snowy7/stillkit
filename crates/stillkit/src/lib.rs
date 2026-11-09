@@ -55,6 +55,7 @@ pub use platform::current::text_field;
 pub mod theme;
 mod tokens;
 pub mod transition;
+mod waker;
 use platform::current::watch;
 
 pub use app_window::{Chrome, Cursor, set_modal_hook};
@@ -75,6 +76,7 @@ pub use text_field::TextField;
 pub use theme::{Palette, Scheme, ShadowLevel, SoftShadow, Style, TextRole, Theme};
 pub use tokens::{Colors, Ink, Material, MenuMetrics, Step, Tokens, Typeface};
 pub use watch::FileWatch;
+pub use waker::{Waker, waker};
 
 /// Accessibility roles for [`Hit`] items.
 pub use accesskit::Role;
