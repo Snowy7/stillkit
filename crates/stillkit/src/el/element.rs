@@ -935,11 +935,17 @@ impl<S> El<S> {
         self.selectable = true;
         if let What::Text { wrap, .. } = &mut self.what {
             *wrap = Some(wrap.unwrap_or(usize::MAX));
-            self.sem.focusable = true;
-            self.cursor = Some(crate::Cursor::Text);
         }
         self.children = self.children.into_iter().map(El::selectable).collect();
         self
+    }
+
+    // A control added after `selectable()` takes its subtree out of document input.
+    fn clear_selection(&mut self) {
+        self.selectable = false;
+        for child in &mut self.children {
+            child.clear_selection();
+        }
     }
 
     /// Child.
@@ -1579,6 +1585,7 @@ impl<S> El<S> {
     /// Space while focused, or assistive technology's invoke. The view then runs again.
     pub fn on_press(mut self, handler: impl Fn(&mut S) + 'static) -> Self {
         self.on_press = Some(Box::new(move |s, _| handler(s)));
+        self.clear_selection();
         self
     }
 
@@ -1586,6 +1593,7 @@ impl<S> El<S> {
     /// with no motion, `tx.set_theme(..)` switches the look.
     pub fn on_press_with(mut self, handler: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
         self.on_press = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1594,6 +1602,7 @@ impl<S> El<S> {
     /// follows the pointer), with no motion.
     pub fn on_drag(mut self, handler: impl Fn(&mut S, f32, f32) + 'static) -> Self {
         self.on_drag = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1608,6 +1617,7 @@ impl<S> El<S> {
     /// Changes land at once, with no motion, as a drag's do. Presses still reach `on_press`.
     pub fn on_pointer(mut self, handler: impl Fn(&mut S, &PointerEvent, &mut Tx) -> bool + 'static) -> Self {
         self.on_pointer = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1695,7 +1705,8 @@ impl<S> El<S> {
 
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
-        self.on_press.is_some()
+        (self.selectable && matches!(self.what, What::Text { .. }))
+            || self.on_press.is_some()
             || self.on_drag.is_some()
             || self.on_pointer.is_some()
             || self.on_wheel.is_some()

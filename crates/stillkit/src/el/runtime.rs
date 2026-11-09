@@ -725,7 +725,7 @@ impl<S> Runtime<S> {
             if el.states.any() {
                 self.stateful.push(laid[i].id);
             }
-            let field = el.field().map(|_| crate::Cursor::Text);
+            let field = (el.field().is_some() || el.selectable && matches!(el.what, What::Text { .. })).then_some(crate::Cursor::Text);
             if let Some(cursor) = el.cursor.or(field) {
                 self.cursors.push((laid[i].id, cursor));
             }
