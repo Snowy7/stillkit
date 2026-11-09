@@ -182,6 +182,7 @@ impl<const N: usize> Prop<N> {
     /// spring, lands on it. An unchanged target keeps its flight.
     pub(crate) fn set(&mut self, target: [f32; N], spring: Option<Spring>, t: f64) {
         if target == self.target {
+            if spring.is_none() { self.moving = None; }
             return;
         }
         let (x, v) = self.sample(t);
@@ -385,8 +386,9 @@ impl Animator {
     }
 
     /// Transfers departing flight tracks before ordinary retained tracks are pruned.
-    pub fn match_flights(&mut self, old: (&[Laid], &[Target], &[Pose]), laid: &[Laid], targets: &[Target], mode: Mode) {
-        if mode != Mode::Animate { return; }
+    pub fn match_flights(&mut self, old: (&[Laid], &[Target], &[Pose]), laid: &[Laid], targets: &[Target], mode: Mode) -> Vec<u64> {
+        let mut matched = Vec::new();
+        if mode != Mode::Animate { return matched; }
         let (previous, old_targets, poses) = old;
         for (to, target) in laid.iter().zip(targets) {
             let Some(key) = &target.flight else { continue };
@@ -407,7 +409,9 @@ impl Animator {
             track.presence = Prop::at([1.0]);
             track.leaving = false;
             self.tracks.insert(to.id, track);
+            matched.push(previous[i].id);
         }
+        matched
     }
 
     /// Starts element `id`'s exit, if it has a transition to exit by.

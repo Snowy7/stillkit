@@ -6,6 +6,7 @@ fn view(right: &bool) -> El<bool> {
     let card = el::el()
         .key("card")
         .flight("hero")
+        .on_press(|s: &mut bool| *s = !*s)
         .w(if *right { 100. } else { 40. })
         .h(40.)
         .radius(if *right { 20. } else { 2. })
@@ -72,7 +73,7 @@ fn interruption_preserves_the_current_rectangle() {
     rt.frame(Duration::ZERO);
     rt.frame(Duration::from_millis(80));
     let rect = rt.presented("card").unwrap().rect;
-    rt.update(|s| *s = false);
+    assert!(rt.click("card"));
     rt.frame(Duration::ZERO);
     assert_eq!(rt.presented("card").unwrap().rect, rect);
     rt.frame(Duration::from_millis(8));
@@ -102,4 +103,43 @@ fn flight_pixels_between_parents() {
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/el-flight.png"),
     )
     .unwrap();
+}
+#[test]
+fn ambiguous_keys_do_not_choose_a_source() {
+    let mut rt = Runtime::new(false, |right| {
+        let mut root = el::row();
+        if !right {
+            root = root.child(el::el().key("a").flight("same").size(20.))
+                .child(el::el().key("b").flight("same").size(30.));
+        } else {
+            root = root.child(el::el().key("c").flight("same").size(40.));
+        }
+        root
+    }, Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE), (300,160),1.).unwrap();
+    rt.update(|s| *s = true); rt.frame(Duration::ZERO);
+    assert_eq!(rt.presented("c").unwrap().rect, rt.find("c").unwrap());
+    assert!(!rt.animating());
+}
+
+#[test]
+fn enabling_reduced_motion_lands_an_active_flight() {
+    let mut rt = runtime();
+    rt.update(|s| *s = true);
+    rt.frame(Duration::ZERO);
+    rt.frame(Duration::from_millis(80));
+    rt.set_reduced_motion(true);
+    rt.frame(Duration::ZERO);
+    assert_eq!(rt.presented("card").unwrap().rect, rt.find("card").unwrap());
+}
+#[test]
+fn an_exiting_parent_does_not_keep_a_second_copy() {
+    let mut rt = Runtime::new(false, |right| {
+        let card = el::el().key("card").flight("hero").size(40.)
+            .fill(Rgba::new(1.,0.,0.,1.));
+        el::row().child(el::el().key(if *right { "right" } else { "left" })
+            .pad(if *right { 80. } else { 0. })
+            .transition(el::Transition::fade()).child(card))
+    }, Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE), (300,200),1.).unwrap();
+    rt.update(|s| *s = true); rt.frame(Duration::ZERO);
+    assert_eq!(rt.list().ops.iter().filter(|op| matches!(op,stillkit::Op::Fill { .. })).count(), 1);
 }
