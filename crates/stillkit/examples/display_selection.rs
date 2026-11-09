@@ -1,4 +1,4 @@
-//! Selectable help text; the kit Markdown layer builds on this document model.
+//! Selectable help text copied as one document.
 use stillkit::el::{self, App, Axis, El, col, text};
 use stillkit::{Kind, Scheme, TextRole, Theme};
 fn view(_: &()) -> El<()> {

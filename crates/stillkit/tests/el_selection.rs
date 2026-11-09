@@ -88,7 +88,7 @@ fn double_word_triple_paragraph_and_shift_extension() {
     rt.pointer_up(r.left, r.top + 3.0);
     rt.key_with(KeyCode::END.0, Modifiers::SHIFT);
     rt.key_with(KeyCode::of('C').0, Modifiers::CTRL);
-    assert!(!board.0.borrow().is_empty());
+    assert_eq!(&*board.0.borrow(), "hello world");
 }
 #[cfg(all(windows, feature = "golden"))]
 #[test]

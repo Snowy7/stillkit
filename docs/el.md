@@ -530,3 +530,5 @@ Descendants added before or after `.selectable()` participate. Give dynamic docu
 Selectable labels wrap fully by default; `.wrap(n)` still limits visible lines.
 The window host uses `el::SystemClipboard`; headless runtimes can inject a
 `Clipboard` with `Runtime::set_clipboard`.
+
+See `examples/display_selection.rs` for a scrollable help document.
