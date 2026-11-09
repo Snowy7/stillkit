@@ -57,7 +57,8 @@ pub mod token;
 
 pub use element::{
     Align, ArcStart, Axis, El, Handled, Justify, Key, KeyCode, Len, Modifiers, Motion, Orientation, Paint,
-    Painter, Transition, Tx, arc, col, el, grid, icon, image, paint, row, text, text_area, text_input,
+    Face, Painter, TextAlign, Transition, Tx, arc, col, el, grid, icon, image, paint, row, text, text_area,
+    text_input,
 };
 pub use crate::platform::current::host::reduced_motion;
 pub use clipboard::{Clipboard, Memory as MemoryClipboard};

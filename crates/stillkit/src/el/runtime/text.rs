@@ -68,8 +68,8 @@ impl<S> Runtime<S> {
                 (r.height() - pad(0) - pad(2)).max(0.0),
             );
             field.look = Some(Look {
-                style: theme.font.style(spec.role, s),
-                line: theme.font.line(spec.role, s),
+                style: spec.face.style(theme, s),
+                line: spec.face.line(theme, s),
                 ink: el.look.color.unwrap_or(token::LABEL).resolve(theme),
                 multiline: spec.multiline,
                 secure: spec.secure,

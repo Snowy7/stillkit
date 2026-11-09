@@ -356,18 +356,18 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
         let rows = if f.multiline { f.rows } else { 1 };
         return Some(Measure {
             text: "".into(),
-            style: cx.theme.font.style(f.role, cx.s),
-            line: cx.theme.font.line(f.role, cx.s) * rows as f32,
+            style: f.face.style(cx.theme, cx.s),
+            line: f.face.line(cx.theme, cx.s) * rows as f32,
             wrap: None,
         });
     }
-    let What::Text { text, role, wrap } = &el.what else {
+    let What::Text { text, face, wrap } = &el.what else {
         return None;
     };
     Some(Measure {
         text: text.clone(),
-        style: cx.theme.font.style(*role, cx.s),
-        line: cx.theme.font.line(*role, cx.s),
+        style: face.style(cx.theme, cx.s),
+        line: face.line(cx.theme, cx.s),
         wrap: *wrap,
     })
 }

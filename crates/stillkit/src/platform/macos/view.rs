@@ -432,6 +432,13 @@ impl View {
             Cursor::Move => NSCursor::openHandCursor(),
             #[allow(deprecated)]
             Cursor::ResizeHorizontal => NSCursor::resizeLeftRightCursor(),
+            #[allow(deprecated)]
+            Cursor::ResizeVertical => NSCursor::resizeUpDownCursor(),
+            Cursor::Grab => NSCursor::openHandCursor(),
+            Cursor::Grabbing => NSCursor::closedHandCursor(),
+            Cursor::Crosshair => NSCursor::crosshairCursor(),
+            Cursor::NotAllowed => NSCursor::operationNotAllowedCursor(),
+            Cursor::Copy => NSCursor::dragCopyCursor(),
         }
     }
 
