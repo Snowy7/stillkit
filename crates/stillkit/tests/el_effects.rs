@@ -133,3 +133,24 @@ fn reduced_motion_lands_gradient_animation_within_the_short_fade() {
     assert!(!rt.animating());
     assert_eq!(gradient(&rt).stops.as_ref(), effects::COOL);
 }
+
+#[test]
+fn gradient_border_matches_the_native_stroke_after_an_icon() {
+    use stillkit::{DisplayList, Rect, Rgba};
+    let list = DisplayList {
+        ops: vec![
+            Op::Icon { rect: Rect::new(0.0, 0.0, 6.0, 6.0), icon: stillkit::icons::Icon::Check, weight: 1.0, color: Rgba::new(1.0, 1.0, 1.0, 1.0) },
+            Op::Gradient { rect: Rect::new(12.0, 12.0, 20.0, 20.0), radius: 0.0, width: 8.0, gradient: stillkit::paint::Gradient::new(effects::WARM, Some(0.0)) },
+        ],
+        ..Default::default()
+    };
+    let mut ui = stillkit::Ui::new().unwrap();
+    let image = stillkit::render(&mut ui, &list, 44, 44).unwrap();
+    let mut reference = list.clone();
+    reference.ops[1] = Op::Stroke { rect: Rect::new(12.0, 12.0, 20.0, 20.0), radius: 0.0, width: 8.0, color: Rgba::new(1.0, 1.0, 1.0, 1.0) };
+    let reference = stillkit::render(&mut ui, &reference, 44, 44).unwrap();
+    for (actual, expected) in image.pixels.as_chunks::<4>().0.iter().zip(reference.pixels.as_chunks::<4>().0) {
+        assert!(actual[3].abs_diff(expected[3]) <= 8, "gradient borders must keep the native stroke's shape after an icon");
+    }
+    assert_eq!(image.pixel(20, 20)[3], 0, "the border leaves its interior clear");
+}

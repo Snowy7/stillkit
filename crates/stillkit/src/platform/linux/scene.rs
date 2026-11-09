@@ -84,7 +84,7 @@ pub(super) fn draw_ops(
                 }.with_stops(stops.as_slice());
                 ctx.set_paint(g);
                 let p = rounded(*r, *radius);
-                if *width > 0.0 { ctx.set_stroke(Stroke::new(*width as f64)); ctx.stroke_path(&p); }
+                if *width > 0.0 { ctx.set_stroke(Stroke::new(*width as f64).with_caps(Cap::Round).with_join(Join::Round)); ctx.stroke_path(&p); }
                 else { ctx.fill_path(&p); }
             }
             Op::Fill {
