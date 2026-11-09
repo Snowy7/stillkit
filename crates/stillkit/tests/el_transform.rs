@@ -126,3 +126,12 @@ fn rotated_text_image_and_box_pixels() {
     )
     .unwrap();
 }
+
+#[test]
+#[cfg(windows)]
+fn a_rotated_marker_clip_preserves_its_shape() {
+ let mut ui=stillkit::Ui::new().unwrap();
+ let list=stillkit::DisplayList {ops:vec![Op::Transformed{transform:Transform::new(Point::new(40.,40.),std::f32::consts::FRAC_PI_4,(1.,1.),(0.,0.)),ops:vec![Op::Clip{rect:Rect::new(30.,30.,20.,20.)},Op::Fill{rect:Rect::new(0.,0.,80.,80.),radius:0.,color:Rgba::HIT},Op::Unclip].into()}],..Default::default()};
+ let image=stillkit::render(&mut ui,&list,80,80).unwrap();
+ assert_eq!(image.pixel(27,27)[3],0);assert!(image.pixel(40,40)[3]>0);
+}

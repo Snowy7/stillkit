@@ -763,6 +763,30 @@ impl Painter {
     /// Runs between BeginDraw/EndDraw. Marker clips are scoped to this slice, including
     /// inside a retained clipped group, so an unmatched Unclip cannot pop a caller's clip.
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
+        // D2D axis clips expand rotated rectangles to their bounding boxes. Preserve
+        // marker clips as geometry scopes when an affine turn is active.
+        let mut xf=windows_numerics::Matrix3x2::identity();
+        unsafe { self.target.GetTransform(&mut xf); }
+        if (xf.M12 != 0.0 || xf.M21 != 0.0) && ops.iter().any(|op|matches!(op,Op::Clip{..})) {
+            let mut i=0;
+            while i<ops.len() {
+                if let Op::Clip { rect } = &ops[i] {
+                    let mut depth=1;let mut end=i+1;
+                    while end<ops.len() {
+                        match ops[end] { Op::Clip{..}=>depth+=1,Op::Unclip=>depth-=1,_=>{} }
+                        if depth==0 {break;}
+                        end+=1;
+                    }
+                    let group=Op::RoundedClipped{rect:*rect,radius:0.0,ops:ops[i+1..end].to_vec().into()};
+                    unsafe { self.op(text,&group,damage); }
+                    i=(end+1).min(ops.len());
+                } else {
+                    if !matches!(ops[i],Op::Unclip) && touches(&ops[i],damage) { unsafe {self.op(text,&ops[i],damage);} }
+                    i+=1;
+                }
+            }
+            return;
+        }
         let mut pushed = 0;
         // SAFETY: the caller owns this draw scope; each pushed clip is balanced below.
         unsafe {
