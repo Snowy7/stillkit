@@ -4,6 +4,7 @@
 
 ### Added
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
+- Single-instance guards forward launch arguments and activation URLs to the UI thread.
 - Opt-in desktop notifications with action events: shell balloons on Windows and D-Bus on Linux.
 - Opt-in global hotkeys using RegisterHotKey and the compositor-dependent GlobalShortcuts portal.
 - Opt-in Windows and Linux tray icons, click events and stillkit menu placement, without service threads or startup shell imports.

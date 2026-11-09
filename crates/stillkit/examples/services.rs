@@ -4,6 +4,7 @@ use stillkit::{
     tray::{Event, Icon, Tray},
 };
 fn main() -> anyhow::Result<()> {
+    let Some(mut instance)=stillkit::instance::Instance::claim("stillkit.services",std::env::args_os().collect())? else { return Ok(()) };
     let mut tray = Tray::new(
         "stillkit.services",
         "stillkit: right-click to exit",
@@ -20,6 +21,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         while let Some(action)=notifications.next_action() { println!("{action:?}"); }
+        while let Some(args)=instance.next_args() { println!("activation: {args:?}"); }
         host::wait();
     }
 }

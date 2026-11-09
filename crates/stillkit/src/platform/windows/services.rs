@@ -490,6 +490,246 @@ impl Notifications {
     }
 }
 
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE};
+type FindByClass = unsafe extern "system" fn(PCWSTR, PCWSTR) -> HWND;
+type SendData =
+    unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM, u32, u32, *mut usize) -> LRESULT;
+type CreateMutex = unsafe extern "system" fn(*const std::ffi::c_void, i32, PCWSTR) -> HANDLE;
+type WaitMutex = unsafe extern "system" fn(HANDLE, u32) -> u32;
+type HandleOp = unsafe extern "system" fn(HANDLE) -> i32;
+pub(crate) struct Instance {
+    window: HWND,
+    mutex: HANDLE,
+    close: HandleOp,
+    pending: Box<RefCell<VecDeque<Vec<u8>>>>,
+}
+impl Instance {
+    pub fn claim(id: &str, payload: Vec<u8>) -> Result<Option<Self>> {
+        // SAFETY: each function has the documented kernel32 ABI; DLL remains loaded.
+        let (create, wait, release, close): (CreateMutex, WaitMutex, HandleOp, HandleOp) = unsafe {
+            (
+                std::mem::transmute::<RawProcedure, CreateMutex>(procedure(
+                    w!("kernel32.dll"),
+                    s!("CreateMutexW"),
+                )?),
+                std::mem::transmute::<RawProcedure, WaitMutex>(procedure(
+                    w!("kernel32.dll"),
+                    s!("WaitForSingleObject"),
+                )?),
+                std::mem::transmute::<RawProcedure, HandleOp>(procedure(
+                    w!("kernel32.dll"),
+                    s!("ReleaseMutex"),
+                )?),
+                std::mem::transmute::<RawProcedure, HandleOp>(procedure(
+                    w!("kernel32.dll"),
+                    s!("CloseHandle"),
+                )?),
+            )
+        };
+        // SAFETY: these entry points use the documented user32 ABI; DLL stays mapped.
+        let (find, send): (FindByClass, SendData) = unsafe {
+            (
+                std::mem::transmute::<RawProcedure, FindByClass>(procedure(
+                    w!("user32.dll"),
+                    s!("FindWindowW"),
+                )?),
+                std::mem::transmute::<RawProcedure, SendData>(procedure(
+                    w!("user32.dll"),
+                    s!("SendMessageTimeoutW"),
+                )?),
+            )
+        };
+        let name: Vec<u16> = format!("Local\\stillkit.instance.{id}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        // SAFETY: no security attributes; terminated name. Read last error immediately.
+        let (mutex, exists) = unsafe {
+            let mutex = create(std::ptr::null(), 1, PCWSTR(name.as_ptr()));
+            (mutex, GetLastError() == ERROR_ALREADY_EXISTS)
+        };
+        ensure!(!mutex.is_invalid(), "could not create instance mutex");
+        let class: Vec<u16> = format!("stillkit.instance.{id}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        if exists {
+            // SAFETY: waits for the first process to finish creating its hidden endpoint.
+            let ready = unsafe { wait(mutex, 5000) };
+            if ready != 0 && ready != 0x80 {
+                // SAFETY: this call owns the returned mutex handle.
+                unsafe {
+                    close(mutex);
+                }
+                anyhow::bail!("first instance did not become ready");
+            }
+            // SAFETY: query a terminated class name, then send a bounded, synchronous WM_COPYDATA.
+            let sent = unsafe {
+                (|| -> Result<()> {
+                    let window = find(PCWSTR(class.as_ptr()), PCWSTR::null());
+                    ensure!(
+                        !window.0.is_null(),
+                        "first instance endpoint is unavailable"
+                    );
+                    let data = windows::Win32::System::DataExchange::COPYDATASTRUCT {
+                        dwData: 0x53544b31,
+                        cbData: payload.len() as u32,
+                        lpData: payload.as_ptr() as *mut _,
+                    };
+                    let mut result = 0usize;
+                    ensure!(
+                        send(
+                            window,
+                            WM_COPYDATA,
+                            WPARAM(0),
+                            LPARAM((&raw const data) as isize),
+                            SMTO_ABORTIFHUNG.0,
+                            5000,
+                            Some(&mut result)
+                        )
+                        .0 != 0
+                            && result == 1,
+                        "activation forwarding failed"
+                    );
+                    Ok(())
+                })()
+            };
+            // SAFETY: release ownership and our duplicate handle after forwarding completes.
+            unsafe {
+                release(mutex);
+                close(mutex);
+            }
+            sent?;
+            return Ok(None);
+        }
+        // SAFETY: hidden top-level endpoint; never shown or activated.
+        let window = unsafe {
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(instance_proc),
+                lpszClassName: PCWSTR(class.as_ptr()),
+                ..Default::default()
+            });
+            CreateWindowExW(
+                WINDOW_EX_STYLE::default(),
+                PCWSTR(class.as_ptr()),
+                w!(""),
+                WINDOW_STYLE::default(),
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+            )
+        };
+        let window = match window {
+            Ok(w) => w,
+            Err(e) => {
+                // SAFETY: construction failed, so release and close our owned mutex.
+                unsafe {
+                    release(mutex);
+                    close(mutex);
+                }
+                return Err(e.into());
+            }
+        };
+        let mut instance = Self {
+            window,
+            mutex,
+            close,
+            pending: Box::default(),
+        };
+        // SAFETY: the stable box outlives this window; releasing the mutex publishes a ready endpoint.
+        unsafe {
+            SetWindowLongPtrW(window, GWLP_USERDATA, (&raw mut *instance.pending) as isize);
+            release(mutex);
+        }
+        Ok(Some(instance))
+    }
+    pub fn next_args(&mut self) -> Option<Vec<u8>> {
+        self.pending.borrow_mut().pop_front()
+    }
+}
+unsafe extern "system" fn instance_proc(
+    window: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if message == WM_COPYDATA && lparam.0 != 0 {
+        // SAFETY: WM_COPYDATA gives a synchronous OS-marshalled COPYDATASTRUCT for this call.
+        let data =
+            unsafe { &*(lparam.0 as *const windows::Win32::System::DataExchange::COPYDATASTRUCT) };
+        if data.dwData == 0x53544b31 && data.cbData <= 65536 && !data.lpData.is_null() {
+            // SAFETY: the OS keeps cbData bytes alive for this synchronous message.
+            let bytes = unsafe {
+                std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize)
+            };
+            // SAFETY: userdata is our live boxed queue, cleared before destruction.
+            let ptr = unsafe { GetWindowLongPtrW(window, GWLP_USERDATA) }
+                as *const RefCell<VecDeque<Vec<u8>>>;
+            if !ptr.is_null() && crate::instance::decode(bytes).is_some() {
+                // SAFETY: the stable queue is owned by the endpoint on this thread.
+                let mut queue = unsafe { &*ptr }.borrow_mut();
+                if queue.len() < 256 {
+                    queue.push_back(bytes.to_vec());
+                    return LRESULT(1);
+                }
+            }
+        }
+        return LRESULT(0);
+    }
+    // SAFETY: all other messages use default processing.
+    unsafe { DefWindowProcW(window, message, wparam, lparam) }
+}
+impl Drop for Instance {
+    fn drop(&mut self) {
+        // SAFETY: clear the queue pointer, destroy the endpoint, then close our mutex reference.
+        unsafe {
+            SetWindowLongPtrW(self.window, GWLP_USERDATA, 0);
+            let _ = DestroyWindow(self.window);
+            (self.close)(self.mutex);
+        }
+    }
+}
+
+#[cfg(test)]
+mod instance_tests {
+    use super::*;
+    #[test]
+    fn second_process_forwards_arguments_and_releases_its_handle() -> Result<()> {
+        const MARKER: &str = "STILLKIT_INSTANCE_TEST_ID";
+        let args: Vec<std::ffi::OsString> = vec![
+            "stillkit://open/project".into(),
+            "\u{65e5}\u{672c}\u{8a9e}".into(),
+        ];
+        if let Ok(id) = std::env::var(MARKER) {
+            assert!(Instance::claim(&id, crate::instance::encode(&args)?)?.is_none());
+            return Ok(());
+        }
+        let id = format!("test.{}", std::process::id());
+        let mut first = Instance::claim(&id, crate::instance::encode(&[])?)?.unwrap();
+        let mut child=std::process::Command::new(std::env::current_exe()?).args(["--exact","platform::windows::services::instance_tests::second_process_forwards_arguments_and_releases_its_handle"]).env(MARKER,&id).spawn()?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let received = loop {
+            if let Some(bytes) = first.next_args() {
+                break crate::instance::decode(&bytes);
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                anyhow::bail!("activation did not reach first process")
+            }
+            super::super::host::wait_for(std::time::Duration::from_millis(100));
+        };
+        assert_eq!(received, Some(args));
+        assert!(child.wait()?.success());
+        drop(first);
+        assert!(Instance::claim(&id, crate::instance::encode(&[])?)?.is_some());
+        Ok(())
+    }
+}
 #[cfg(test)]
 mod notification_tests {
     use super::*;

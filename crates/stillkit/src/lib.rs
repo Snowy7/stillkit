@@ -29,6 +29,7 @@ pub mod dialog;
 pub mod tray;
 pub mod hotkey;
 pub mod notify;
+pub mod instance;
 pub mod el;
 pub mod focus;
 pub mod geom;

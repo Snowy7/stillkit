@@ -68,3 +68,11 @@ returns an id; `next_action` reports the id and action key after dispatch. Windo
 uses tray balloons (one active balloon at a time, default action, shell text limits), avoiding
 WinRT startup and registration. Linux uses org.freedesktop.Notifications; action
 support depends on the notification server. Drop closes owned notifications.
+
+Call `instance::Instance::claim(id, std::env::args_os().collect())` before creating UI.
+`Some(guard)` is the first launch; `None` means arguments were acknowledged by the
+first launch and this process should return from main. Drain `next_args()` after
+native dispatch. URL activations are arguments; register URL schemes in your app's
+installer or desktop file. Windows uses a session-local named mutex and a hidden
+WM_COPYDATA endpoint; Linux uses a D-Bus name. Forwarding is bounded to 64 KiB and
+five seconds. Native argument encodings are preserved. Drop releases ownership.

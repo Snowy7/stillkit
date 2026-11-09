@@ -25,3 +25,8 @@ impl Notifications {
  pub fn next_action(&mut self)->Option<crate::notify::Action> {None}
 }
 
+pub(crate) struct Instance;
+impl Instance {
+ pub fn claim(_:&str,_:Vec<u8>)->anyhow::Result<Option<Self>> {anyhow::bail!("single instance unsupported")}
+ pub fn next_args(&mut self)->Option<Vec<u8>> {None}
+}

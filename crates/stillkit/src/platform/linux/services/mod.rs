@@ -37,5 +37,7 @@ pub(crate) use hotkey::Hotkey;
 mod notify;
 pub(crate) use notify::Notifications;
 
+mod instance;
+pub(crate) use instance::Instance;
 
 mod wire;
