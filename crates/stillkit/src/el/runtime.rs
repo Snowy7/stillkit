@@ -605,7 +605,7 @@ impl<S> Runtime<S> {
         let mut tx = Tx::default();
         for action in std::mem::take(&mut self.queue) {
             let action = match action {
-                Action::Press(hit) if self.display_link_hit(hit).is_some() => {
+                Action::Press(hit, _) if self.display_link_hit(hit).is_some() => {
                     let (parent, url) = self.display_link_hit(hit).expect("rich link");
                     let selected = self.index_of_hit(parent).and_then(|i| self.display.get(&self.laid[i].id)).is_some_and(|d| !d.field.ed.selection().is_empty());
                     if selected { continue; }
