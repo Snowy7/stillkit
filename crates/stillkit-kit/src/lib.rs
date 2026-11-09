@@ -1154,11 +1154,13 @@ mod chart;
 mod data;
 mod feedback;
 mod navigation;
+mod color;
 mod stepper;
 pub use chart::{Chart, ChartSeries, QuotaBar};
 pub use data::{ScrollView, SortDirection, Table, Tree, TreeNode};
 pub use feedback::{Avatar, Ring, Skeleton, Spinner};
 pub use navigation::{Accordion, Disclosure, Sidebar, Tabs, Toolbar};
+pub use color::{ColorPicker, Hsva};
 pub use stepper::Stepper;
 
 // Text
