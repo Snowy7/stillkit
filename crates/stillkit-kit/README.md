@@ -408,7 +408,6 @@ No changes were made under `crates/stillkit`, and no branch was pushed or merged
 Final `cargo clippy -p stillkit-kit --all-targets` is warning-free; the audit test
 reuses the text gallery's overlay module to avoid duplicate module loading.
 
-
 ## App shells
 
 `SplitView::new(key, &state, access, first, second)` composes two controlled panes.
@@ -429,8 +428,103 @@ before Runtime (which reserves Tab for focus traversal). Forward Ctrl+Shift+Tab 
 A release more than 24 px vertically outside a tab emits `TornOut(id)`; the app moves
 the document to another window. The kit does not create windows or transfer state.
 
+`WindowTitlebar` provides leading, tabs and trailing slots. After layout and DPI
+changes, call `WindowTitlebar::sync_chrome(&surface, &runtime, key)`. It registers
+caption/minimize/maximize/close bounds with the existing platform hit tester;
+Windows supplies dragging, double-click maximize and HTMAXBUTTON snap hover.
+Keyboard/assistive caption activation emits `WindowAction` for the host to apply.
+On macOS set `Caption::Compact` and pass `Surface::system_controls().right / scale`
+to `system_inset`. No platform APIs, threads or imports are added by these builders.
+
+`ShortcutRecorder` renders `ShortcutRecorderState` as keycaps. Its accessible name
+is the action being bound. Before Runtime, forward Key **and KeyUp** through
+`state.handle(event, modifiers)`, including after acceptance until key release;
+consume events it uses so repeats cannot activate another control. Escape
+cancels, Backspace/Delete clears, and deactivation cancels. Persist `chord`; the app
+validates conflicts and registers shortcuts. `Keybind` displays keycap labels alone.
+
+`HoverCard` wraps interactive rich content in a non-modal popover. Give it a
+`key("details-panel")` and track that complete panel, including its padding. Feed pointer
+and leave/deactivation/Escape events to `HoverCardState::handle`, using logical
+anchor/card bounds and the window scale. Its 500 ms entry delay has one host wake:
+include `deadline()` alongside `Runtime::wake_at`, then call `advance(now)`.
+Pointer transfer into the card keeps it open; dismissal clears the deadline.
+Use `enter(now)` for keyboard-focus entry, or a keyboard-activatable trigger to open
+it directly. The example demonstrates the host wiring without a polling timer.
+
+`RollingText` slides/fades a replaced complete text run (including shaped Unicode),
+using retained presence and the runtime's reduced-motion policy. Unlike Rune's
+per-grapheme LCS matching, it replaces the whole run and keeps no global cache.
+`SidebarHeader`/`SidebarSection` provide controlled collapse and counts;
+`SidebarRow` provides icons, selection and counts. Wrap rows in a vertical focus
+group for arrow navigation. `Page` places a heading, toolbar and flexible content.
+All components use theme tokens and shared contrast helpers for the five looks.
+
+`cargo run -p stillkit-kit --example app_shell` opens an editor shell. Add
+`--snap-dir PATH` to export all ten look/scheme combinations, at rest and with rich content open,
+without a window.
+`tests/app_shell.rs` covers resize capture/cancel/reset, keyboard limits, tab
+reorder/tear-out/close, shortcut key-up, delayed hover transfer, collapse and idle.
 
 `PopupList`/`PopupItem` supply bounded listbox content for completion popovers.
 The app filters rows, supplies stable ids/selection and applies picks; disabled rows
 stay announced but are skipped by keyboard navigation. Compose it with `el::popover`
 and `take_focus()` when keyboard focus should leave the triggering editor.
+
+### Virtual tables
+
+For large data, keep a `TableModel` in app state and build with `VirtualTable::new(key, &state, model)`.
+`set_rows` supplies stable keys and type-ahead labels only when the order changes;
+the custom cell callback runs only for the built range. Columns retain their widths
+with min/max bounds and a header drag handle. The header stays above the scrolling
+body. The sort callback applies your comparator and calls `set_rows` with the result.
+`selection.multi = true` enables Ctrl toggles and Shift ranges. Up/Down, Home/End,
+PageUp/PageDown, type-ahead and Enter operate over the whole model, including rows
+that have never been built. `reveal(key)` scrolls to an unbuilt row. Grid, row and
+cell semantics include complete counts and indexes. Width persistence across process
+launches belongs to the app; the model retains widths across view runs.
+
+```rust
+VirtualTable::new("records", &s.table, |s: &mut State| &mut s.table)
+    .label("Records")
+    .height(420.)
+    .cell(|row, col| text(format!("{row}:{col}")))
+    .on_open(|s, key| s.opened = key.to_string())
+    .on_sort(|s, (col, dir)| { /* reorder s.table for col and dir */ })
+    .build()
+```
+
+Only the key, borrowed model and mutable model accessor are required. The label defaults
+to the key. Without `height`, the control grows to fill available height; constrain its
+parent. Paging moves ten rows without an explicit height. The default cells show row
+labels in the first column. `on_sort` enables sortable headers; without it, header presses
+do nothing. `on_open` enables Enter opening; otherwise Enter is unhandled. Columns use
+fixed design-pixel widths with no horizontal scroll; the header does not scroll sideways.
+
+### Virtual trees
+
+`TreeModel::new(nodes)` caches flattened visibility; `VirtualTree::new(key, &state, model).build()` builds only
+rows near sight. Left/Right collapse, expand and move to parents or first children;
+Up/Down, Home/End, paging and type-ahead use visible order. Set `selection.multi` for
+Ctrl and Shift selection. `reveal(key)` opens the complete ancestor path, selects the
+node and scrolls to it. `filter` keeps matching labels and ancestors; `clear_filter`
+keeps current expansion state. `sort_natural` orders sibling filenames by numeric
+runs without integer overflow. Each tree item reports level, sibling count and position.
+
+```rust
+VirtualTree::new("files", &s.tree, |s: &mut State| &mut s.tree)
+    .label("Project files")
+    .height(390.)
+    .on_open(|s, key| s.opened = key.to_string())
+    .build()
+```
+
+The tree uses the same label and height defaults as the table. Leaf opening is off
+without `on_open`; Enter/Space still toggle branches.
+
+Run `cargo run -p stillkit-kit --example data_grid` for a 100,000-row table alongside
+a file-like tree, with resizing, sorting, reveal and filtering.
+
+## Component stories
+
+The optional [playground](../../docs/guide/playground.md) includes each supported component and all button kinds. Run `cargo run -p stillkit-playground --example stories`; `--goldens DIR` renders every story across looks and schemes.

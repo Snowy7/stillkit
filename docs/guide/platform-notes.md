@@ -41,3 +41,46 @@ fn main() -> anyhow::Result<()> {
 
 
 [All guides](../../README.md#guides) | [Element reference](../el.md)
+
+## Opt-in desktop services
+
+`tray::Tray::new` creates an icon from validated straight RGBA pixels. Keep it on the
+UI thread, drain `next_event`, and sleep with `platform::current::host::wait`.
+Creation never shows or activates a window. Drop removes the icon. The `services`
+example is a tray app; right-click opens its stillkit menu. Pass `--hotkey`,
+`--notify` or `--pick` to try the other services.
+
+Windows resolves shell APIs on first use and restores icons after Explorer restarts.
+Linux uses StatusNotifierItem on the session bus, sharing the AT-SPI wire reader and
+joining the Wayland poll set. A StatusNotifier host is required (GNOME needs an extension).
+Tooltip changes signal the host. Primary and context-menu requests return screen
+coordinates; `Tray::open_menu` opens stillkit's own `Menu` there. The app routes menu
+surface events to the menu as usual. Wayland compositors control global placement;
+tray-menu placement is therefore compositor-dependent. macOS currently reports an
+unsupported NSStatusItem stub.
+
+`hotkey::Hotkey::new("CTRL+ALT+K".parse()?, "Open panel")` registers a global chord.
+Drain `activated()` after the wait. Drop unregisters it. Linux uses GlobalShortcuts,
+requires compositor support and may show a consent dialog (up to two minutes).
+The compositor chooses the actual trigger. macOS hotkeys are currently unsupported.
+
+`notify::Notifications::new(id, icon)` owns desktop notifications. `show(title, body)`
+returns an id; `next_action` reports the id and action key after dispatch. Windows
+uses tray balloons (one active balloon at a time, default action, shell text limits), avoiding
+WinRT startup and registration. Linux uses org.freedesktop.Notifications; action
+support depends on the notification server. Drop closes owned notifications.
+
+Call `instance::Instance::claim(id, std::env::args_os().collect())` before creating UI.
+`Some(guard)` is the first launch; `None` means arguments were acknowledged by the
+first launch and this process should return from main. Drain `next_args()` after
+native dispatch. URL activations are arguments; register URL schemes in your app's
+installer or desktop file. Windows uses a session-local named mutex and a hidden
+WM_COPYDATA endpoint; Linux uses a D-Bus name. Forwarding is bounded to 64 KiB and
+five seconds. Native argument encodings are preserved. Drop releases ownership.
+
+Linux `dialog::pick_folder`, `pick_files` and `save_file` use the XDG FileChooser
+portal on demand. The call waits on a private bus fd (no worker or polling thread),
+with a two-minute consent limit. Cancellation or an unavailable portal returns no
+paths, consistent with the existing picker API. Local file URIs preserve raw Unix
+filename bytes; remote URIs are rejected. A starting folder and suggested save name
+are passed to the portal. Alerts still log on Linux.

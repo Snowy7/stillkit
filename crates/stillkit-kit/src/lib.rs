@@ -1152,15 +1152,19 @@ pub use tooltip::Tooltip;
 // Layout and data
 mod chart;
 mod data;
+mod virtual_data;
+pub use virtual_data::{
+    DataSelection, TableColumn, TableModel, TreeModel, VirtualTable, VirtualTree, natural_cmp,
+};
+mod color;
 mod feedback;
 mod navigation;
-mod color;
 mod stepper;
 pub use chart::{Chart, ChartSeries, QuotaBar};
+pub use color::{ColorPicker, Hsva};
 pub use data::{ScrollView, SortDirection, Table, Tree, TreeNode};
 pub use feedback::{Avatar, Ring, Skeleton, Spinner};
 pub use navigation::{Accordion, Disclosure, Sidebar, Tabs, Toolbar};
-pub use color::{ColorPicker, Hsva};
 pub use stepper::Stepper;
 
 // Text
@@ -1171,10 +1175,16 @@ pub use combobox::{Combobox, QueryState};
 pub use palette::{Command, CommandPalette};
 pub use text::{SearchField, SecureField, TextArea, TextField};
 
-mod split_view;
-pub use split_view::{SplitAxis, SplitState, SplitView};
-
-mod tab_strip;
 mod popup_list;
-pub use tab_strip::{Tab, TabEvent, TabStrip, TabStripState};
+mod shell_pieces;
+mod split_view;
+mod tab_strip;
+mod window_titlebar;
 pub use popup_list::{PopupItem, PopupList};
+pub use shell_pieces::{
+    HoverCard, HoverCardState, KeyChord, Keybind, Page, RollingText, ShortcutRecorder,
+    ShortcutRecorderState, SidebarHeader, SidebarRow, SidebarSection,
+};
+pub use split_view::{SplitAxis, SplitState, SplitView};
+pub use tab_strip::{Tab, TabEvent, TabStrip, TabStripState};
+pub use window_titlebar::{WindowAction, WindowTitlebar};

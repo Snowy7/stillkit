@@ -156,20 +156,39 @@ impl Transition {
 pub struct Tx {
     pub(crate) instant: bool,
     pub(crate) mods: Modifiers,
+    #[cfg(feature = "inspect")]
+    pub(crate) preview: Option<(Key, super::inspect::PreviewState)>,
     pub(crate) theme: Option<Theme>,
+    pub(crate) scale: Option<f32>,
+    pub(crate) reduced: Option<bool>,
     pub(crate) reveal: Vec<Key>,
     /// Where focus goes once the view has run: an element by key, or nowhere (`None`).
     pub(crate) focus: Option<Option<Key>>,
 }
 
 impl Tx {
+    /// Previews interaction for a keyed story control without running its handlers.
+    #[cfg(feature = "inspect")]
+    pub fn preview_state(&mut self, key: impl Into<Key>, state: super::inspect::PreviewState) {
+        self.preview = Some((key.into(), state));
+    }
+
+    /// Changes raster density without replacing application state.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = Some(scale);
+    }
+    /// Overrides motion for this runtime.
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.reduced = Some(reduced);
+    }
+
     /// Applies this change with no motion: everything lands on its target at once.
     pub fn instant(&mut self) {
         self.instant = true;
     }
 
-    /// The modifier keys held with the key an [`El::on_key`] handler is looking at (none for a
-    /// press or a timer).
+    /// The modifiers captured with this key, press, pointer or wheel action.
+    /// Timers and other programmatic actions carry none.
     pub fn modifiers(&self) -> Modifiers {
         self.mods
     }
@@ -729,6 +748,8 @@ pub(crate) struct Sem {
     pub invalid: bool,
     /// The key of the descendant it shows as active ([`El::active_descendant`]).
     pub active: Option<Key>,
+    pub collection: Option<Box<crate::a11y::Collection>>,
+
 }
 
 /// A roving focus group ([`El::focus_group`]).
@@ -783,6 +804,7 @@ pub struct El<S> {
     pub(crate) virt: Option<super::virtualize::Virt>,
     /// Draws no focus ring of its own ([`El::focus_ring`]).
     pub(crate) quiet: bool,
+    pub(crate) selectable: bool,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -825,6 +847,7 @@ fn new<S>(what: What) -> El<S> {
         virt: None,
         cascade: false,
         quiet: false,
+        selectable: false,
         children: Vec::new(),
     }
 }
@@ -944,15 +967,43 @@ impl<S> El<S> {
         self
     }
 
+    /// Makes display text selectable. A container joins descendants in reading order,
+    /// with a newline between elements. Fields keep their own editing selection.
+    /// Unwrapped labels become fully wrapped text.
+    pub fn selectable(mut self) -> Self {
+        if self.field().is_some() || self.on_press.is_some() || self.on_drag.is_some() || self.on_pointer.is_some() {
+            return self;
+        }
+        self.selectable = true;
+        if let What::Text { wrap, .. } = &mut self.what {
+            *wrap = Some(wrap.unwrap_or(usize::MAX));
+        }
+        self.children = self.children.into_iter().map(El::selectable).collect();
+        self
+    }
+
+    // A control added after `selectable()` takes its subtree out of document input.
+    fn clear_selection(&mut self) {
+        self.selectable = false;
+        for child in &mut self.children {
+            child.clear_selection();
+        }
+    }
+
     /// Child.
     pub fn child(mut self, child: El<S>) -> Self {
+        let child = if self.selectable { child.selectable() } else { child };
         self.children.push(child);
         self
     }
 
     /// Children.
     pub fn children(mut self, children: impl IntoIterator<Item = El<S>>) -> Self {
-        self.children.extend(children);
+        if self.selectable {
+            self.children.extend(children.into_iter().map(El::selectable));
+        } else {
+            self.children.extend(children);
+        }
         self
     }
 
@@ -1251,7 +1302,42 @@ impl<S> El<S> {
         self
     }
 
-    /// For the members of a list, tab bar or segmented control: whether this one is chosen.
+    /// Total rows, including virtual rows.
+    pub fn row_count(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).row_count = Some(value);
+        self
+    }
+    /// Total columns.
+    pub fn column_count(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).column_count = Some(value);
+        self
+    }
+    /// Zero-based row index in the complete model.
+    pub fn row_index(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).row_index = Some(value);
+        self
+    }
+    /// Zero-based column index.
+    pub fn column_index(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).column_index = Some(value);
+        self
+    }
+    /// One-based tree depth.
+    pub fn level(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).level = Some(value);
+        self
+    }
+    /// Number of siblings.
+    pub fn size_of_set(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).size_of_set = Some(value);
+        self
+    }
+    /// One-based sibling position.
+    pub fn position_in_set(mut self, value: usize) -> Self {
+        self.sem.collection.get_or_insert_with(Default::default).position_in_set = Some(value);
+        self
+    }
+    /// Whether this member is chosen.
     /// A focus group's Tab lands on its selected (or checked) member.
     pub fn selected(mut self, selected: bool) -> Self {
         self.sem.selected = Some(selected);
@@ -1576,6 +1662,7 @@ impl<S> El<S> {
     /// Space while focused, or assistive technology's invoke. The view then runs again.
     pub fn on_press(mut self, handler: impl Fn(&mut S) + 'static) -> Self {
         self.on_press = Some(Box::new(move |s, _| handler(s)));
+        self.clear_selection();
         self
     }
 
@@ -1583,6 +1670,7 @@ impl<S> El<S> {
     /// with no motion, `tx.set_theme(..)` switches the look.
     pub fn on_press_with(mut self, handler: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
         self.on_press = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1591,6 +1679,7 @@ impl<S> El<S> {
     /// follows the pointer), with no motion.
     pub fn on_drag(mut self, handler: impl Fn(&mut S, f32, f32) + 'static) -> Self {
         self.on_drag = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1605,6 +1694,7 @@ impl<S> El<S> {
     /// Changes land at once, with no motion, as a drag's do. Presses still reach `on_press`.
     pub fn on_pointer(mut self, handler: impl Fn(&mut S, &PointerEvent, &mut Tx) -> bool + 'static) -> Self {
         self.on_pointer = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1692,7 +1782,8 @@ impl<S> El<S> {
 
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
-        self.on_press.is_some()
+        (self.selectable && matches!(self.what, What::Text { .. }))
+            || self.on_press.is_some()
             || self.on_drag.is_some()
             || self.on_pointer.is_some()
             || self.on_wheel.is_some()

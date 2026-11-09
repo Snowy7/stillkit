@@ -176,3 +176,8 @@ pub enum Caption {
     /// centred in it: for an app's own title bar holding menus and tabs.
     Compact,
 }
+
+// The services encoder is pure bytes; exercise it with zbus on every host.
+#[cfg(all(test,not(target_os="linux")))]
+#[path="linux/services/wire.rs"]
+mod services_wire;

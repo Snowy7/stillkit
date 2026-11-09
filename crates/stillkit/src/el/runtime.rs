@@ -36,9 +36,13 @@ use accesskit::Role;
 use anyhow::Result;
 
 mod layer;
+#[cfg(feature = "inspect")]
+#[path = "inspect.rs"]
+pub mod inspect;
 #[cfg(windows)]
 mod native;
 mod text;
+mod selection;
 
 use super::animate::{Animator, Mode, Pose, Target};
 use super::element::{ArcLook, Axis, El, Handled, Key, KeyCode, Modifiers, Range, Transition, Tx, What};
@@ -71,7 +75,7 @@ struct Capture {
 }
 
 enum Action<S> {
-    Press(HitId),
+    Press(HitId, Modifiers),
     Drag(HitId, f32, f32),
     /// The pointer's story on an element with `on_pointer`.
     Pointer(HitId, super::element::PointerEvent),
@@ -145,7 +149,7 @@ pub struct Shown {
     pub range: Option<(f64, f64, f64)>,
     /// Its value as text ([`El::value`]).
     pub value: Option<Arc<str>>,
-    /// A text field's selection: where it started and the caret (byte offsets in `text`).
+    /// A field or selectable display text's selection: anchor and caret byte offsets.
     pub selection: Option<(usize, usize)>,
     /// Description.
     pub description: Option<Arc<str>>,
@@ -198,6 +202,10 @@ struct Bar {
 /// A view, its state and everything retained between frames. Headless as is; [`super::run`]
 /// hosts one in a window.
 pub struct Runtime<S> {
+    #[cfg(feature = "inspect")]
+    inspector: Option<inspect::Inspector>,
+    #[cfg(feature = "inspect")]
+    look_watch: Option<inspect::ThemeWatch>,
     state: S,
     view: View<S>,
     theme: Theme,
@@ -221,6 +229,7 @@ pub struct Runtime<S> {
     dragging: Option<HitId>,
     /// Scroll views by identity.
     scrolls: HashMap<u64, ScrollView>,
+    variable_rows: bool,
     /// Whether a scroll view glides or its scrollbar shows (frames keep coming).
     scrolling: bool,
     /// Keys to scroll into view once the layout is current.
@@ -274,6 +283,10 @@ pub struct Runtime<S> {
     lifted: HashMap<u64, Rect>,
     // ---- Text fields (`text`) ---------------------------------------------------------
     fields: HashMap<u64, Field>,
+    display: HashMap<u64, selection::Display>,
+    documents: HashMap<u64, super::edit::Editor>,
+    display_drag: Option<selection::Drag>,
+    display_clicks: Option<(Duration, Point, u8)>,
     /// The field with focus, by identity, as last seen.
     typing: Option<u64>,
     selecting: Option<text::Selecting>,
@@ -327,6 +340,10 @@ impl<S: 'static> Runtime<S> {
         scale: f32,
     ) -> Result<Self> {
         let mut runtime = Self {
+            #[cfg(feature = "inspect")]
+            inspector: None,
+            #[cfg(feature = "inspect")]
+            look_watch: None,
             state,
             view: Box::new(view),
             theme,
@@ -347,6 +364,7 @@ impl<S: 'static> Runtime<S> {
             queue: Vec::new(),
             dragging: None,
             scrolls: HashMap::new(),
+            variable_rows: false,
             scrolling: false,
             reveal: Vec::new(),
             followed: false,
@@ -379,6 +397,10 @@ impl<S: 'static> Runtime<S> {
             window_list: None,
             lifted: HashMap::new(),
             fields: HashMap::new(),
+            display: HashMap::new(),
+            documents: HashMap::new(),
+            display_drag: None,
+            display_clicks: None,
             typing: None,
             selecting: None,
             clipboard: Box::new(super::clipboard::Memory::default()),
@@ -409,6 +431,14 @@ impl<S> Runtime<S> {
     /// changed, advances the animation, and repaints if anything it draws changed. Returns
     /// whether a new list was painted ([`damage`](Self::damage) says what it changed).
     pub fn frame(&mut self, dt: Duration) -> bool {
+        #[cfg(feature = "inspect")]
+        if self.inspector.is_some() || self.look_watch.is_some() {
+            return self.tools_frame(dt);
+        }
+        self.frame_inner(dt)
+    }
+
+    fn frame_inner(&mut self, dt: Duration) -> bool {
         self.clock += dt;
         self.anim.t += dt.as_secs_f64() * f64::from(self.time_scale);
         self.fire_timers();
@@ -450,7 +480,11 @@ impl<S> Runtime<S> {
         }
         let scrolled = self.tick_scrolls() || std::mem::take(&mut self.followed);
         // A virtual list scrolled past what it built: build again, in this frame.
-        if scrolled && self.virtual_stale() {
+        for _ in 0..3 {
+            if !scrolled || !(self.virtual_stale() || self.stale_view) {
+                break;
+            }
+            self.stale_view = false;
             let before = keyed(&self.root, &self.laid, &self.theme);
             self.views += 1;
             let root = self.run_view();
@@ -574,7 +608,7 @@ impl<S> Runtime<S> {
                     self.stale_view = true;
                     continue;
                 }
-                Action::Press(hit)
+                Action::Press(hit, _)
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
@@ -588,9 +622,15 @@ impl<S> Runtime<S> {
             let Some(el) = element(&self.root, &self.laid, hit) else {
                 continue;
             };
+            tx.mods = match &action {
+                Action::Press(_, mods) => *mods,
+                Action::Pointer(_, event) => event.mods,
+                Action::Wheel(_, event) => event.mods,
+                _ => Modifiers::NONE,
+            };
             let state = &mut self.state;
             match action {
-                Action::Press(_) => match &el.on_press {
+                Action::Press(_, _) => match &el.on_press {
                     Some(handler) => handler(state, &mut tx),
                     None => continue,
                 },
@@ -654,6 +694,26 @@ impl<S> Runtime<S> {
         if let Some(theme) = tx.theme {
             self.set_theme(theme);
         }
+        if let Some(scale) = tx.scale {
+            self.set_scale(scale);
+        }
+        if let Some(reduced) = tx.reduced {
+            self.set_reduced_motion(reduced);
+        }
+        #[cfg(feature = "inspect")]
+        if let Some((key, state)) = tx.preview
+            && let Some(i) = self.index_of_key(&key)
+        {
+            let root = self.laid[i].rect;
+            let hit = self.list.hits.iter()
+                .find(|h| h.actionable && root.contains(h.rect.center()))
+                .map_or(self.laid[i].hit, |h| h.id);
+            self.ix.hover = matches!(state, inspect::PreviewState::Hover | inspect::PreviewState::Pressed).then_some(hit);
+            self.ix.pressed = (state == inspect::PreviewState::Pressed).then_some(hit);
+            self.ix.focus = (state == inspect::PreviewState::Focus).then_some(hit);
+            self.ix.focus_visible = state == inspect::PreviewState::Focus;
+            self.stale_paint = true;
+        }
         self.reveal.extend(tx.reveal);
         if let Some(to) = tx.focus {
             self.focus_to = Some((to, keyed));
@@ -716,7 +776,7 @@ impl<S> Runtime<S> {
             if el.states.any() {
                 self.stateful.push(laid[i].id);
             }
-            let field = el.field().map(|_| crate::Cursor::Text);
+            let field = (el.field().is_some() || el.selectable && matches!(el.what, What::Text { .. })).then_some(crate::Cursor::Text);
             if let Some(cursor) = el.cursor.or(field) {
                 self.cursors.push((laid[i].id, cursor));
             }
@@ -738,7 +798,9 @@ impl<S> Runtime<S> {
         self.laid = laid;
         self.targets = targets;
         self.sync_fields();
+        self.sync_display();
         self.sync_scrolls();
+        self.measure_virtual_rows();
         self.sync_timers();
         if !self.layers.is_empty() || !self.shown.is_empty() {
             self.follow_layers();
@@ -764,9 +826,11 @@ impl<S> Runtime<S> {
         let t = self.anim.t;
         let mut seen = HashSet::new();
         let mut followed = false;
+        let mut variable_rows = false;
         let areas: HashMap<u64, (f32, f32)> =
             self.fields.keys().filter_map(|&id| Some((id, self.field_extent(id)?))).collect();
         each(&self.root, &self.laid, &mut |el, i, _| {
+            variable_rows |= el.virt.as_ref().is_some_and(|v| v.variable.is_some());
             let field = areas.get(&self.laid[i].id).copied();
             let axis = el.scrolls().or(field.map(|_| Axis::Vertical));
             if let (Some(axis), Some(extent)) = (axis, self.laid[i].extent.or(field)) {
@@ -786,6 +850,7 @@ impl<S> Runtime<S> {
         });
         self.scrolls.retain(|id, _| seen.contains(id));
         self.followed |= followed;
+        self.variable_rows = variable_rows;
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
@@ -945,6 +1010,7 @@ impl<S> Runtime<S> {
             lifted: &self.lifted,
             escaped: Vec::new(),
             fields: &self.fields,
+            display: &self.display,
             caret: self.caret_on().then_some(self.typing).flatten(),
             feedback: &self.feedback,
             t,
@@ -1009,6 +1075,22 @@ impl<S> Runtime<S> {
     /// Feeds one input event. Hover, press and focus changes repaint at the next frame
     /// without running the view; activations queue their handlers.
     pub fn handle(&mut self, event: &Event) {
+        #[cfg(feature = "inspect")]
+        if matches!(event, Event::Key(0x7B)) {
+            self.set_inspector(self.inspector.is_none());
+            return;
+        }
+        #[cfg(feature = "inspect")]
+        if let Some(inspector) = self.inspector.as_mut()
+            && inspector.input(event)
+        {
+            self.stale_paint = true;
+            return;
+        }
+        #[cfg(feature = "inspect")]
+        if self.inspector.is_some() && matches!(event, Event::Move(_)) {
+            self.stale_paint = true;
+        }
         self.input(event);
         self.follow_tip();
     }
@@ -1050,9 +1132,10 @@ impl<S> Runtime<S> {
         }
         let before = self.ix.clone();
         if let Response::Activate(hit) = self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), event) {
-            self.queue.push(Action::Press(hit));
+            self.queue.push(Action::Press(hit, self.held));
         }
         self.pointer_input(event);
+        self.display_pointer(event);
         if !self.fields.is_empty()
             && matches!(event, Event::Press(..) | Event::Move(_) | Event::Release(..) | Event::CaptureLost | Event::Cancelled | Event::Leave)
         {
@@ -1091,8 +1174,56 @@ impl<S> Runtime<S> {
 
     /// Runs the view with each virtual list's scroll place in reach ([`super::virtual_list`]).
     fn run_view(&mut self) -> El<S> {
+        if self.variable_rows {
+            let flat = flatten(&self.root);
+            for (i, el) in flat.iter().enumerate() {
+                if let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) {
+                    let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit)).and_then(|mut j| {
+                        loop {
+                            let parent = self.laid[j].parent?;
+                            if parent == i { return flat[j].key.clone(); }
+                            j = parent;
+                        }
+                    });
+                    if let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)) {
+                        rows.prepare(view.offset(self.anim.t) / self.scale, focused);
+                    }
+                }
+            }
+        }
         let places = self.virtual_places();
         super::virtualize::with_viewports(places, || (self.view)(&self.state))
+    }
+
+    /// Measures built rows and keeps the keyed anchor still.
+    fn measure_virtual_rows(&mut self) {
+        if !self.variable_rows {
+            return;
+        }
+        let flat = flatten(&self.root);
+        for (i, el) in flat.iter().enumerate() {
+            let Some(rows) = el.virt.as_ref().and_then(|v| v.variable.as_ref()) else { continue };
+            let mut changed = false;
+            for (j, child) in flat.iter().enumerate().skip(i + 1) {
+                if self.laid[j].parent == Some(i) && let Some(key) = &child.key {
+                    changed |= rows.measure(key, self.laid[j].rect.height() / self.scale);
+                }
+            }
+            if let Some(view) = self.scrolls.get_mut(&self.laid[i].id) {
+                let anchored = rows.offset() * self.scale;
+                if rows.take_jump() {
+                    view.to(anchored, None, self.anim.t);
+                } else {
+                    // Rows above the anchor were measured: follow them without ending a
+                    // scroll that is still moving.
+                    let drift = anchored - view.offset(self.anim.t);
+                    if drift.abs() >= 0.5 {
+                        view.slide(drift);
+                    }
+                }
+            }
+            self.stale_view |= changed;
+        }
     }
 
     /// Each keyed virtual list's offset and viewport now, design px.
@@ -1117,6 +1248,7 @@ impl<S> Runtime<S> {
             if let Some(v) = &el.virt
                 && let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id))
             {
+                if let Some(rows) = &v.variable { rows.track(view.offset(t) / s); }
                 stale |= v.stale(view.offset(t) / s, view.viewport / s);
             }
         });
@@ -1343,6 +1475,7 @@ impl<S> Runtime<S> {
                 return true;
             }
         }
+        if self.display_key(key) { return true; }
         let focused = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
         let mut chain = Vec::new();
         let mut at = Some(focused.unwrap_or(0));
@@ -1452,7 +1585,7 @@ impl<S> Runtime<S> {
             Intent::Focus(hit, press) => {
                 self.focus_hit(hit);
                 if press {
-                    self.queue.push(Action::Press(hit));
+                    self.queue.push(Action::Press(hit, self.mods));
                 }
             }
             Intent::Scroll(index, to) => {
@@ -1902,7 +2035,7 @@ impl<S> Runtime<S> {
                     What::Field(f) if !f.secure => self.field_shown(laid.id).map(|(t, _)| t.into()),
                     _ => None,
                 },
-                selection: el.field().filter(|f| !f.secure).and_then(|_| self.field_shown(laid.id)).map(|(_, s)| s),
+                selection: self.display.get(&laid.id).map(|d| (d.field.ed.anchor, d.field.ed.caret)).or_else(|| el.field().filter(|f| !f.secure).and_then(|_| self.field_shown(laid.id)).map(|(_, s)| s)),
                 checked: sem.checked,
                 state: if enabled { self.ix.state(laid.hit, true) } else { State::Rest },
                 focused: self.ix.focus == Some(laid.hit),
@@ -2131,6 +2264,8 @@ fn role_of<S>(el: &El<S>) -> Role {
         Role::ScrollView
     } else if el.interactive() && el.sem.checked.is_some() {
         Role::Switch
+    } else if el.selectable && matches!(el.what, What::Text { .. }) {
+        Role::Label
     } else if el.interactive() {
         Role::Button
     } else {
@@ -2172,6 +2307,7 @@ fn semantics_of<S>(el: &El<S>, id: HitId, rel: Option<&Relation>, out: &mut Vec<
         invalid: s.invalid,
         // Keys resolve once the whole list is painted (`Runtime::paint`).
         active_descendant: None,
+        collection: s.collection.clone(),
     };
     if detail != Detail::default() || s.active.is_some() {
         out.push((id, Semantics::Detail(detail)));
@@ -2204,6 +2340,7 @@ struct Walk<'a, S> {
     /// Escaped entries: their identity, ops and hits.
     escaped: Vec<Escaped>,
     fields: &'a HashMap<u64, Field>,
+    display: &'a HashMap<u64, selection::Display>,
     /// The field whose caret is drawn now.
     caret: Option<u64>,
     feedback: &'a Feedback,
@@ -2342,7 +2479,7 @@ fn paint_el<S>(
         }
     }
     // A scroll view takes focus for its keys, but is no button: no wash; nor is a field.
-    if controls && scroll.is_none() && el.field().is_none() {
+    if controls && scroll.is_none() && el.field().is_none() && !el.selectable {
         let c = &theme.color;
         let wash = if enabled { w.feedback.wash(me.hit, w.t, c.hover, c.pressed) } else { Rgba::TRANSPARENT };
         f.fill(rect, radius, wash);
@@ -2391,6 +2528,16 @@ fn paint_el<S>(
                     if let Some(text) = field.accessible(scroll_y) {
                         w.semantics.push((me.hit, Semantics::Field(Arc::new(text))));
                     }
+                }
+            }
+        }
+        What::Text { .. } if w.display.contains_key(&me.id) => {
+            let display = &w.display[&me.id];
+            selection::paint(f, display, rect, ink);
+            if live {
+                w.semantics.push((me.hit, Semantics::Text(display.field.ed.text.as_str().into())));
+                if let Some(text) = display.accessible(rect) {
+                    w.semantics.push((me.hit, Semantics::Field(Arc::new(text))));
                 }
             }
         }

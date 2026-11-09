@@ -1,0 +1,20 @@
+[package]
+name = "stillkit-playground"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Opt-in story browser and headless story snapshots for stillkit"
+
+[dependencies]
+stillkit = { path = "../stillkit", features = ["inspect"] }
+stillkit-kit = { path = "../stillkit-kit" }
+anyhow.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true
+
+[[example]]
+name = "ten_minutes"
+test = true

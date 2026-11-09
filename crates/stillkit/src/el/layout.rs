@@ -25,6 +25,7 @@ pub(crate) struct Measure {
     style: TextStyle,
     line: f32,
     wrap: Option<usize>,
+    selectable: bool,
 }
 
 struct Retained {
@@ -58,6 +59,8 @@ pub(crate) struct Layout {
     generation: u64,
     /// Nodes created, restyled, re-measured or re-parented by the last [`Layout::sync`].
     pub touched: usize,
+    #[cfg(feature = "inspect")]
+    pub inspected: Option<Vec<u64>>,
 }
 
 /// What lengths resolve against.
@@ -101,6 +104,8 @@ impl Layout {
             nodes: HashMap::new(),
             generation: 0,
             touched: 0,
+            #[cfg(feature = "inspect")]
+            inspected: None,
         }
     }
 
@@ -130,6 +135,10 @@ impl Layout {
             width: AvailableSpace::Definite(size.0),
             height: AvailableSpace::Definite(size.1),
         };
+        #[cfg(feature = "inspect")]
+        if let Some(inspected) = &mut self.inspected {
+            inspected.extend(order.iter().filter_map(|(id,node)| self.taffy.dirty(*node).unwrap_or(false).then_some(*id)));
+        }
         let measured = self
             .taffy
             .compute_layout_with_measure(node, available, |inputs, _, measure, style| {
@@ -341,6 +350,13 @@ impl Measure {
             AvailableSpace::MaxContent => w.ceil(),
             AvailableSpace::MinContent => 0.0,
         });
+        if self.selectable {
+            let look = super::field::Look { style: self.style.clone(), line: self.line, ink: crate::Rgba::TRANSPARENT,
+                multiline: true, secure: false, rect: Rect::new(0.0, 0.0, width, 0.0), content: Rect::new(0.0, 0.0, width, 0.0) };
+            let shape = super::field::shape(text, &self.text, &look, Some(width.max(1.0)));
+            let widest = shape.lines.iter().flat_map(|l| l.stops.iter().map(|s| s.1)).fold(0.0, f32::max);
+            return (widest.ceil(), self.line * shape.lines.len().min(lines).max(1) as f32);
+        }
         let wrapped = text.lines(&self.text, &self.style, width.max(1.0), lines);
         let widest = wrapped
             .iter()
@@ -359,6 +375,7 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
             style: f.face.style(cx.theme, cx.s),
             line: f.face.line(cx.theme, cx.s) * rows as f32,
             wrap: None,
+            selectable: false,
         });
     }
     let What::Text { text, face, wrap } = &el.what else {
@@ -369,6 +386,7 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
         style: face.style(cx.theme, cx.s),
         line: face.line(cx.theme, cx.s),
         wrap: *wrap,
+        selectable: el.selectable,
     })
 }
 

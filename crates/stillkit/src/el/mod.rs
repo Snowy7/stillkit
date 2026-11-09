@@ -51,8 +51,10 @@ mod layout;
 mod overlay;
 mod png;
 mod virtualize;
-pub use virtualize::virtual_list;
+pub use virtualize::{virtual_list, variable_list, VirtualRows};
 mod runtime;
+#[cfg(feature = "inspect")]
+pub use runtime::inspect;
 mod rotate;
 mod scroll;
 pub mod token;

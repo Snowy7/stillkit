@@ -281,13 +281,13 @@ impl Session {
         serial
     }
 }
-fn pad(out: &mut Vec<u8>, start: usize, to: usize) {
+pub(super) fn pad(out: &mut Vec<u8>, start: usize, to: usize) {
     while !(out.len() - start).is_multiple_of(to) {
         out.push(0);
     }
 }
 /// A string at a 4-aligned offset (every caller's position is).
-fn put_str(out: &mut Vec<u8>, s: &str) {
+pub(super) fn put_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(&(s.len() as u32).to_le_bytes());
     out.extend_from_slice(s.as_bytes());
     out.push(0);
@@ -299,7 +299,7 @@ const ERROR: u8 = 3;
 const SIGNAL: u8 = 4;
 
 /// The full length of the message at the start of `bytes`, once its fixed header has arrived.
-fn message_len(bytes: &[u8]) -> Result<Option<usize>, Gone> {
+pub(super) fn message_len(bytes: &[u8]) -> Result<Option<usize>, Gone> {
     if bytes.len() < 16 {
         return Ok(None);
     }
@@ -321,19 +321,19 @@ fn message_len(bytes: &[u8]) -> Result<Option<usize>, Gone> {
 }
 
 /// The header fields this client reads.
-struct Message<'a> {
-    kind: u8,
-    big: bool,
-    body_at: usize,
-    reply_serial: Option<u32>,
-    path: Option<&'a str>,
-    interface: Option<&'a str>,
-    member: Option<&'a str>,
-    sender: Option<&'a str>,
-    signature: &'a [u8],
+pub(super) struct Message<'a> {
+    pub(super) kind: u8,
+    pub(super) big: bool,
+    pub(super) body_at: usize,
+    pub(super) reply_serial: Option<u32>,
+    pub(super) path: Option<&'a str>,
+    pub(super) interface: Option<&'a str>,
+    pub(super) member: Option<&'a str>,
+    pub(super) sender: Option<&'a str>,
+    pub(super) signature: &'a [u8],
 }
 impl<'a> Message<'a> {
-    fn parse(bytes: &'a [u8]) -> Option<Self> {
+    pub(super) fn parse(bytes: &'a [u8]) -> Option<Self> {
         let big = bytes[0] == b'B';
         let mut r = Reader { bytes, at: 12, big };
         let mut m = Message {
@@ -371,49 +371,49 @@ impl<'a> Message<'a> {
         Some(m)
     }
     /// A reader at the body, if its signature is `expected`.
-    fn body_reader(&self, bytes: &'a [u8], expected: &str) -> Option<Reader<'a>> {
+    pub(super) fn body_reader(&self, bytes: &'a [u8], expected: &str) -> Option<Reader<'a>> {
         (self.signature == expected.as_bytes()).then_some(Reader { bytes, at: self.body_at, big: self.big })
     }
 }
 
 /// Reads D-Bus wire values; positions are absolute in the message, as alignment requires.
 /// Every method returns `None` on malformed or truncated input.
-struct Reader<'a> {
+pub(super) struct Reader<'a> {
     bytes: &'a [u8],
     at: usize,
     big: bool,
 }
 impl<'a> Reader<'a> {
-    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+    pub(super) fn take(&mut self, n: usize) -> Option<&'a [u8]> {
         let end = self.at.checked_add(n)?;
         let out = self.bytes.get(self.at..end)?;
         self.at = end;
         Some(out)
     }
-    fn align(&mut self, to: usize) -> Option<()> {
+    pub(super) fn align(&mut self, to: usize) -> Option<()> {
         let at = self.at.next_multiple_of(to);
         self.take(at - self.at).map(|_| ())
     }
-    fn u8(&mut self) -> Option<u8> {
+    pub(super) fn u8(&mut self) -> Option<u8> {
         Some(self.take(1)?[0])
     }
-    fn u32(&mut self) -> Option<u32> {
+    pub(super) fn u32(&mut self) -> Option<u32> {
         self.align(4)?;
         let word: [u8; 4] = self.take(4)?.try_into().ok()?;
         Some(if self.big { u32::from_be_bytes(word) } else { u32::from_le_bytes(word) })
     }
-    fn str(&mut self) -> Option<&'a str> {
+    pub(super) fn str(&mut self) -> Option<&'a str> {
         let len = self.u32()? as usize;
         let s = self.take(len.checked_add(1)?)?;
         std::str::from_utf8(&s[..len]).ok()
     }
-    fn sig(&mut self) -> Option<&'a [u8]> {
+    pub(super) fn sig(&mut self) -> Option<&'a [u8]> {
         let len = self.u8()? as usize;
         Some(&self.take(len + 1)?[..len])
     }
     /// Calls `each` for every element of an array whose elements align to `to`; together
     /// they must consume exactly its length (which excludes the padding before the first).
-    fn array(&mut self, to: usize, mut each: impl FnMut(&mut Self) -> Option<()>) -> Option<()> {
+    pub(super) fn array(&mut self, to: usize, mut each: impl FnMut(&mut Self) -> Option<()>) -> Option<()> {
         let len = self.u32()? as usize;
         self.align(to)?;
         let end = self.at.checked_add(len)?;
@@ -426,7 +426,7 @@ impl<'a> Reader<'a> {
         (self.at == end).then_some(())
     }
     /// Skips one complete value of the type that starts `sig`; returns the rest of `sig`.
-    fn skip<'s>(&mut self, sig: &'s [u8], depth: u8) -> Option<&'s [u8]> {
+    pub(super) fn skip<'s>(&mut self, sig: &'s [u8], depth: u8) -> Option<&'s [u8]> {
         if depth > 64 {
             return None;
         }
