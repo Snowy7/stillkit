@@ -121,3 +121,17 @@ fn an_overestimate_still_fills_the_viewport_in_the_first_frame() {
     assert!(rt.find("tiny399").is_some());
     assert!(rt.tree().len() < 1300);
 }
+#[test]
+fn a_gliding_scroll_keeps_its_target_while_new_rows_are_measured() {
+    let mut rt = runtime();
+    rt.set_reduced_motion(false);
+    rt.wheel_at(100., 100., -12000);
+    let target = rt.scroll_offset("list").unwrap();
+    let runs = rt.view_runs();
+    for _ in 0..90 {
+        rt.frame(Duration::from_millis(16));
+    }
+    assert!(rt.view_runs() > runs, "the glide built new rows on its way");
+    let rest = rt.scroll_offset("list").unwrap();
+    assert!(rest >= target - 1., "the glide reached its target: {rest} < {target}");
+}

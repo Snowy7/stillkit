@@ -1143,7 +1143,17 @@ impl<S> Runtime<S> {
                 }
             }
             if let Some(view) = self.scrolls.get_mut(&self.laid[i].id) {
-                view.to(rows.offset() * self.scale, None, self.anim.t);
+                let anchored = rows.offset() * self.scale;
+                if rows.take_jump() {
+                    view.to(anchored, None, self.anim.t);
+                } else {
+                    // Rows above the anchor were measured: follow them without ending a
+                    // scroll that is still moving.
+                    let drift = anchored - view.offset(self.anim.t);
+                    if drift.abs() >= 0.5 {
+                        view.slide(drift);
+                    }
+                }
             }
             self.stale_view |= changed;
         }

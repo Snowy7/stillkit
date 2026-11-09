@@ -109,6 +109,8 @@ struct Measurements {
     anchor: Option<(Key, f32)>,
     offset: f32,
     pending: Option<Key>,
+    /// A reveal moved the anchor: the scroll view jumps there instead of following.
+    jump: bool,
     focused: Option<Key>,
     reordered: bool,
 }
@@ -174,6 +176,7 @@ impl VirtualRows {
             anchor: None,
             offset: 0.,
             pending: None,
+            jump: false,
             focused: None,
             reordered: false,
         })))
@@ -250,6 +253,10 @@ impl VirtualRows {
     pub(crate) fn offset(&self) -> f32 {
         self.0.borrow().anchored()
     }
+    /// Whether a reveal asked the scroll view to jump to [`offset`](Self::offset) (taken once).
+    pub(crate) fn take_jump(&self) -> bool {
+        std::mem::take(&mut self.0.borrow_mut().jump)
+    }
 }
 /// Builds natural-height rows near sight, keeping a focused row outside that range.
 /// Each row receives its model key automatically.
@@ -273,6 +280,7 @@ pub fn variable_list<S: 'static>(
         offset = m.prefix(i);
         m.anchor = Some((m.keys[i].clone(), 0.));
         m.offset = offset;
+        m.jump = true;
     }
     m.reordered = false;
     let count = m.keys.len();
