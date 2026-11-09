@@ -66,6 +66,9 @@ pub enum Event {
     FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
     /// A desktop surface activated; Explorer may finish reordering its band afterwards.
     Activated,
     /// The surface lost the activation (another window was clicked or focused).
@@ -1513,6 +1516,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
             }
             wl_keyboard::Event::Key {
                 key,
+                state: wayland_client::WEnum::Value(wl_keyboard::KeyState::Released),
+                ..
+            } => {
+                if let (Some(id), Some(s)) = (a.key_focus, &mut a.xkb)
+                    && let Some(vk) = key_vk(s.symbol(key))
+                {
+                    a.events.push_back((id, Event::KeyUp(vk as u16)));
+                }
+            }
+            wl_keyboard::Event::Key {
+                key,
                 serial,
                 state: wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
@@ -1524,28 +1538,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                     if let Some(event) = super::text_field::key(id, sym, &s.text(key)) {
                         a.events.push_back((id, event));
                     }
-                    let vk = match sym {
-                        0xff51 => Some(0x25),
-                        0xff52 => Some(0x26),
-                        0xff53 => Some(0x27),
-                        0xff54 => Some(0x28),
-                        0xff1b => Some(0x1b),
-                        0xff0d => Some(0x0d),
-                        0xff09 => Some(9),
-                        0xff08 => Some(8),
-                        0xff50 => Some(0x24),
-                        0xff57 => Some(0x23),
-                        0xff55 => Some(0x21),
-                        0xff56 => Some(0x22),
-                        0xff63 => Some(0x2d),
-                        0xffff => Some(0x2e),
-                        0xff67 => Some(0x5d),
-                        // Letters, digits and space are their own virtual keys; other printable
-                        // symbols ('(' would be 0x28, Down's code) type characters only.
-                        32 | 48..=57 | 65..=90 => Some(sym),
-                        97..=122 => Some(sym - 32),
-                        _ => None,
-                    };
+                    let vk = key_vk(sym);
                     if let Some(vk) = vk {
                         a.events.push_back((id, Event::Key(vk as u16)));
                     }
@@ -1563,6 +1556,33 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
         }
     }
 }
+/// The virtual key for an XKB keysym: arrows, editing and navigation keys, letters, digits
+/// and space; other symbols only type characters.
+fn key_vk(sym: u32) -> Option<u32> {
+    match sym {
+        0xff51 => Some(0x25),
+        0xff52 => Some(0x26),
+        0xff53 => Some(0x27),
+        0xff54 => Some(0x28),
+        0xff1b => Some(0x1b),
+        0xff0d => Some(0x0d),
+        0xff09 => Some(9),
+        0xff08 => Some(8),
+        0xff50 => Some(0x24),
+        0xff57 => Some(0x23),
+        0xff55 => Some(0x21),
+        0xff56 => Some(0x22),
+        0xff63 => Some(0x2d),
+        0xffff => Some(0x2e),
+        0xff67 => Some(0x5d),
+        // Letters, digits and space are their own virtual keys; other printable
+        // symbols ('(' would be 0x28, Down's code) type characters only.
+        32 | 48..=57 | 65..=90 => Some(sym),
+        97..=122 => Some(sym - 32),
+        _ => None,
+    }
+}
+
 wayland_client::delegate_noop!(State: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(State: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(State: ignore wl_shm_pool::WlShmPool);

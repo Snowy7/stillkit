@@ -17,6 +17,7 @@
 - el raw pointer and wheel: `on_pointer` (hover, held press with capture, merged moves, deltas, modifiers, click count) and `on_wheel`; `Runtime::set_modifiers`.
 - el styling for dense tools: `border`, `hovered`/`pressed` state looks (sprung, no view run), per-element `family`/`weight`/`text_size`/`text_align`, and `cursor` with six new pointer shapes.
 - `Surface::set_caption(Caption::Compact)` (a 40-point title area with the macOS traffic lights centred) and `Surface::system_controls()` (their rect, so an app's own title bar leaves them room).
+- `Event::KeyUp`: a key going up on macOS, Windows and Linux, for held-key input such as fly navigation.
 - Real soft shadows (`Op::SoftShadow`) with elevation levels per look, and Windows system backdrop frost for CPU surfaces.
 - Kit text components (text, secure and search fields, text area, combobox, command palette) and Linux Vulkan/Vello Hybrid GPU rendering and glass.
 - Portable process `Identity` and Wayland app_id, preserving Windows window class names.
