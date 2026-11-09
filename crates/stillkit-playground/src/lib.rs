@@ -133,38 +133,50 @@ fn browser<S: 'static>(s: &Session<S>) -> El<Session<S>> {
         .h_full()
         .child(text("LOOK & ENVIRONMENT"));
     for style in Style::ALL {
-        controls = controls.child(Button::new(format!("{style:?}")).build().on_press_with(
-            move |s: &mut Session<S>, tx| {
-                change(s, tx, |k| {
-                    k.style = style;
-                    k.material = None;
-                    k.shape = None;
-                })
-            },
-        ));
+        controls = controls.child(
+            Button::new(format!("{style:?}"))
+                .key(format!("look-{}", preset(style)))
+                .build()
+                .on_press_with(move |s: &mut Session<S>, tx| {
+                    change(s, tx, |k| {
+                        k.style = style;
+                        k.material = None;
+                        k.shape = None;
+                    })
+                }),
+        );
     }
     controls = controls.child(text("Material / shape (mix parts)"));
     for style in Style::ALL {
-        controls =
-            controls.child(
-                row()
-                    .gap(4.)
-                    .child(text(format!("M {style:?}")).on_press_with(
-                        move |s: &mut Session<S>, tx| change(s, tx, |k| k.material = Some(style)),
-                    ))
-                    .child(text(format!("S {style:?}")).on_press_with(
-                        move |s: &mut Session<S>, tx| change(s, tx, |k| k.shape = Some(style)),
-                    )),
-            );
+        controls = controls.child(
+            row()
+                .gap(4.)
+                .child(
+                    text(format!("M {style:?}"))
+                        .key(format!("material-{}", preset(style)))
+                        .on_press_with(move |s: &mut Session<S>, tx| {
+                            change(s, tx, |k| k.material = Some(style))
+                        }),
+                )
+                .child(
+                    text(format!("S {style:?}"))
+                        .key(format!("shape-{}", preset(style)))
+                        .on_press_with(move |s: &mut Session<S>, tx| {
+                            change(s, tx, |k| k.shape = Some(style))
+                        }),
+                ),
+        );
     }
     controls = controls
         .child(
             Button::new("Light / dark")
+                .key("scheme")
                 .build()
                 .on_press_with(|s: &mut Session<S>, tx| change(s, tx, |k| k.dark = !k.dark)),
         )
         .child(
             Button::new(format!("Scale {}x", s.knobs.scale))
+                .key("scale")
                 .build()
                 .on_press_with(|s: &mut Session<S>, tx| {
                     change(s, tx, |k| {
@@ -174,6 +186,7 @@ fn browser<S: 'static>(s: &Session<S>) -> El<Session<S>> {
         )
         .child(
             Button::new(format!("Reduced motion: {}", s.knobs.reduced))
+                .key("reduced")
                 .build()
                 .on_press_with(|s: &mut Session<S>, tx| change(s, tx, |k| k.reduced = !k.reduced)),
         )
@@ -186,6 +199,7 @@ fn browser<S: 'static>(s: &Session<S>) -> El<Session<S>> {
     ] {
         controls = controls.child(
             Button::new(label)
+                .key(format!("state-{}", label.to_ascii_lowercase()))
                 .build()
                 .on_press_with(move |_: &mut Session<S>, tx| tx.preview_state("subject", state)),
         );
@@ -193,11 +207,13 @@ fn browser<S: 'static>(s: &Session<S>) -> El<Session<S>> {
     controls = controls
         .child(
             Button::new(format!("Disabled: {}", s.knobs.disabled))
+                .key("disabled")
                 .on_press(|s: &mut Session<S>| s.knobs.disabled = !s.knobs.disabled)
                 .build(),
         )
         .child(
             Button::new(format!("Invalid: {}", s.knobs.invalid))
+                .key("invalid")
                 .on_press(|s: &mut Session<S>| s.knobs.invalid = !s.knobs.invalid)
                 .build(),
         )
