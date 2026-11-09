@@ -395,7 +395,33 @@ impl DisplayList {
     }
 }
 
+/// The changed middle of two op lists: their equal start and end trimmed, so an op inserted
+/// or removed damages only what actually changed, not every op after it.
+fn changed_span<'a>(old: &'a [Op], new: &'a [Op]) -> (&'a [Op], &'a [Op]) {
+    let prefix = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+    let (old, new) = (&old[prefix..], &new[prefix..]);
+    let suffix = old
+        .iter()
+        .rev()
+        .zip(new.iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    (&old[..old.len() - suffix], &new[..new.len() - suffix])
+}
+
 fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect>) {
+    let (old, new) = changed_span(old, new);
+    // Lists of different lengths no longer line up op for op: each op that remains is damage.
+    if old.len() != new.len() {
+        for op in old.iter().chain(new) {
+            let bounds = op.bounds();
+            let bounds = clip.map_or(bounds, |clip| intersection(bounds, clip));
+            if !bounds.is_empty() {
+                out.push(bounds);
+            }
+        }
+        return;
+    }
     for i in 0..old.len().max(new.len()) {
         let changed = match (old.get(i), new.get(i)) {
             (Some(a), Some(b)) if a == b => continue,
@@ -492,6 +518,15 @@ fn intersection(a: Rect, b: Rect) -> Rect {
 }
 
 fn damage_ops(old: &[Op], new: &[Op]) -> Option<Rect> {
+    let (old, new) = changed_span(old, new);
+    if old.len() != new.len() {
+        return old
+            .iter()
+            .chain(new)
+            .map(Op::bounds)
+            .filter(|r| !r.is_empty())
+            .reduce(Rect::union);
+    }
     let count = new.len().max(old.len());
     (0..count)
         .filter_map(|i| match (old.get(i), new.get(i)) {
@@ -543,6 +578,18 @@ mod tests {
             ops,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_inserted_op_damages_only_itself() {
+        let old = list((0..20).map(|i| fill(i as f32 * 20.0)).collect());
+        let mut ops: Vec<Op> = (0..20).map(|i| fill(i as f32 * 20.0)).collect();
+        ops.insert(1, fill(500.0));
+        let new = list(ops);
+        // The fill's own bounds, with its antialiasing pixel.
+        let only = fill(500.0).bounds();
+        assert_eq!(new.damage(&old), Some(only));
+        assert_eq!(new.damage_regions(&old), vec![only]);
     }
 
     #[test]
