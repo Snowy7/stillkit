@@ -77,7 +77,7 @@ pub use platform::Caption;
 pub use text::{Text, TextStyle, VARIABLE};
 pub use text_field::TextField;
 pub use theme::{Palette, Scheme, ShadowLevel, SoftShadow, Style, TextRole, Theme};
-pub use tokens::{Colors, Ink, Material, MenuMetrics, Step, Tokens, Typeface};
+pub use tokens::{Colors, Ink, Material, MenuMetrics, Step, Tokens, Typeface, WINDOW_CORNER_RADIUS};
 pub use watch::FileWatch;
 pub use waker::{Waker, waker};
 
