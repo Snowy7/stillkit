@@ -72,7 +72,7 @@ impl Tray {
                 )?),
                 std::mem::transmute::<RawProcedure, CursorPosFn>(procedure(
                     w!("user32.dll"),
-                    s!("GetCursorPos"),
+                    s!("GetPhysicalCursorPos"),
                 )?),
             )
         };
@@ -585,7 +585,7 @@ impl Instance {
                             LPARAM((&raw const data) as isize),
                             SMTO_ABORTIFHUNG.0,
                             5000,
-                            Some(&mut result)
+                            &mut result
                         )
                         .0 != 0
                             && result == 1,

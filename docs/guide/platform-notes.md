@@ -47,7 +47,8 @@ fn main() -> anyhow::Result<()> {
 `tray::Tray::new` creates an icon from validated straight RGBA pixels. Keep it on the
 UI thread, drain `next_event`, and sleep with `platform::current::host::wait`.
 Creation never shows or activates a window. Drop removes the icon. The `services`
-example is a tray-only app; right-click exits it.
+example is a tray app; right-click opens its stillkit menu. Pass `--hotkey`,
+`--notify` or `--pick` to try the other services.
 
 Windows resolves shell APIs on first use and restores icons after Explorer restarts.
 Linux uses StatusNotifierItem on the session bus, sharing the AT-SPI wire reader and
@@ -76,3 +77,10 @@ native dispatch. URL activations are arguments; register URL schemes in your app
 installer or desktop file. Windows uses a session-local named mutex and a hidden
 WM_COPYDATA endpoint; Linux uses a D-Bus name. Forwarding is bounded to 64 KiB and
 five seconds. Native argument encodings are preserved. Drop releases ownership.
+
+Linux `dialog::pick_folder`, `pick_files` and `save_file` use the XDG FileChooser
+portal on demand. The call waits on a private bus fd (no worker or polling thread),
+with a two-minute consent limit. Cancellation or an unavailable portal returns no
+paths, consistent with the existing picker API. Local file URIs preserve raw Unix
+filename bytes; remote URIs are rejected. A starting folder and suggested save name
+are passed to the portal. Alerts still log on Linux.
