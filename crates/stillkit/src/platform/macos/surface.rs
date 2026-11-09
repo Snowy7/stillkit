@@ -399,8 +399,12 @@ impl Surface {
         #[cfg(not(feature = "gpu"))]
         let glass_changed = false;
         let fresh = resized || glass_changed || (self.canvas.is_none() && self.mode == crate::platform::Render::Cpu);
-        let damage = if fresh { Some(crate::Rect::new(0., 0., size.0 as f32, size.1 as f32)) } else { list.damage(&self.shown) };
-        let Some(area) = damage.and_then(|d| d.pixels(size.0, size.1)) else {
+        let whole = crate::Rect::new(0., 0., size.0 as f32, size.1 as f32);
+        // Disjoint damage repaints each region alone (a menu and a counter far apart need not
+        // repaint the window between them); the GPU path takes their union.
+        let damage = if fresh { vec![whole] } else { list.damage_regions(&self.shown) };
+        let regions: Vec<_> = damage.iter().filter_map(|d| d.pixels(size.0, size.1)).collect();
+        let Some(area) = damage.into_iter().reduce(crate::Rect::union).and_then(|d| d.pixels(size.0, size.1)) else {
             self.shown = list;
             return Ok(false);
         };
@@ -426,7 +430,9 @@ impl Surface {
             self.canvas = Some(Canvas::new(ui, size.0, size.1)?);
         }
         let canvas = self.canvas.as_ref().context("no canvas")?;
-        canvas.draw(&mut ui.text, &list, area)?;
+        for region in &regions {
+            canvas.draw(&mut ui.text, &list, *region)?;
+        }
         if let Some(image) = canvas.cg_image() {
             set_contents(&self.view, &image, self.view.scale());
         }

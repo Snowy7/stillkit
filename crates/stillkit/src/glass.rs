@@ -8,7 +8,7 @@
 //! land on it, and the glass under it is never hit. Without a backdrop (no engine, a golden
 //! test) [`available`] is false and views draw their own fill instead.
 //!
-//! **Which backdrop.** An installed one ([`install`]: mypaper's engine) always wins. Without one,
+//! **Which backdrop.** An installed one ([`install`]: Glaze's engine) always wins. Without one,
 //! Windows has a built-in system backdrop (docs/ui.md, "System backdrop"): DWM's blur under
 //! the surface, frost with no lens, in CPU mode with no GPU device in the process. Other
 //! platforms have none yet.
