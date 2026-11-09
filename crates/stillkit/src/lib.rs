@@ -45,6 +45,7 @@ pub mod motion;
 pub use platform::current::render;
 pub mod reveal;
 mod scene;
+pub mod paint;
 mod shadow;
 mod bitmap;
 mod text_style;

@@ -1032,6 +1032,30 @@ impl Painter {
                         log::error!("text field: {e:#}");
                     }
                 }
+                Op::Gradient { rect, radius, width, gradient } => {
+                    use windows::Win32::Graphics::Direct2D::*;
+                    use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
+                    let stops: Vec<_> = gradient.stops.iter().map(|s| D2D1_GRADIENT_STOP { position: s.offset, color: color(s.color) }).collect();
+                    let result = (|| -> Result<ID2D1Brush> {
+                        let stops = t.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let point = |p: crate::Point| Vector2 { X: p.x, Y: p.y };
+                        Ok(if gradient.angle.is_some() {
+                            let (a,b) = gradient.line(*rect);
+                            t.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: point(a), endPoint: point(b) }, None, &stops)?.cast()?
+                        } else {
+                            let r = ((rect.width() * rect.width() + rect.height() * rect.height()).sqrt() * 0.5).max(0.001);
+                            t.CreateRadialGradientBrush(&D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES { center: point(rect.center()), gradientOriginOffset: Vector2::default(), radiusX: r, radiusY: r }, None, &stops)?.cast()?
+                        })
+                    })();
+                    match result {
+                        Ok(brush) => {
+                            let r = D2D1_ROUNDED_RECT { rect: d2d(*rect), radiusX: *radius, radiusY: *radius };
+                            if *width > 0.0 { t.DrawRoundedRectangle(&r, &brush, *width, None); }
+                            else { t.FillRoundedRectangle(&r, &brush); }
+                        }
+                        Err(e) => log::error!("gradient: {e:#}"),
+                    }
+                }
                 Op::Fill {
                     rect,
                     radius,
@@ -1842,3 +1866,36 @@ fn bounded_canvas_bands_preserve_partial_damage_and_the_last_short_band() {
     assert_eq!(heights, [7, 7, 6]);
 }
 
+
+#[cfg(test)]
+mod gradient_cost {
+    use super::*;
+    #[test]
+    #[ignore = "CPU timing probe; run in release mode with --nocapture"]
+    fn native_gradient_cost() {
+        for (w,h) in [(100,100),(320,180),(800,600)] {
+            for kind in [0,1,2] {
+                let mut ui = Ui::new().unwrap();
+                let canvas = Canvas::new(&ui,w,h).unwrap();
+                let rect = Rect::new(0.0,0.0,w as f32,h as f32);
+                let red = Rgba::new(1.0,0.2,0.1,1.0);
+                let blue = Rgba::new(0.1,0.2,1.0,1.0);
+                let op = if kind == 0 { Op::Fill { rect, radius: 12.0, color: red } } else {
+                    Op::Gradient { rect, radius: 12.0, width: 0.0, gradient: crate::paint::Gradient::new(&[
+                        crate::paint::GradientStop { offset: 0.0, color: red },
+                        crate::paint::GradientStop { offset: 1.0, color: blue },
+                    ], (kind == 1).then_some(0.5)) }
+                };
+                let list = DisplayList { ops: vec![op], ..Default::default() };
+                let mut samples = Vec::new();
+                for i in 0..220 {
+                    let start = std::time::Instant::now();
+                    canvas.draw(&mut ui.text,&list,PixelRect::full(w,h)).unwrap();
+                    if i >= 20 { samples.push(start.elapsed().as_secs_f64() * 1000.0); }
+                }
+                samples.sort_by(f64::total_cmp);
+                println!("{w}x{h} kind={kind} median={:.4}ms p95={:.4}ms",samples[100],samples[190]);
+            }
+        }
+    }
+}
