@@ -1,4 +1,9 @@
 //! Theme-driven components built only from public elements. Model values are supplied by views.
+#[cfg(feature = "markdown")]
+pub mod markdown;
+#[cfg(feature = "markdown")]
+pub use markdown::Markdown;
+
 use std::sync::Arc;
 use stillkit::el::{
     Align, El, Justify, Len, Orientation, Paint, Transition, col, el, grid, icon, row, text, token,
