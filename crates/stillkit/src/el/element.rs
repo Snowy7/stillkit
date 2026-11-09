@@ -742,6 +742,8 @@ pub struct El<S> {
     pub(crate) states: States,
     /// The pointer's shape over it ([`El::cursor`]).
     pub(crate) cursor: Option<crate::Cursor>,
+    /// What a [`virtual_list`](super::virtual_list) built.
+    pub(crate) virt: Option<super::virtualize::Virt>,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -778,6 +780,7 @@ fn new<S>(what: What) -> El<S> {
         tip: None,
         states: States::default(),
         cursor: None,
+        virt: None,
         children: Vec::new(),
     }
 }

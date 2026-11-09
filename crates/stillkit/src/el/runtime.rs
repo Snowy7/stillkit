@@ -417,7 +417,8 @@ impl<S> Runtime<S> {
                 self.views += 1;
                 self.stale_view = false;
                 self.stepped.clear();
-                let old = std::mem::replace(&mut self.root, (self.view)(&self.state));
+                let root = self.run_view();
+                let old = std::mem::replace(&mut self.root, root);
                 self.hoist();
                 old
             });
@@ -440,6 +441,15 @@ impl<S> Runtime<S> {
             self.ghosts.retain(|g| !left.contains(&g.id));
         }
         let scrolled = self.tick_scrolls();
+        // A virtual list scrolled past what it built: build again, in this frame.
+        if scrolled && self.virtual_stale() {
+            let before = keyed(&self.root, &self.laid, &self.theme);
+            self.views += 1;
+            let root = self.run_view();
+            let old = std::mem::replace(&mut self.root, root);
+            self.hoist();
+            self.relayout(before, Some(old));
+        }
         // Overlays follow an anchor that scrolled.
         if scrolled && self.layers.iter().any(|l| l.anchor != super::overlay::Anchor::Window) {
             let before = keyed(&self.root, &self.laid, &self.theme);
@@ -1052,6 +1062,40 @@ impl<S> Runtime<S> {
                 self.reveal_index(index);
             }
         }
+    }
+
+    /// Runs the view with each virtual list's scroll place in reach ([`super::virtual_list`]).
+    fn run_view(&mut self) -> El<S> {
+        let places = self.virtual_places();
+        super::virtualize::with_viewports(places, || (self.view)(&self.state))
+    }
+
+    /// Each keyed virtual list's offset and viewport now, design px.
+    fn virtual_places(&self) -> HashMap<Key, (f32, f32)> {
+        let mut places = HashMap::new();
+        let (s, t) = (self.scale, self.anim.t);
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if el.virt.is_some()
+                && let (Some(key), Some(view)) = (&el.key, self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)))
+            {
+                places.insert(key.clone(), (view.offset(t) / s, view.viewport / s));
+            }
+        });
+        places
+    }
+
+    /// Whether a virtual list's rows in sight left what it built.
+    fn virtual_stale(&self) -> bool {
+        let (s, t) = (self.scale, self.anim.t);
+        let mut stale = false;
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if let Some(v) = &el.virt
+                && let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id))
+            {
+                stale |= v.stale(view.offset(t) / s, view.viewport / s);
+            }
+        });
+        stale
     }
 
     /// Where each [`native`](super::native) element shows now: its name and its visible box in
