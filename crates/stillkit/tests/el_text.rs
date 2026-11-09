@@ -1,5 +1,6 @@
 //! Text fields, headless: typing, selection, word movement, undo and paste through a test
-//! clipboard; a controlled value the view refuses; Enter submitting and Tab leaving; a secure
+//! clipboard; a controlled value the view refuses; a field typed then committed with Enter;
+//! Enter submitting and Tab leaving; a secure
 //! field's accessibility; and the caret's blink, which never runs the view and stops.
 
 use std::time::Duration;
@@ -23,6 +24,8 @@ struct Form {
     pin: String,
     password: String,
     notes: String,
+    /// Committed only with Enter (the field has no `on_input`).
+    size: String,
     submitted: Vec<String>,
     /// Keys and characters that reached the form itself.
     bubbled: Vec<u16>,
@@ -76,6 +79,13 @@ fn view(s: &Form) -> El<Form> {
                 .on_input(|s: &mut Form, t| s.notes = t.into()),
         )
         .child(el().key("after").label("After").focusable().w(20.0).h(20.0))
+        .child(
+            text_input("size")
+                .w(200.0)
+                .select_all_on_focus()
+                .value(s.size.as_str())
+                .on_submit(|s: &mut Form, t| s.size = t.into()),
+        )
 }
 
 fn runtime() -> Runtime<Form> {
@@ -181,6 +191,29 @@ fn a_refused_value_keeps_the_old_text() {
     rt.key_with(KeyCode::of('Z').0, CTRL);
     rt.frame(FRAME);
     assert_eq!(rt.state().pin, "12", "undo skips the refused edit");
+}
+
+#[test]
+fn a_committing_field_keeps_typing_until_enter_and_reverts_when_left() {
+    let mut rt = runtime();
+    rt.update(|s| s.size = "12".into());
+    rt.frame(FRAME);
+    focus(&mut rt, "size");
+    assert_eq!(shown(&rt, "size").1, (0, 2), "the focusing click selects it all");
+    rt.key(KeyCode::END.0);
+    rt.type_text("5");
+    rt.frame(FRAME);
+    assert_eq!(shown(&rt, "size").0, "125", "the typed text stays while focused");
+    assert_eq!(rt.state().size, "12", "nothing is committed yet");
+    rt.key(KeyCode::ENTER.0);
+    rt.frame(FRAME);
+    assert_eq!(rt.state().size, "125", "Enter commits");
+    rt.type_text("9");
+    rt.frame(FRAME);
+    assert_eq!(shown(&rt, "size").0, "1259");
+    focus(&mut rt, "name");
+    assert_eq!(shown(&rt, "size").0, "125", "left without Enter, it shows the value again");
+    assert_eq!(rt.state().size, "125");
 }
 
 #[test]
