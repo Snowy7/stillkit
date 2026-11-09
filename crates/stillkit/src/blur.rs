@@ -134,14 +134,27 @@ fn patch(
     Ok(Some((rect, raster(text, source, rect, sigma)?)))
 }
 
-pub(crate) fn prepare(text: &mut crate::Text, ops: &[Op], damage: Rect) -> Result<Cow<'_, [Op]>> {
+pub(crate) fn prepare<'a>(
+    text: &mut crate::Text,
+    ops: &'a [Op],
+    damage: Rect,
+) -> Result<Cow<'a, [Op]>> {
     prepare_mode(text, ops, damage, false)
 }
 #[cfg(feature = "gpu")]
-pub(crate) fn prepare_native(text: &mut crate::Text, ops: &[Op], damage: Rect) -> Result<Cow<'_, [Op]>> {
+pub(crate) fn prepare_native<'a>(
+    text: &mut crate::Text,
+    ops: &'a [Op],
+    damage: Rect,
+) -> Result<Cow<'a, [Op]>> {
     prepare_mode(text, ops, damage, true)
 }
-fn prepare_mode(text: &mut crate::Text, ops: &[Op], damage: Rect, native: bool) -> Result<Cow<'_, [Op]>> {
+fn prepare_mode<'a>(
+    text: &mut crate::Text,
+    ops: &'a [Op],
+    damage: Rect,
+    native: bool,
+) -> Result<Cow<'a, [Op]>> {
     fn has(ops: &[Op]) -> bool {
         ops.iter().any(|o| match o {
             Op::Blurred { .. } | Op::BackdropBlur { .. } => true,
@@ -174,7 +187,13 @@ fn prepare_mode(text: &mut crate::Text, ops: &[Op], damage: Rect, native: bool) 
         native,
     )?))
 }
-fn walk(text: &mut crate::Text, ops: &[Op], behind: &[Op], damage: Rect, native: bool) -> Result<Vec<Op>> {
+fn walk(
+    text: &mut crate::Text,
+    ops: &[Op],
+    behind: &[Op],
+    damage: Rect,
+    native: bool,
+) -> Result<Vec<Op>> {
     let mut out = Vec::new();
     for op in ops {
         match op {

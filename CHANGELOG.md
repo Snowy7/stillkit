@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Animatable subtree and same-surface backdrop blur, with cached CPU patches and native D2D/Vello GPU filters.
+
 - Optional kit Markdown view with document selection, themed blocks, tables, links and fenced-code copying.
 - Add keyed, measured variable-height virtual lists with estimates, anchoring, reveal and focused-row retention.
 
