@@ -56,6 +56,11 @@ impl ScrollView {
         }
     }
 
+    /// Whether the content rests at its end (or cannot scroll).
+    pub fn at_end(&self) -> bool {
+        self.offset.target[0] >= self.max - 0.5
+    }
+
     /// Where the content rests.
     pub fn target(&self) -> f32 {
         self.offset.target[0]
