@@ -69,13 +69,31 @@ fn view(s: &State) -> El<State> {
                 .key("clear")
                 .on_press(|s: &mut State| s.tree.clear_filter()),
         );
-    col().pad(20.).gap(12.)
+    let records = col()
+        .w(520.)
+        .gap(8.)
+        .child(text("RECORDS").color(token::SECONDARY))
+        .child(table);
+    let files = col()
+        .w(300.)
+        .gap(8.)
+        .child(text("PROJECT FILES").color(token::SECONDARY))
+        .child(actions)
+        .child(tree);
+    let hint = text(
+        "Drag column edges to resize | Click headers to sort | Ctrl/Shift select | Type to jump",
+    );
+    col()
+        .pad(20.)
+        .gap(12.)
         .child(text("Data workspace | 100,000 records").text_size(24.))
-        .child(text("Drag column edges to resize | Click headers to sort | Ctrl/Shift select | Type to jump"))
-        .child(row().gap(16.)
-            .child(col().w(520.).gap(8.).child(text("RECORDS").color(token::SECONDARY)).child(table))
-            .child(col().w(300.).gap(8.).child(text("PROJECT FILES").color(token::SECONDARY)).child(actions).child(tree)))
-        .child(text(if s.opened.is_empty() { "Select a row, then press Enter" } else { &s.opened }))
+        .child(hint)
+        .child(row().gap(16.).child(records).child(files))
+        .child(text(if s.opened.is_empty() {
+            "Select a row, then press Enter"
+        } else {
+            &s.opened
+        }))
 }
 fn main() -> anyhow::Result<()> {
     let mut table = TableModel::new(vec![
