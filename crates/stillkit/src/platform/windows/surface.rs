@@ -120,7 +120,9 @@ pub enum Event {
     /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
     /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
     KeyUp(u16),
-    /// A desktop surface activated; Explorer may finish reordering its band afterwards.
+    /// The surface became the active window. Desktop surfaces: Explorer may finish reordering
+    /// its band afterwards. App windows: anything kept beside it in the z-order (a glass
+    /// plate below it) needs restacking now, since activation raised it.
     Activated,
     /// The surface lost the activation (another window was clicked or focused).
     Deactivated,
@@ -1627,7 +1629,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         windows::Win32::UI::WindowsAndMessaging::WM_CANCELMODE => push(id, Event::Cancelled),
         WM_ACTIVATE if (wparam.0 & 0xFFFF) as u32 == WA_INACTIVE => push(id, Event::Deactivated),
-        WM_ACTIVATE if shared.desktop.is_some() => push(id, Event::Activated),
+        WM_ACTIVATE => push(id, Event::Activated),
         WM_A11Y_ACTION => {
             let hit = lparam.0 as HitId;
             push(
