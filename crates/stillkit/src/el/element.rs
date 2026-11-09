@@ -380,6 +380,8 @@ pub(crate) type OnContext<S> = Box<dyn Fn(&mut S, f32, f32)>;
 pub(crate) type OnTimeout<S> = (Duration, Box<dyn Fn(&mut S)>);
 /// A pointer handler ([`El::on_pointer`]): whether it changed the state (the view runs).
 pub(crate) type OnPointer<S> = Box<dyn Fn(&mut S, &PointerEvent, &mut Tx) -> bool>;
+/// A file-drop handler ([`El::on_drop_files`]): the dropped paths.
+pub(crate) type OnFiles<S> = Box<dyn Fn(&mut S, &[std::path::PathBuf])>;
 /// A wheel handler ([`El::on_wheel`]): whether it changed the state (the view runs).
 pub(crate) type OnWheel<S> = Box<dyn Fn(&mut S, &WheelEvent, &mut Tx) -> bool>;
 
@@ -623,11 +625,13 @@ pub(crate) struct States {
     pub hover: Option<Look>,
     pub within: Option<Look>,
     pub press: Option<Look>,
+    /// While dragged files are over it ([`El::dropping`]).
+    pub drop: Option<Look>,
 }
 
 impl States {
     pub fn any(&self) -> bool {
-        self.hover.is_some() || self.within.is_some() || self.press.is_some()
+        self.hover.is_some() || self.within.is_some() || self.press.is_some() || self.drop.is_some()
     }
 }
 
@@ -637,13 +641,14 @@ pub(crate) struct Active {
     pub hover: Vec<u64>,
     pub within: Vec<u64>,
     pub press: Vec<u64>,
+    pub drop: Vec<u64>,
 }
 
 impl Active {
     /// `look` with the state styles of element `id` laid over it.
     pub fn look(&self, id: u64, look: Look, states: &States) -> Look {
         let mut out = look;
-        for (on, patch) in [(&self.hover, states.hover), (&self.within, states.within), (&self.press, states.press)] {
+        for (on, patch) in [(&self.hover, states.hover), (&self.within, states.within), (&self.press, states.press), (&self.drop, states.drop)] {
             if let Some(patch) = patch.filter(|_| on.contains(&id)) {
                 out = out.with(patch);
             }
@@ -721,6 +726,8 @@ pub struct El<S> {
     pub(crate) on_drag: Option<Drag<S>>,
     pub(crate) on_pointer: Option<OnPointer<S>>,
     pub(crate) on_wheel: Option<OnWheel<S>>,
+    /// Files dropped on it ([`El::on_drop_files`]).
+    pub(crate) on_files: Option<OnFiles<S>>,
     pub(crate) on_key: Option<OnKey<S>>,
     pub(crate) on_step: Option<OnStep<S>>,
     pub(crate) group: Option<Group>,
@@ -766,6 +773,7 @@ fn new<S>(what: What) -> El<S> {
         on_drag: None,
         on_pointer: None,
         on_wheel: None,
+        on_files: None,
         on_key: None,
         on_step: None,
         group: None,
@@ -1354,6 +1362,21 @@ impl<S> El<S> {
     /// the view. Pressed and focus looks lie over it.
     pub fn hovered(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
         self.states.hover = Some(style(el()).look);
+        self
+    }
+
+    /// Runs on `&mut S` with the paths of files dropped on it from another app (Finder,
+    /// Explorer). The innermost element with one under the drop takes it; it needs no other
+    /// handler. Pair it with [`dropping`](Self::dropping) to show where files will land.
+    pub fn on_drop_files(mut self, handler: impl Fn(&mut S, &[std::path::PathBuf]) + 'static) -> Self {
+        self.on_files = Some(Box::new(handler));
+        self
+    }
+
+    /// A look it takes while dragged files are over it and it would take them
+    /// ([`on_drop_files`](Self::on_drop_files)): a highlighted border, a tinted fill.
+    pub fn dropping(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
+        self.states.drop = Some(style(el()).look);
         self
     }
 
