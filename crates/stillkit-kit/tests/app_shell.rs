@@ -323,3 +323,39 @@ fn titlebar_caption_buttons_have_keyboard_actions_and_device_bounds() {
     assert_eq!(rt.find("titlebar").unwrap().height(), 80.);
     assert_eq!(rt.find("titlebar/close").unwrap().width(), 92.);
 }
+
+#[test]
+fn recorder_consumes_finishing_key_repeats_until_release() {
+    let mut state = ShortcutRecorderState::default();
+    state.begin();
+    assert!(state.handle(&Event::Key(0x0d), Modifiers::CTRL));
+    assert!(!state.recording);
+    assert!(state.handle(&Event::Key(0x0d), Modifiers::CTRL));
+    assert!(state.handle(&Event::KeyUp(0x0d), Modifiers::NONE));
+    assert!(!state.handle(&Event::Key(0x0d), Modifiers::NONE));
+    state.begin();
+    assert!(state.handle(&Event::Key(0x1b), Modifiers::NONE));
+    assert!(state.handle(&Event::Key(0x1b), Modifiers::NONE));
+    state.handle(&Event::Deactivated, Modifiers::NONE);
+    assert!(!state.handle(&Event::Key(0x1b), Modifiers::NONE));
+}
+
+#[test]
+fn tabs_new_and_overflow_menu_activate_with_keyboard() {
+    let mut rt = runtime();
+    rt.focus("documents/new");
+    frame(&mut rt);
+    rt.key(0x0d);
+    frame(&mut rt);
+    assert_eq!(rt.state().tabs.len(), 4);
+    assert_eq!(rt.state().selected.as_ref(), "new-1");
+    rt.focus("documents/overflow");
+    frame(&mut rt);
+    rt.key(0x0d);
+    frame(&mut rt);
+    rt.key(0x24);
+    frame(&mut rt);
+    rt.key(0x0d);
+    frame(&mut rt);
+    assert_eq!(rt.state().selected.as_ref(), "source");
+}

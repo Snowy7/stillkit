@@ -239,18 +239,20 @@ impl<S: 'static> TabStrip<S> {
             true.into()
         });
         row()
-            .key(key)
+            .key(key.clone())
             .min_w(0.)
             .align(Align::Center)
             .gap(token::ITEM)
             .child(rail)
             .child(
                 IconButton::new(Icon::Add, "New tab")
+                    .key(format!("{key}/new"))
                     .on_press(move |s| event(s, TabEvent::New))
                     .build(),
             )
             .child(
                 IconButton::new(Icon::ChevronDown, "All tabs")
+                    .key(format!("{key}/overflow"))
                     .on_press(move |s| access(s).menu = !access(s).menu)
                     .build()
                     .overlay(menu.overlay().open(state.menu)),

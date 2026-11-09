@@ -94,16 +94,34 @@ pub struct ShortcutRecorderState {
     /// Whether this control is currently recording.
     pub recording: bool,
     held: Modifiers,
+    finishing: Option<u16>,
 }
 impl ShortcutRecorderState {
     /// Begin a new recording, preserving the old chord until acceptance.
     pub fn begin(&mut self) {
         self.recording = true;
         self.held = Modifiers::NONE;
+        self.finishing = None;
     }
-    /// Forward both Key and KeyUp before Runtime::handle; true means consumed.
+    /// Forward Key and KeyUp before Runtime::handle, even after acceptance until release.
+    /// True means consumed; repeats of the finishing key stay inside the recorder.
     /// `mods` is the host's current modifier snapshot. Deactivation cancels recording.
     pub fn handle(&mut self, event: &Event, mods: Modifiers) -> bool {
+        if *event == Event::Deactivated {
+            self.recording = false;
+            self.held = Modifiers::NONE;
+            self.finishing = None;
+            return false;
+        }
+        if let Some(key) = self.finishing {
+            if *event == Event::Key(key) {
+                return true;
+            }
+            if *event == Event::KeyUp(key) {
+                self.finishing = None;
+                return true;
+            }
+        }
         if !self.recording {
             return false;
         }
@@ -112,16 +130,12 @@ impl ShortcutRecorderState {
                 self.held = mods;
                 true
             }
-            Event::Deactivated => {
-                self.recording = false;
-                self.held = Modifiers::NONE;
-                false
-            }
             Event::Key(vk) => {
                 self.held = mods;
                 if modifier(vk) {
                     return true;
                 }
+                self.finishing = Some(vk);
                 match KeyCode(vk) {
                     KeyCode::ESCAPE => self.recording = false,
                     KeyCode::BACKSPACE | KeyCode::DELETE => {

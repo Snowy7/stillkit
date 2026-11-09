@@ -292,9 +292,10 @@ fn main() -> anyhow::Result<()> {
             if event == Event::Close {
                 return Ok(());
             }
-            let mut consumed = false;
-            if rt.state().recorder.recording {
-                rt.update(|s| consumed = s.recorder.handle(&event, modifiers()));
+            let mut recorder = rt.state().recorder.clone();
+            let consumed = recorder.handle(&event, modifiers());
+            if consumed || event == Event::Deactivated {
+                rt.update(|s| s.recorder = recorder);
             }
             if let Some(anchor) = rt.find("about") {
                 let card = rt.find("about-panel");

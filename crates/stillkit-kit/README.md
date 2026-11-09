@@ -438,11 +438,13 @@ to `system_inset`. No platform APIs, threads or imports are added by these build
 
 `ShortcutRecorder` renders `ShortcutRecorderState` as keycaps. Its accessible name
 is the action being bound. Before Runtime, forward Key **and KeyUp** through
-`state.handle(event, modifiers)` while recording; consume events it uses. Escape
+`state.handle(event, modifiers)`, including after acceptance until key release;
+consume events it uses so repeats cannot activate another control. Escape
 cancels, Backspace/Delete clears, and deactivation cancels. Persist `chord`; the app
 validates conflicts and registers shortcuts. `Keybind` displays keycap labels alone.
 
-`HoverCard` wraps interactive rich content in a non-modal popover. Feed pointer
+`HoverCard` wraps interactive rich content in a non-modal popover. Give it a
+`key("details-panel")` and track that complete panel, including its padding. Feed pointer
 and leave/deactivation/Escape events to `HoverCardState::handle`, using logical
 anchor/card bounds and the window scale. Its 500 ms entry delay has one host wake:
 include `deadline()` alongside `Runtime::wake_at`, then call `advance(now)`.
@@ -459,7 +461,8 @@ group for arrow navigation. `Page` places a heading, toolbar and flexible conten
 All components use theme tokens and shared contrast helpers for the five looks.
 
 `cargo run -p stillkit-kit --example app_shell` opens an editor shell. Add
-`--snap-dir PATH` to export all ten look/scheme combinations without a window.
+`--snap-dir PATH` to export all ten look/scheme combinations, at rest and with rich content open,
+without a window.
 `tests/app_shell.rs` covers resize capture/cancel/reset, keyboard limits, tab
 reorder/tear-out/close, shortcut key-up, delayed hover transfer, collapse and idle.
 
