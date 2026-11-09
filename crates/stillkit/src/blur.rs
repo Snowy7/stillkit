@@ -301,17 +301,17 @@ fn walk(
                     Some((*rect, *radius, *opacity)),
                 )? {
                     let output = rect.intersect(damage);
+                    // The hole clears the target itself, outside any clip: inside a clip layer
+                    // (vello) it would clear only the layer, leaving the old backdrop beneath.
+                    out.push(Op::Hole { rect: output });
                     out.push(Op::Clipped {
                         rect: output,
-                        ops: vec![
-                            Op::Hole { rect: output },
-                            Op::Image {
-                                rect: area,
-                                image,
-                                opacity: 1.0,
-                                source: None,
-                            },
-                        ]
+                        ops: vec![Op::Image {
+                            rect: area,
+                            image,
+                            opacity: 1.0,
+                            source: None,
+                        }]
                         .into(),
                     });
                 }
