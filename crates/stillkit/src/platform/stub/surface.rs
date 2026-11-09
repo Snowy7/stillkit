@@ -61,8 +61,18 @@ pub enum Event {
     Release(Pointer, Button),
     /// Double click.
     DoubleClick(Pointer, Button),
+    /// Files dragged from another app are over the surface ([`take_dropped_files`] after
+    /// [`Event::FilesDropped`]).
+    FilesHover(Pointer),
+    /// The dragged files left the surface, or the drag was cancelled.
+    FilesLeave,
+    /// Files were dropped here; [`take_dropped_files`] has their paths.
+    FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
     /// A desktop surface activated; Explorer may finish reordering its band afterwards.
     Activated,
     /// The surface lost the activation (another window was clicked or focused).
@@ -238,5 +248,45 @@ impl crate::platform::Window for Surface {
     }
     fn next_event() -> Option<(SurfaceId, Event)> {
         next_event()
+    }
+}
+
+impl Surface {
+    /// Native layers aren't available here yet (on Wayland they will be subsurfaces below the
+    /// surface's buffer): this fails, and a [`crate::el::native`] element stays a transparent hole.
+    pub fn native_layer(&self, name: &str) -> anyhow::Result<crate::NativeHandle> {
+        anyhow::bail!("native layer {name}: not available on this platform yet")
+    }
+
+    /// Nothing to place (see [`native_layer`](Self::native_layer)).
+    pub fn place_native_layer(&self, _: &str, _: Option<crate::Rect>) {}
+
+    /// Nothing to release (see [`native_layer`](Self::native_layer)).
+    pub fn release_native_layer(&self, _: &str) {}
+}
+
+thread_local! {
+    static DROPPED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The paths of the files dropped with the last [`Event::FilesDropped`] (taken once).
+pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
+    DROPPED.with_borrow_mut(std::mem::take)
+}
+
+/// Keeps dropped paths for [`take_dropped_files`].
+#[allow(dead_code)]
+pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
+    DROPPED.with_borrow_mut(|d| *d = paths);
+}
+
+impl Surface {
+    /// The title area's height where the system draws window controls: only macOS does, so
+    /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
+    pub fn set_caption(&self, _: crate::Caption) {}
+
+    /// Where the system draws the window controls: nowhere here (apps draw their own).
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        None
     }
 }

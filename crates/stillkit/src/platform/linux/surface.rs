@@ -57,8 +57,18 @@ pub enum Event {
     Release(Pointer, Button),
     /// Double click.
     DoubleClick(Pointer, Button),
+    /// Files dragged from another app are over the surface ([`take_dropped_files`] after
+    /// [`Event::FilesDropped`]).
+    FilesHover(Pointer),
+    /// The dragged files left the surface, or the drag was cancelled.
+    FilesLeave,
+    /// Files were dropped here; [`take_dropped_files`] has their paths.
+    FilesDropped(Pointer),
     /// A key went down (a virtual-key code).
     Key(u16),
+    /// A key went up (a virtual-key code): held-key input such as fly navigation pairs it
+    /// with [`Event::Key`]. Repeats send `Key` again with no `KeyUp` between.
+    KeyUp(u16),
     /// A desktop surface activated; Explorer may finish reordering its band afterwards.
     Activated,
     /// The surface lost the activation (another window was clicked or focused).
@@ -308,6 +318,7 @@ pub(super) fn wait() {
                 libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: timer.unwrap_or(-1), events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: r.state.a11y.fd(), events: libc::POLLIN, revents: 0 },
+                libc::pollfd { fd: super::wake::waker_fd().unwrap_or(-1), events: libc::POLLIN, revents: 0 },
             ];
             fds.extend(r.state.windows.values().filter_map(|n| {
                 let fd = n.a11y.fd();
@@ -335,10 +346,16 @@ pub(super) fn wait() {
                 r.queue.dispatch_pending(&mut r.state)?;
                 return Ok(());
             }
+            if fds[3].revents & libc::POLLIN != 0 {
+                super::wake::woken();
+                r.queue.dispatch_pending(&mut r.state)?;
+                return Ok(());
+            }
         }
     }) {
         log::error!("Wayland wait: {e}");
     }
+    crate::waker::rearm();
 }
 pub(super) fn screen_size() -> (i32, i32) {
     runtime(|r| Ok(r.state.screen_size)).unwrap_or((1920, 1080))
@@ -974,6 +991,9 @@ impl Surface {
     pub fn take_focus(&self) -> &'static str {
         "Wayland focus is compositor controlled"
     }
+    /// The pointer's shape over the surface. Wayland surfaces keep the compositor's default
+    /// until the cursor-shape-v1 protocol is wired up.
+    pub fn set_cursor(&self, _: super::app_window::Cursor) {}
     /// Sets chrome.
     pub fn set_chrome(&self, parts: &[(crate::Rect, super::app_window::Chrome)]) {
         let _ = runtime(|r| {
@@ -1496,6 +1516,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
             }
             wl_keyboard::Event::Key {
                 key,
+                state: wayland_client::WEnum::Value(wl_keyboard::KeyState::Released),
+                ..
+            } => {
+                if let (Some(id), Some(s)) = (a.key_focus, &mut a.xkb)
+                    && let Some(vk) = key_vk(s.symbol(key))
+                {
+                    a.events.push_back((id, Event::KeyUp(vk as u16)));
+                }
+            }
+            wl_keyboard::Event::Key {
+                key,
                 serial,
                 state: wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed),
                 ..
@@ -1507,28 +1538,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
                     if let Some(event) = super::text_field::key(id, sym, &s.text(key)) {
                         a.events.push_back((id, event));
                     }
-                    let vk = match sym {
-                        0xff51 => Some(0x25),
-                        0xff52 => Some(0x26),
-                        0xff53 => Some(0x27),
-                        0xff54 => Some(0x28),
-                        0xff1b => Some(0x1b),
-                        0xff0d => Some(0x0d),
-                        0xff09 => Some(9),
-                        0xff08 => Some(8),
-                        0xff50 => Some(0x24),
-                        0xff57 => Some(0x23),
-                        0xff55 => Some(0x21),
-                        0xff56 => Some(0x22),
-                        0xff63 => Some(0x2d),
-                        0xffff => Some(0x2e),
-                        0xff67 => Some(0x5d),
-                        // Letters, digits and space are their own virtual keys; other printable
-                        // symbols ('(' would be 0x28, Down's code) type characters only.
-                        32 | 48..=57 | 65..=90 => Some(sym),
-                        97..=122 => Some(sym - 32),
-                        _ => None,
-                    };
+                    let vk = key_vk(sym);
                     if let Some(vk) = vk {
                         a.events.push_back((id, Event::Key(vk as u16)));
                     }
@@ -1546,6 +1556,33 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for State {
         }
     }
 }
+/// The virtual key for an XKB keysym: arrows, editing and navigation keys, letters, digits
+/// and space; other symbols only type characters.
+fn key_vk(sym: u32) -> Option<u32> {
+    match sym {
+        0xff51 => Some(0x25),
+        0xff52 => Some(0x26),
+        0xff53 => Some(0x27),
+        0xff54 => Some(0x28),
+        0xff1b => Some(0x1b),
+        0xff0d => Some(0x0d),
+        0xff09 => Some(9),
+        0xff08 => Some(8),
+        0xff50 => Some(0x24),
+        0xff57 => Some(0x23),
+        0xff55 => Some(0x21),
+        0xff56 => Some(0x22),
+        0xff63 => Some(0x2d),
+        0xffff => Some(0x2e),
+        0xff67 => Some(0x5d),
+        // Letters, digits and space are their own virtual keys; other printable
+        // symbols ('(' would be 0x28, Down's code) type characters only.
+        32 | 48..=57 | 65..=90 => Some(sym),
+        97..=122 => Some(sym - 32),
+        _ => None,
+    }
+}
+
 wayland_client::delegate_noop!(State: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(State: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
@@ -1553,3 +1590,43 @@ wayland_client::delegate_noop!(State: ignore xdg_positioner::XdgPositioner);
 wayland_client::delegate_noop!(State: ignore layer_shell::ZwlrLayerShellV1);
 
 wayland_client::delegate_noop!(State: ignore wl_region::WlRegion);
+
+impl Surface {
+    /// Native layers aren't available here yet (on Wayland they will be subsurfaces below the
+    /// surface's buffer): this fails, and a [`crate::el::native`] element stays a transparent hole.
+    pub fn native_layer(&self, name: &str) -> anyhow::Result<crate::NativeHandle> {
+        anyhow::bail!("native layer {name}: not available on this platform yet")
+    }
+
+    /// Nothing to place (see [`native_layer`](Self::native_layer)).
+    pub fn place_native_layer(&self, _: &str, _: Option<crate::Rect>) {}
+
+    /// Nothing to release (see [`native_layer`](Self::native_layer)).
+    pub fn release_native_layer(&self, _: &str) {}
+}
+
+thread_local! {
+    static DROPPED: std::cell::RefCell<Vec<std::path::PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The paths of the files dropped with the last [`Event::FilesDropped`] (taken once).
+pub fn take_dropped_files() -> Vec<std::path::PathBuf> {
+    DROPPED.with_borrow_mut(std::mem::take)
+}
+
+/// Keeps dropped paths for [`take_dropped_files`].
+#[allow(dead_code)]
+pub(super) fn set_dropped_files(paths: Vec<std::path::PathBuf>) {
+    DROPPED.with_borrow_mut(|d| *d = paths);
+}
+
+impl Surface {
+    /// The title area's height where the system draws window controls: only macOS does, so
+    /// this does nothing here (apps draw their own controls with [`Chrome`](crate::Chrome)).
+    pub fn set_caption(&self, _: crate::Caption) {}
+
+    /// Where the system draws the window controls: nowhere here (apps draw their own).
+    pub fn system_controls(&self) -> Option<crate::Rect> {
+        None
+    }
+}

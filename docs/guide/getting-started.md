@@ -5,7 +5,6 @@ Install Rust with rustup. Clone this repository to run the examples. For a downs
 ```sh
 cargo new hello-stillkit
 cd hello-stillkit
-rustup override set nightly
 ```
 
 Keep edition = "2024" in Cargo.toml and add these dependencies, pinning YOUR_COMMIT to a tested revision:
@@ -23,7 +22,7 @@ accesskit_windows = { git = "https://github.com/Snowy7/stillkit", rev = "YOUR_CO
 
 Cargo applies only root-workspace patches, so downstream Windows apps need that AccessKit patch too.
 
-The repo's rust-toolchain.toml selects nightly with Cranelift, rust-src, clippy, rustfmt and rust-analyzer. It is currently floating, not date-pinned. Verified compiler: rustc 1.101.0-nightly (commit date 2026-11-02). `.cargo/config.toml` uses Cranelift for local dev crates, LLVM for dependencies and nightly parallel frontend flags. Downstream git dependencies inherit neither this config nor this toolchain override: use your own nightly and ordinary LLVM defaults. In this checkout, set CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm to opt out of Cranelift; the nightly rustflags still apply.
+The repo's rust-toolchain.toml selects nightly with Cranelift, rust-src, clippy, rustfmt and rust-analyzer. It is currently floating, not date-pinned. Verified compiler: rustc 1.101.0-nightly (commit date 2026-11-02). `.cargo/config.toml` uses Cranelift for local dev crates, LLVM for dependencies and nightly parallel frontend flags. Downstream git dependencies inherit neither this config nor this toolchain override: the crates build on stable Rust 1.96 or newer with ordinary LLVM defaults. In this checkout, set CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm to opt out of Cranelift; the nightly rustflags still apply.
 
 Linux (Debian/Ubuntu): install pkg-config, libwayland-dev, libxkbcommon-dev and libfontconfig1-dev. Interactive CPU windows need a Wayland session; snapshots do not. Put the following in src/main.rs:
 

@@ -8,6 +8,7 @@ mod a11y;
 pub mod app_window;
 pub mod caret;
 pub mod clipboard;
+pub(crate) mod dialog;
 mod draw;
 pub mod glass;
 #[cfg(feature = "gpu")]

@@ -172,6 +172,7 @@ fn op(ctx: &CGContext, text: &mut Text, images: &mut Images, op: &Op, damage: Re
             CGContext::restore_g_state(c);
         }
         Op::Fill { rect, radius, color } => fill(ctx, &rounded(*rect, *radius), *color),
+        Op::Hole { rect } => CGContext::clear_rect(c, cg(*rect)),
         Op::Stroke { rect, radius, width, color } => stroke(ctx, &rounded(*rect, *radius), *width, *color, false),
         Op::Continuous { rect, radius, smoothing, width, color } => {
             let points = crate::geom::continuous::outline(*rect, *radius, *smoothing);

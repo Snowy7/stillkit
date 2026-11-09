@@ -11,7 +11,7 @@ use std::sync::Arc;
 use taffy::Overflow;
 use taffy::prelude::{
     AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent, LengthPercentage,
-    LengthPercentageAuto, NodeId, Position, Style, TaffyTree, fr, repeat,
+    FlexWrap, LengthPercentageAuto, NodeId, Position, Style, TaffyTree, fr, repeat,
 };
 
 use super::element::{Align, Axis, Dim, El, Flow, Justify, Len, What};
@@ -356,18 +356,18 @@ fn measure_of<S>(el: &El<S>, cx: &Cx) -> Option<Measure> {
         let rows = if f.multiline { f.rows } else { 1 };
         return Some(Measure {
             text: "".into(),
-            style: cx.theme.font.style(f.role, cx.s),
-            line: cx.theme.font.line(f.role, cx.s) * rows as f32,
+            style: f.face.style(cx.theme, cx.s),
+            line: f.face.line(cx.theme, cx.s) * rows as f32,
             wrap: None,
         });
     }
-    let What::Text { text, role, wrap } = &el.what else {
+    let What::Text { text, face, wrap } = &el.what else {
         return None;
     };
     Some(Measure {
         text: text.clone(),
-        style: cx.theme.font.style(*role, cx.s),
-        line: cx.theme.font.line(*role, cx.s),
+        style: face.style(cx.theme, cx.s),
+        line: face.line(cx.theme, cx.s),
         wrap: *wrap,
     })
 }
@@ -422,6 +422,11 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
         }),
         ..Style::default()
     };
+    if z.flow_wrap {
+        style.flex_wrap = FlexWrap::Wrap;
+        // Lines pack at the start, `gap` apart, however tall the box is.
+        style.align_content = taffy::AlignContent::FLEX_START;
+    }
     if let Some(gap) = z.gap {
         style.gap = taffy::Size {
             width: len(gap),
@@ -457,7 +462,7 @@ fn style_of<S>(el: &El<S>, cx: &Cx, root: Option<(f32, f32)>) -> Style {
             }
         }
         What::Field(_) if z.min_w.is_none() => style.min_size.width = LengthPercentageAuto::length(0.0),
-        What::Text { .. } | What::Paint(_) | What::Field(_) => {}
+        What::Text { .. } | What::Paint(_) | What::Field(_) | What::Native(_) => {}
     }
     // The root is the surface.
     if let Some((w, h)) = root {

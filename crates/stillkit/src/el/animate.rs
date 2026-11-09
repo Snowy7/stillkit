@@ -28,6 +28,9 @@ pub(crate) struct Target {
     /// Left, top, right, bottom, from the parent's top-left.
     pub rel: [f32; 4],
     pub fill: Option<Rgba>,
+    /// Its border's colour, and width in device px ([`super::El::border`]).
+    pub border: Option<Rgba>,
+    pub border_width: f32,
     /// Text and icon colour.
     pub ink: Rgba,
     pub opacity: f32,
@@ -87,6 +90,9 @@ pub(crate) struct Pose {
     /// Its own and its ancestors' presence transforms.
     pub xf: Xf,
     pub fill: Option<Rgba>,
+    pub border: Option<Rgba>,
+    /// Device px.
+    pub border_width: f32,
     pub ink: Rgba,
     /// Its own, presence included; paint multiplies it down the subtree.
     pub opacity: f32,
@@ -199,6 +205,9 @@ struct Track {
     /// Premultiplied OKLab, and the exact colour it rests on.
     fill: Prop<4>,
     fill_rest: Option<Rgba>,
+    border: Prop<4>,
+    border_rest: Option<Rgba>,
+    border_width: f32,
     ink: Prop<4>,
     ink_rest: Rgba,
     opacity: Prop<1>,
@@ -219,6 +228,9 @@ impl Track {
             rect: Prop::at(target.rel),
             fill: Prop::at(oklab(target.fill)),
             fill_rest: target.fill,
+            border: Prop::at(oklab(target.border)),
+            border_rest: target.border,
+            border_width: target.border_width,
             ink: Prop::at(oklab(Some(target.ink))),
             ink_rest: target.ink,
             opacity: Prop::at([target.opacity]),
@@ -240,6 +252,9 @@ impl Track {
         self.rect.set(target.rel, spatial, t);
         self.fill.set(oklab(target.fill), fade, t);
         self.fill_rest = target.fill;
+        self.border.set(oklab(target.border), fade, t);
+        self.border_rest = target.border;
+        self.border_width = target.border_width;
         self.ink.set(oklab(Some(target.ink)), fade.map(|s| s.faster(2.0)), t);
         self.ink_rest = target.ink;
         self.opacity.set([target.opacity], fade, t);
@@ -267,6 +282,7 @@ impl Track {
         [
             self.rect.settle(t, 0.1),
             self.fill.settle(t, color),
+            self.border.settle(t, color),
             self.ink.settle(t, color),
             self.opacity.settle(t, color),
             self.radius.settle(t, 0.1),
@@ -281,6 +297,7 @@ impl Track {
     fn moving(&self) -> bool {
         self.rect.moving.is_some()
             || self.fill.moving.is_some()
+            || self.border.moving.is_some()
             || self.ink.moving.is_some()
             || self.opacity.moving.is_some()
             || self.radius.moving.is_some()
@@ -384,6 +401,8 @@ impl Animator {
                     local: offset(target.rel, origin),
                     xf,
                     fill: target.fill,
+                    border: target.border,
+                    border_width: target.border_width,
                     ink: target.ink,
                     opacity: target.opacity,
                     radius: target.radius,
@@ -418,6 +437,8 @@ impl Animator {
             local,
             xf,
             fill: color(&track.fill, track.fill_rest),
+            border: color(&track.border, track.border_rest),
+            border_width: track.border_width,
             ink: color(&track.ink, Some(track.ink_rest)).unwrap_or(track.ink_rest),
             opacity: scalar(&track.opacity) * fade,
             radius: track.radius.value(t)[0].max(0.0),

@@ -37,10 +37,13 @@ notes area).
 |---|---|
 | `el()`, `col()`, `row()`, `grid(n)` | containers: a column, a row, `n` equal columns |
 | `text(s)` | one line in a type role (`.font(TextRole)`), cut with an ellipsis; `.wrap(lines)` wraps |
-| `icon(Icon)` | a vector icon filling its square box (`token::ICON` unless sized) |
+| `icon(Icon)` | a vector icon filling its square box (`token::ICON` unless sized); `Icon::Path(&IconPath)` draws an app's own SVG path data on the 24-unit grid |
 | `image(Arc<Image>)` | a bitmap at its own size unless sized; rounded with `.radius` |
 | `arc(fraction)` | a ring or meter: a circle fitting its box, `fraction` of its span filled in `color` (`token::ACCENT`) over a track (`.track(paint)`, `token::FILL`; `.no_track()`), stroked `token::RING` wide (`.stroke(len)`) with round caps; `.arc_start(ArcStart::Top \| Right \| Bottom \| Left)` or any start, `.arc_angle(radians)` clockwise from twelve (`1.25 * PI` is half past seven), and `.arc_span(0..=1)` (`Left` with `0.5` is a semicircle meter; 7:30 with `0.75` a gauge); with motion the fraction springs |
 | `paint(\|f, rect, id\| ..)` | draws with the kit (`Frame`) into its laid-out rect; `id` is the element's hit id, so a kit control drawn here hovers, presses and focuses like any element |
+| `on_drop_files(|s, paths| ..)` + `dropping(|el| ..)` | files dropped from other apps: the innermost element under the drag with a handler takes the paths and, while files hover, its `dropping` look (no view run). Hosts route `Event::FilesHover`/`FilesLeave`/`FilesDropped` through `handle` (`Runtime::files_over`, `drop_files`) |
+| `virtual_list(key, count, row, |range| rows)` | a vertical scroll view of `count` rows, each `row` design px tall, that builds only the rows near sight (a viewport either side) between spacers that keep the scroll extent exact; scrolling past what was built runs the view again in the same frame. For lists of 100,000 rows |
+| `native(name)` | a hole (`Op::Hole`) onto the host's native GPU layer `name`: `Runtime::natives()` reports its visible box (cut by scroll views); the host places the layer with `Surface::native_layer` and `place_native_layer` and draws into it with its own device (a `CAMetalLayer` on macOS; a child `HWND` under a GPU surface on Windows; not yet on Wayland). Children and overlays draw over it. See `examples/native_layer.rs` |
 | `text_input(key)`, `text_area(key)` | a text field: one line, or wrapped lines that scroll; see [Text fields](#text-fields) |
 
 - **Layout:** `w`, `h`, `size`, `w_full`, `h_full`, `grow`, `min_*`, `max_*`, `gap`, `pad`,
@@ -50,8 +53,10 @@ notes area).
 - **Style:** `fill`, `color` (text and icon ink), `radius` (clamped to a capsule), `shadow`
   (the theme's soft shadow at `ShadowLevel::Raised`), `shadow_level(ShadowLevel::Menu)` (a
   menu's, a dialog's...), `box_shadow(SoftShadow)` (a custom one), `opacity` (the element and
-  everything in it), `focus_within(|el| el.fill(..))` (a look while focus is on or in it). A
+  everything in it), `focus_within(|el| el.fill(..))` (a look while focus is on or in it). `cascade_ink()` makes its ink (own or a state look's) flow to descendants that set none, as CSS's `color` inherits, so a button's label follows its hover colour. `hovered(|el| ..)` and `pressed(|el| ..)` are the same for the pointer over it (or an interactive element inside it) and a press on it; pressed lies over focus, focus over hover, and none runs the view. A
   popup's window grows by its shadows' reach.
+- **Text:** `font(TextRole)`, and `family(..)`, `weight(..)`, `text_size(..)` (its line scales with it) and `text_align(TextAlign::Start | Center | End)` over the role; fields take them too.
+- **Pointer:** `cursor(Cursor)`: the shape over it (innermost wins; fields show an I-beam), kept through a press that began on it. `Runtime::cursor()` reads it; `el::run` applies it. Shapes: arrow, text, hand, move, resize (both ways), grab, grabbing, crosshair, not allowed, copy.
 - **Transform:** `rotate(radians)` and `spin(period)`. See [Rotation and
   spinners](#rotation-and-spinners).
 - **Semantics:** `key`, `role`, `label`, `checked`, `disabled`, `focusable`, `description`,
@@ -65,6 +70,7 @@ notes area).
 - **Motion:** `motion(spring)` (a `Spring` or `token::MOTION_LAYOUT` / `MOTION_INTERACTIVE` /
   `MOTION_OPEN`), `animate()` (the theme's layout spring), `transition(Transition::fade() |
   scale(s) | slide(x, y))`, `instant()`. See [Animation](#animation).
+- **Raw pointer:** `on_pointer(|s, e: &PointerEvent, tx| -> bool)`: `Hover`, then `Down`, `Move`… `Up` or `Cancel` for a press of any button that began on it (it holds the pointer until released, wherever it goes), with design-px `at`, `local`, `delta` (moves within a frame merge), `origin`, `size`, `mods` and `clicks`; return whether the state changed (a hover that changed nothing runs no view). `on_wheel(|s, w: &WheelEvent, tx| -> bool)` takes the wheel over it before scroll views. Hosts pass held modifiers with `Runtime::set_modifiers` (`el::run` does).
 - **Handlers:** `on_press(|s: &mut S| ..)` (click, Enter, Space, assistive invoke),
   `on_press_with(|s, tx: &mut Tx| ..)` (`tx.instant()`, `tx.set_theme(..)`) and
   `on_drag(|s, x, y| ..)` (the pointer's place across the box, `0..=1`, while pressed; its
@@ -425,7 +431,10 @@ an animation (Add invoked through UI Automation, so no input or focus) settled: 
 0 ms CPU, 8.0 MB private (the UI Automation adapter now has a tree), and no frame thread left.
 
 Apps with their own loop host a `Runtime` directly: feed `handle(&event)`, call `frame(dt)`,
-and `present(&mut surface, origin)` when it returns `true`.
+and `present(&mut surface, origin)` when it returns `true`. Workers wake such a loop with
+`stillkit::waker()` (made on the UI thread; `Waker::wake` from any thread ends the current or
+next `host::wait`, coalesced into one native message: an `NSEvent` on macOS, a thread message on
+Windows, an eventfd beside the display on Linux). Drain your channels after every wait.
 
 ## Agent tooling
 

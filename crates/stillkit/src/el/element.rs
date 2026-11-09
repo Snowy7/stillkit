@@ -378,6 +378,70 @@ pub(crate) type OnText<S> = Box<dyn Fn(&mut S, &str)>;
 pub(crate) type OnContext<S> = Box<dyn Fn(&mut S, f32, f32)>;
 /// A timeout handler ([`El::on_timeout`]).
 pub(crate) type OnTimeout<S> = (Duration, Box<dyn Fn(&mut S)>);
+/// A pointer handler ([`El::on_pointer`]): whether it changed the state (the view runs).
+pub(crate) type OnPointer<S> = Box<dyn Fn(&mut S, &PointerEvent, &mut Tx) -> bool>;
+/// A file-drop handler ([`El::on_drop_files`]): the dropped paths.
+pub(crate) type OnFiles<S> = Box<dyn Fn(&mut S, &[std::path::PathBuf])>;
+/// A wheel handler ([`El::on_wheel`]): whether it changed the state (the view runs).
+pub(crate) type OnWheel<S> = Box<dyn Fn(&mut S, &WheelEvent, &mut Tx) -> bool>;
+
+/// What a pointer did on an element with [`El::on_pointer`]. Positions are design px.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PointerEvent {
+    /// What happened.
+    pub phase: PointerPhase,
+    /// The button pressed (for every phase of a press; `Left` while hovering).
+    pub button: crate::Button,
+    /// Where the pointer is, from the window's top-left.
+    pub at: crate::Point,
+    /// Where it is from the element's top-left (outside its box during a captured drag).
+    pub local: crate::Point,
+    /// How far it moved since the element's last event (moves within a frame add up).
+    pub delta: crate::Point,
+    /// Where the press began, from the window's top-left (`at` while hovering).
+    pub origin: crate::Point,
+    /// The element's size.
+    pub size: (f32, f32),
+    /// The modifier keys held.
+    pub mods: Modifiers,
+    /// 1 for a click, 2 for a double click (on `Down`).
+    pub clicks: u8,
+}
+
+impl PointerEvent {
+    /// How far the pointer is from where the press began.
+    pub fn travel(&self) -> crate::Point {
+        crate::Point::new(self.at.x - self.origin.x, self.at.y - self.origin.y)
+    }
+}
+
+/// The phase of a [`PointerEvent`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerPhase {
+    /// It moved over the element with no button held.
+    Hover,
+    /// A button went down on the element: the element holds the pointer until it is released.
+    Down,
+    /// It moved while held (anywhere, even outside the element or the window).
+    Move,
+    /// The button went up.
+    Up,
+    /// The press ended without a release (the window lost the pointer or deactivated).
+    Cancel,
+}
+
+/// The wheel turned over an element with [`El::on_wheel`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WheelEvent {
+    /// Where the pointer is, from the window's top-left (design px).
+    pub at: crate::Point,
+    /// Where it is from the element's top-left (design px).
+    pub local: crate::Point,
+    /// Notches, positive away from the user (up); a touchpad gives fractions.
+    pub delta: f32,
+    /// The modifier keys held.
+    pub mods: Modifiers,
+}
 
 /// A range's values ([`El::range`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -413,9 +477,75 @@ pub(crate) struct FieldSpec {
     pub max_len: Option<usize>,
     pub read_only: bool,
     pub select_all: bool,
-    pub role: TextRole,
+    pub face: Face,
     /// A text area's height in lines when it is given none.
     pub rows: usize,
+}
+
+/// Where a line of text sits across its box ([`El::text_align`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextAlign {
+    /// The left edge (the default).
+    #[default]
+    Start,
+    /// Centred.
+    Center,
+    /// The right edge: numbers in a column.
+    End,
+}
+
+/// How text is set: a theme role ([`El::font`]), with optionally its own family, weight and
+/// size ([`El::family`], [`El::weight`], [`El::text_size`]) and alignment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Face {
+    pub(crate) role: TextRole,
+    pub(crate) family: Option<Arc<str>>,
+    pub(crate) weight: Option<u16>,
+    /// Design px.
+    pub(crate) size: Option<f32>,
+    pub(crate) align: TextAlign,
+}
+
+impl Default for Face {
+    fn default() -> Self {
+        Self {
+            role: TextRole::Body,
+            family: None,
+            weight: None,
+            size: None,
+            align: TextAlign::Start,
+        }
+    }
+}
+
+impl Face {
+    /// The text style under `theme` at `s` device px per design px: the role's, with this
+    /// face's overrides.
+    pub(crate) fn style(&self, theme: &Theme, s: f32) -> crate::TextStyle {
+        let mut style = theme.font.style(self.role, s);
+        if let Some(family) = &self.family {
+            style.family = family.clone();
+        }
+        if let Some(weight) = self.weight {
+            style.weight = weight;
+        }
+        if let Some(size) = self.size {
+            let role = theme.font.font(self.role).size.max(1.0);
+            style.tracking *= size / role;
+            style.size = size * s;
+            style.optical = size * 0.75;
+        }
+        style
+    }
+
+    /// The baseline-to-baseline distance in device px: the role's, scaled with the size.
+    pub(crate) fn line(&self, theme: &Theme, s: f32) -> f32 {
+        let font = theme.font.font(self.role);
+        match self.size {
+            Some(size) => (font.line * size / font.size.max(1.0) * s).round(),
+            None => theme.font.line(self.role, s),
+        }
+    }
 }
 
 pub(crate) enum What {
@@ -425,7 +555,7 @@ pub(crate) enum What {
     Field(FieldSpec),
     Text {
         text: Arc<str>,
-        role: TextRole,
+        face: Face,
         /// Wrap into at most this many lines; `None` keeps one line (cut with an ellipsis).
         wrap: Option<usize>,
     },
@@ -433,6 +563,8 @@ pub(crate) enum What {
     Image(Arc<Image>),
     Paint(Painter),
     Arc(ArcLook),
+    /// [`native`]: a hole showing the host's native layer of this name.
+    Native(Key),
 }
 
 #[derive(Default, Clone, Copy)]
@@ -450,6 +582,8 @@ pub(crate) struct Sizing {
     pub align: Option<Align>,
     pub justify: Option<Justify>,
     pub absolute: Option<(Len, Len)>,
+    /// Children flow onto further lines when they overflow the main axis.
+    pub flow_wrap: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -460,10 +594,13 @@ pub(crate) struct Look {
     pub radius: Option<Len>,
     pub shadow: Option<Cast>,
     pub opacity: f32,
+    /// A stroke inside the box's edge ([`El::border`]).
+    pub border: Option<Border>,
 }
 
 impl Look {
-    /// This look with what `patch` sets (a [`El::focus_within`] style) laid over it.
+    /// This look with what `patch` sets (a state style: [`El::hovered`], [`El::pressed`],
+    /// [`El::focus_within`]) laid over it.
     pub fn with(self, patch: Self) -> Self {
         Self {
             fill: patch.fill.or(self.fill),
@@ -471,7 +608,54 @@ impl Look {
             radius: patch.radius.or(self.radius),
             shadow: patch.shadow.or(self.shadow),
             opacity: if patch.opacity < 1.0 { patch.opacity } else { self.opacity },
+            border: patch.border.or(self.border),
         }
+    }
+}
+
+/// A box's border: a stroke of `width` design px inside its edge, following its radius.
+#[derive(Clone, Copy)]
+pub(crate) struct Border {
+    pub width: Len,
+    pub paint: Paint,
+}
+
+/// The looks an element takes in interaction states, laid over its own in this order
+/// (pressed wins): pointer over it or inside it, focus on it or inside it, pressed on it.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct States {
+    pub hover: Option<Look>,
+    pub within: Option<Look>,
+    pub press: Option<Look>,
+    /// While dragged files are over it ([`El::dropping`]).
+    pub drop: Option<Look>,
+}
+
+impl States {
+    pub fn any(&self) -> bool {
+        self.hover.is_some() || self.within.is_some() || self.press.is_some() || self.drop.is_some()
+    }
+}
+
+/// Which elements are in an interaction state now (identities), for [`States`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Active {
+    pub hover: Vec<u64>,
+    pub within: Vec<u64>,
+    pub press: Vec<u64>,
+    pub drop: Vec<u64>,
+}
+
+impl Active {
+    /// `look` with the state styles of element `id` laid over it.
+    pub fn look(&self, id: u64, look: Look, states: &States) -> Look {
+        let mut out = look;
+        for (on, patch) in [(&self.hover, states.hover), (&self.within, states.within), (&self.press, states.press), (&self.drop, states.drop)] {
+            if let Some(patch) = patch.filter(|_| on.contains(&id)) {
+                out = out.with(patch);
+            }
+        }
+        out
     }
 }
 
@@ -542,11 +726,17 @@ pub struct El<S> {
     pub(crate) anim: Anim,
     pub(crate) on_press: Option<Press<S>>,
     pub(crate) on_drag: Option<Drag<S>>,
+    pub(crate) on_pointer: Option<OnPointer<S>>,
+    pub(crate) on_wheel: Option<OnWheel<S>>,
+    /// Files dropped on it ([`El::on_drop_files`]).
+    pub(crate) on_files: Option<OnFiles<S>>,
     pub(crate) on_key: Option<OnKey<S>>,
     pub(crate) on_step: Option<OnStep<S>>,
     pub(crate) group: Option<Group>,
     /// A scroll view along this axis ([`El::scroll`]); boxes only.
     pub(crate) scroll: Option<Axis>,
+    /// A scroll view that stays at its end while content grows ([`El::follow_end`]).
+    pub(crate) follow_end: bool,
     pub(crate) on_context: Option<OnContext<S>>,
     pub(crate) on_timeout: Option<OnTimeout<S>>,
     pub(crate) on_char: Option<OnChar<S>>,
@@ -559,8 +749,16 @@ pub struct El<S> {
     pub(crate) popup: Option<HasPopup>,
     /// Its tooltip's text ([`El::tooltip`]).
     pub(crate) tip: Option<Arc<str>>,
-    /// The look it takes while focus is on it or inside it ([`El::focus_within`]).
-    pub(crate) within: Option<Look>,
+    /// The looks it takes while hovered, focused within or pressed ([`El::hovered`]...).
+    pub(crate) states: States,
+    /// The pointer's shape over it ([`El::cursor`]).
+    pub(crate) cursor: Option<crate::Cursor>,
+    /// Its ink flows to descendants that set none ([`El::cascade_ink`]).
+    pub(crate) cascade: bool,
+    /// What a [`virtual_list`](super::virtual_list) built.
+    pub(crate) virt: Option<super::virtualize::Virt>,
+    /// Draws no focus ring of its own ([`El::focus_ring`]).
+    pub(crate) quiet: bool,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -575,15 +773,20 @@ fn new<S>(what: What) -> El<S> {
             radius: None,
             shadow: None,
             opacity: 1.0,
+            border: None,
         },
         sem: Sem::default(),
         anim: Anim::default(),
         on_press: None,
         on_drag: None,
+        on_pointer: None,
+        on_wheel: None,
+        on_files: None,
         on_key: None,
         on_step: None,
         group: None,
         scroll: None,
+        follow_end: false,
         on_context: None,
         on_timeout: None,
         on_char: None,
@@ -592,7 +795,11 @@ fn new<S>(what: What) -> El<S> {
         overlays: Vec::new(),
         popup: None,
         tip: None,
-        within: None,
+        states: States::default(),
+        cursor: None,
+        virt: None,
+        cascade: false,
+        quiet: false,
         children: Vec::new(),
     }
 }
@@ -622,7 +829,7 @@ pub fn grid<S>(columns: u16) -> El<S> {
 pub fn text<S>(text: impl Into<Arc<str>>) -> El<S> {
     new(What::Text {
         text: text.into(),
-        role: TextRole::Body,
+        face: Face::default(),
         wrap: None,
     })
 }
@@ -636,7 +843,7 @@ fn field<S>(key: Key, multiline: bool) -> El<S> {
         max_len: None,
         read_only: false,
         select_all: false,
-        role: TextRole::Body,
+        face: Face::default(),
         rows: 3,
     }));
     el.key = Some(key);
@@ -665,6 +872,17 @@ pub fn text_area<S>(key: impl Into<Key>) -> El<S> {
 /// A vector icon filling a square box, [`super::token::ICON`] across unless sized.
 pub fn icon<S>(icon: Icon) -> El<S> {
     new(What::Icon(icon))
+}
+
+/// A window onto a native layer the host draws with its own GPU device (a 3D viewport, a
+/// video): the element clears its box to transparent ([`crate::Op::Hole`]) and
+/// [`Runtime::natives`](super::Runtime::natives) reports where it shows, so the host places
+/// the surface's layer `name` there ([`crate::Surface::native_layer`]). It has no size of
+/// its own (size it, or `grow`). Anything drawn after it, such as overlays and children,
+/// draws over the layer; give it `on_pointer`, `on_wheel`, `focusable` and `on_key` for
+/// its input.
+pub fn native<S>(name: impl Into<Key>) -> El<S> {
+    new(What::Native(name.into()))
 }
 
 /// A bitmap, at its own size in device pixels unless sized.
@@ -781,6 +999,14 @@ impl<S> El<S> {
         self
     }
 
+    /// Lets a box's children flow onto further lines (rows below, or columns beside) when
+    /// they overflow its main axis, `gap` apart both ways: a tile grid whose column count
+    /// follows the width.
+    pub fn flow_wrap(mut self) -> Self {
+        self.sizing.flow_wrap = true;
+        self
+    }
+
     /// Padding on all four sides.
     pub fn pad(mut self, pad: impl Into<Len>) -> Self {
         self.sizing.pad = [Some(pad.into()); 4];
@@ -866,8 +1092,8 @@ impl<S> El<S> {
     /// A text element's (or field's) role in the theme's type ramp.
     pub fn font(mut self, role: TextRole) -> Self {
         match &mut self.what {
-            What::Text { role: r, .. } => *r = role,
-            What::Field(f) => f.role = role,
+            What::Text { face, .. } => face.role = role,
+            What::Field(f) => f.face.role = role,
             _ => {}
         }
         self
@@ -1071,6 +1297,14 @@ impl<S> El<S> {
         self
     }
 
+    /// Keeps a scroll view at its end while content grows, as long as it rests there: a log
+    /// or a chat shows what arrived, and scrolling back holds the place until the person
+    /// scrolls to the end again. Works with [`super::virtual_list`].
+    pub fn follow_end(mut self) -> Self {
+        self.follow_end = true;
+        self
+    }
+
     // ---- Arcs -----------------------------------------------------------------------------
 
     /// Where an [`arc`] starts; it runs clockwise from there.
@@ -1138,14 +1372,126 @@ impl<S> El<S> {
         self.motion(super::token::MOTION_LAYOUT)
     }
 
+    /// Whether it draws its own keyboard focus ring (on by default). Turn it off where a
+    /// container shows the focus instead, through [`focus_within`](Self::focus_within): a
+    /// search box's border lighting up around its field, so the field isn't ringed twice.
+    /// Focus, Tab order and assistive technology are unchanged.
+    pub fn focus_ring(mut self, on: bool) -> Self {
+        self.quiet = !on;
+        self
+    }
+
     /// A look it takes while keyboard focus is on it or anywhere inside it (CSS's
     /// `:focus-within`): `.focus_within(|el| el.fill(token::FILL).radius(8.0))`. The fill,
     /// colour, radius, shadow and opacity (below 1) set in `style` replace its own; the rest
     /// stays. Focus moving in and out repaints without running the view, and the change
     /// springs along the element's [`motion`](Self::motion) like any other.
     pub fn focus_within(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
-        self.within = Some(style(el()).look);
+        self.states.within = Some(style(el()).look);
         self
+    }
+
+    /// Its ink (its `color`, or a state look's) flows to every descendant that sets none, as
+    /// CSS's `color` inherits: a button's label and icon follow the button's hover colour,
+    /// springing with it. Inside, an element that sets its own ink passes that one on.
+    /// Without it, text and icons take the theme's label ink.
+    pub fn cascade_ink(mut self) -> Self {
+        self.cascade = true;
+        self
+    }
+
+    /// A look it takes while the pointer is over it or anything inside it (CSS's `:hover`):
+    /// `.hovered(|el| el.fill(token::FILL).color(token::LABEL))`. Like
+    /// [`focus_within`](Self::focus_within), its fill, colour, border, radius, shadow and
+    /// opacity replace its own while hovered, springing along its motion, without running
+    /// the view. Pressed and focus looks lie over it.
+    pub fn hovered(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
+        self.states.hover = Some(style(el()).look);
+        self
+    }
+
+    /// Runs on `&mut S` with the paths of files dropped on it from another app (Finder,
+    /// Explorer). The innermost element with one under the drop takes it; it needs no other
+    /// handler. Pair it with [`dropping`](Self::dropping) to show where files will land.
+    pub fn on_drop_files(mut self, handler: impl Fn(&mut S, &[std::path::PathBuf]) + 'static) -> Self {
+        self.on_files = Some(Box::new(handler));
+        self
+    }
+
+    /// A look it takes while dragged files are over it and it would take them
+    /// ([`on_drop_files`](Self::on_drop_files)): a highlighted border, a tinted fill.
+    pub fn dropping(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
+        self.states.drop = Some(style(el()).look);
+        self
+    }
+
+    /// A look it takes while it is pressed (CSS's `:active`), over its hover and focus looks.
+    pub fn pressed(mut self, style: impl FnOnce(El<S>) -> El<S>) -> Self {
+        self.states.press = Some(style(el()).look);
+        self
+    }
+
+    /// A border `width` design px wide, drawn inside its edge and following its radius. Its
+    /// colour springs with the element's motion like its fill; state looks can change it
+    /// (`.focus_within(|el| el.border(1.0, token::ACCENT))`).
+    pub fn border(mut self, width: impl Into<Len>, paint: impl Into<Paint>) -> Self {
+        self.look.border = Some(Border {
+            width: width.into(),
+            paint: paint.into(),
+        });
+        self
+    }
+
+    /// The pointer's shape while it is over the element (the innermost element that sets one
+    /// wins), and while a press that began on it lasts. Text fields show [`Cursor::Text`]
+    /// unless they set another. Hosts read it with [`Runtime::cursor`](super::Runtime::cursor).
+    ///
+    /// [`Cursor::Text`]: crate::Cursor::Text
+    pub fn cursor(mut self, cursor: crate::Cursor) -> Self {
+        self.cursor = Some(cursor);
+        self
+    }
+
+    /// Text in `family` instead of the theme's (a monospaced face for values and code).
+    /// Families the system lacks fall back to the theme's.
+    pub fn family(mut self, family: impl Into<Arc<str>>) -> Self {
+        if let Some(face) = self.face_mut() {
+            face.family = Some(family.into());
+        }
+        self
+    }
+
+    /// Text at this weight (100..=900) instead of its role's.
+    pub fn weight(mut self, weight: u16) -> Self {
+        if let Some(face) = self.face_mut() {
+            face.weight = Some(weight.clamp(1, 1000));
+        }
+        self
+    }
+
+    /// Text at this size in design px instead of its role's; its line height and tracking
+    /// scale with it.
+    pub fn text_size(mut self, size: f32) -> Self {
+        if let Some(face) = self.face_mut() {
+            face.size = Some(size.max(1.0));
+        }
+        self
+    }
+
+    /// Where a line of text sits across its box, when the box is wider than the text.
+    pub fn text_align(mut self, align: TextAlign) -> Self {
+        if let Some(face) = self.face_mut() {
+            face.align = align;
+        }
+        self
+    }
+
+    fn face_mut(&mut self) -> Option<&mut Face> {
+        match &mut self.what {
+            What::Text { face, .. } => Some(face),
+            What::Field(f) => Some(&mut f.face),
+            _ => None,
+        }
     }
 
     /// Turns the element and everything in it `radians` clockwise about its centre, at draw
@@ -1206,6 +1552,28 @@ impl<S> El<S> {
     /// follows the pointer), with no motion.
     pub fn on_drag(mut self, handler: impl Fn(&mut S, f32, f32) + 'static) -> Self {
         self.on_drag = Some(Box::new(handler));
+        self
+    }
+
+    /// Runs on `&mut S` for the pointer's raw story on the element: `Hover` while it moves
+    /// over with no button held, then `Down`, `Move`… and `Up` (or `Cancel`) for a press of
+    /// any button that began on it, which holds the pointer until released, wherever it goes.
+    /// Each event has its place, its delta since the last (moves within a frame add up, so a
+    /// fast drag runs the handler once a frame), the press's origin, the modifiers and the
+    /// click count: number scrubbing, splitters, tab and row drags, canvases.
+    ///
+    /// Return whether the state changed: `false` (a hover that changed nothing) runs no view.
+    /// Changes land at once, with no motion, as a drag's do. Presses still reach `on_press`.
+    pub fn on_pointer(mut self, handler: impl Fn(&mut S, &PointerEvent, &mut Tx) -> bool + 'static) -> Self {
+        self.on_pointer = Some(Box::new(handler));
+        self
+    }
+
+    /// Runs on `&mut S` when the wheel turns over the element (or anything inside it without
+    /// its own): the element takes the wheel, so scroll views around it stay put. Return
+    /// whether the state changed: zooming a canvas, nudging a number.
+    pub fn on_wheel(mut self, handler: impl Fn(&mut S, &WheelEvent, &mut Tx) -> bool + 'static) -> Self {
+        self.on_wheel = Some(Box::new(handler));
         self
     }
 
@@ -1287,6 +1655,8 @@ impl<S> El<S> {
     pub(crate) fn interactive(&self) -> bool {
         self.on_press.is_some()
             || self.on_drag.is_some()
+            || self.on_pointer.is_some()
+            || self.on_wheel.is_some()
             || self.on_step.is_some()
             || self.sem.focusable
             || self.scroll.is_some() && matches!(self.what, What::Box(_))

@@ -61,9 +61,24 @@ use crate::{
 type View<S> = Box<dyn Fn(&S) -> El<S>>;
 
 /// Input waiting for its handler, run at the start of the next frame.
+/// A press an `on_pointer` element holds until release (device px).
+#[derive(Debug, Clone, Copy)]
+struct Capture {
+    hit: HitId,
+    button: Button,
+    origin: Point,
+    last: Point,
+}
+
 enum Action<S> {
     Press(HitId),
     Drag(HitId, f32, f32),
+    /// The pointer's story on an element with `on_pointer`.
+    Pointer(HitId, super::element::PointerEvent),
+    /// The wheel over an element with `on_wheel`.
+    Wheel(HitId, super::element::WheelEvent),
+    /// Files dropped on an element with `on_drop_files`.
+    Files(HitId, Vec<std::path::PathBuf>),
     /// A range stepped by this much.
     Step(HitId, f64),
     /// A context menu asked for at this point (design px).
@@ -210,6 +225,8 @@ pub struct Runtime<S> {
     scrolling: bool,
     /// Keys to scroll into view once the layout is current.
     reveal: Vec<Key>,
+    /// A [`El::follow_end`] view jumped to its end in the last layout.
+    followed: bool,
     /// Range steps queued since the view last ran, by hit, so quick keys add up.
     stepped: HashMap<HitId, f64>,
     /// Focus stops of the last paint.
@@ -263,6 +280,13 @@ pub struct Runtime<S> {
     clipboard: Box<dyn super::Clipboard>,
     /// The modifier keys held with the key being handled.
     mods: Modifiers,
+    /// The modifiers held, as the host last said ([`Runtime::set_modifiers`]).
+    held: Modifiers,
+    /// The press an `on_pointer` element holds, and where the pointer last hovered one.
+    capture: Option<Capture>,
+    hovered_at: Option<(HitId, Point)>,
+    /// The element dragged files are over that would take them (its place in `laid`).
+    drop_target: Option<usize>,
     /// Whether the window has the keyboard (the caret blinks and shows only then).
     active: bool,
     /// Whether the last paint drew the caret.
@@ -276,10 +300,13 @@ pub struct Runtime<S> {
     /// Where `Tx::focus`/`blur` (or `Runtime::focus`/`blur`) move focus once the view has run,
     /// and whether a key asked.
     focus_to: Option<(Option<Key>, bool)>,
-    /// Elements with a focus-within look, by identity.
-    withins: Vec<u64>,
-    /// Those of them holding focus now (innermost first).
-    within_on: Vec<u64>,
+    /// Elements with a state look ([`El::hovered`], [`El::pressed`], [`El::focus_within`]),
+    /// by identity.
+    stateful: Vec<u64>,
+    /// Those of them in each state now (innermost first).
+    states_on: super::element::Active,
+    /// Elements that set a pointer shape (and text fields, an I-beam), by identity.
+    cursors: Vec<(u64, crate::Cursor)>,
     // ---- Spinning (`El::spin`) -------------------------------------------------------
     /// Each spinner's turn when it last showed, by identity.
     spins: HashMap<u64, f32>,
@@ -322,6 +349,7 @@ impl<S: 'static> Runtime<S> {
             scrolls: HashMap::new(),
             scrolling: false,
             reveal: Vec::new(),
+            followed: false,
             stepped: HashMap::new(),
             nav: Vec::new(),
             semantics: Vec::new(),
@@ -355,13 +383,18 @@ impl<S: 'static> Runtime<S> {
             selecting: None,
             clipboard: Box::new(super::clipboard::Memory::default()),
             mods: Modifiers::NONE,
+            held: Modifiers::NONE,
+            capture: None,
+            hovered_at: None,
+            drop_target: None,
             active: true,
             caret_shown: false,
             feedback: Feedback::default(),
             focus_to: None,
             pointing: None,
-            withins: Vec::new(),
-            within_on: Vec::new(),
+            stateful: Vec::new(),
+            states_on: Default::default(),
+            cursors: Vec::new(),
             spins: HashMap::new(),
             spinning: false,
             visible: true,
@@ -392,7 +425,8 @@ impl<S> Runtime<S> {
                 self.views += 1;
                 self.stale_view = false;
                 self.stepped.clear();
-                let old = std::mem::replace(&mut self.root, (self.view)(&self.state));
+                let root = self.run_view();
+                let old = std::mem::replace(&mut self.root, root);
                 self.hoist();
                 old
             });
@@ -401,9 +435,7 @@ impl<S> Runtime<S> {
         if let Some((to, keyed)) = self.focus_to.take() {
             self.move_focus(to, keyed);
         }
-        if !self.withins.is_empty() || !self.within_on.is_empty() {
-            self.follow_focus_within();
-        }
+        self.follow_states();
         if !self.reveal.is_empty() {
             for key in std::mem::take(&mut self.reveal) {
                 if let Some(index) = self.index_of_key(&key) {
@@ -416,7 +448,16 @@ impl<S> Runtime<S> {
         if !left.is_empty() {
             self.ghosts.retain(|g| !left.contains(&g.id));
         }
-        let scrolled = self.tick_scrolls();
+        let scrolled = self.tick_scrolls() || std::mem::take(&mut self.followed);
+        // A virtual list scrolled past what it built: build again, in this frame.
+        if scrolled && self.virtual_stale() {
+            let before = keyed(&self.root, &self.laid, &self.theme);
+            self.views += 1;
+            let root = self.run_view();
+            let old = std::mem::replace(&mut self.root, root);
+            self.hoist();
+            self.relayout(before, Some(old));
+        }
         // Overlays follow an anchor that scrolled.
         if scrolled && self.layers.iter().any(|l| l.anchor != super::overlay::Anchor::Window) {
             let before = keyed(&self.root, &self.laid, &self.theme);
@@ -439,29 +480,57 @@ impl<S> Runtime<S> {
             let hover = self.ix.hover;
             self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), &Event::Move(p));
             if self.ix.hover != hover {
+                self.follow_states();
                 self.paint();
             }
         }
         true
     }
 
-    /// Restyles the elements with a [`El::focus_within`] look when focus moved in or out of
-    /// them: their targets change (springing along their motion); the view does not run.
-    fn follow_focus_within(&mut self) {
-        let mut on = Vec::new();
-        let mut at = self.ix.focus.and_then(|hit| self.index_of_hit(hit));
+    /// The pointer's shape now: that of the innermost element under the pointer (or holding
+    /// a press that began on it) that sets one ([`El::cursor`]; text fields show an I-beam),
+    /// else the arrow. Hosts apply it after input ([`run`](super::run) does).
+    pub fn cursor(&self) -> crate::Cursor {
+        let mut at = self.ix.pressed.or(self.ix.hover).and_then(|hit| self.index_of_hit(hit));
         while let Some(i) = at.filter(|&i| i < self.laid.len()) {
             let id = self.laid[i].id;
-            if self.withins.contains(&id) {
-                on.push(id);
+            if let Some(&(_, cursor)) = self.cursors.iter().find(|(c, _)| *c == id) {
+                return cursor;
             }
             at = self.laid[i].parent;
         }
-        if on == self.within_on {
+        crate::Cursor::Arrow
+    }
+
+    /// Restyles the elements with a state look ([`El::hovered`], [`El::pressed`],
+    /// [`El::focus_within`]) when the pointer or focus moved in or out of them, or a press
+    /// began or ended: their targets change (springing along their motion); the view does
+    /// not run.
+    fn follow_states(&mut self) {
+        if self.stateful.is_empty() && self.states_on == Default::default() {
             return;
         }
-        self.within_on = on;
-        let targets = targets(&self.root, &self.laid, &self.theme, self.scale, &self.within_on);
+        let chain = |hit: Option<crate::HitId>| {
+            let mut on = Vec::new();
+            let mut at = hit.and_then(|hit| self.index_of_hit(hit));
+            while let Some(i) = at.filter(|&i| i < self.laid.len()) {
+                let id = self.laid[i].id;
+                if self.stateful.contains(&id) {
+                    on.push(id);
+                }
+                at = self.laid[i].parent;
+            }
+            on
+        };
+        // Pressed shows only while the pointer is still over what was pressed, as washes do.
+        let pressed = self.ix.pressed.filter(|&p| self.ix.hover == Some(p));
+        let drop = self.drop_target.and_then(|i| self.laid.get(i)).map(|l| vec![l.id]).unwrap_or_default();
+        let active = super::element::Active { hover: chain(self.ix.hover), within: chain(self.ix.focus), press: chain(pressed), drop };
+        if active == self.states_on {
+            return;
+        }
+        self.states_on = active;
+        let targets = targets(&self.root, &self.laid, &self.theme, self.scale, &self.states_on);
         let all: HashSet<u64> = self.laid.iter().map(|l| l.id).collect();
         self.anim.retarget(&self.laid, &targets, &all, Mode::Animate);
         self.targets = targets;
@@ -509,6 +578,9 @@ impl<S> Runtime<S> {
                 | Action::Input(hit, _)
                 | Action::Submit(hit, _)
                 | Action::Drag(hit, ..)
+                | Action::Pointer(hit, _)
+                | Action::Wheel(hit, _)
+                | Action::Files(hit, _)
                 | Action::Step(hit, _)
                 | Action::Context(hit, ..)
                 | Action::Timeout(hit) => *hit,
@@ -528,6 +600,23 @@ impl<S> Runtime<S> {
                         tx.instant();
                     }
                     None => continue,
+                },
+                Action::Pointer(_, event) => match &el.on_pointer {
+                    Some(handler) => {
+                        if !handler(state, &event, &mut tx) {
+                            continue;
+                        }
+                        tx.instant();
+                    }
+                    None => continue,
+                },
+                Action::Files(_, paths) => match &el.on_files {
+                    Some(handler) => handler(state, &paths),
+                    None => continue,
+                },
+                Action::Wheel(_, event) => match &el.on_wheel {
+                    Some(handler) if handler(state, &event, &mut tx) => {}
+                    _ => continue,
                 },
                 Action::Step(_, delta) => match &el.on_step {
                     Some(handler) => handler(state, delta),
@@ -621,13 +710,18 @@ impl<S> Runtime<S> {
         if !self.layers.is_empty() {
             laid = self.place_layers(laid);
         }
-        self.withins.clear();
+        self.stateful.clear();
+        self.cursors.clear();
         each(&self.root, &laid, &mut |el, i, _| {
-            if el.within.is_some() {
-                self.withins.push(laid[i].id);
+            if el.states.any() {
+                self.stateful.push(laid[i].id);
+            }
+            let field = el.field().map(|_| crate::Cursor::Text);
+            if let Some(cursor) = el.cursor.or(field) {
+                self.cursors.push((laid[i].id, cursor));
             }
         });
-        let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.within_on);
+        let targets = targets(&self.root, &laid, &self.theme, self.scale, &self.states_on);
         let ids: HashSet<u64> = laid.iter().map(|l| l.id).collect();
         if let Some(old) = old
             && mode == Mode::Animate
@@ -669,6 +763,7 @@ impl<S> Runtime<S> {
     fn sync_scrolls(&mut self) {
         let t = self.anim.t;
         let mut seen = HashSet::new();
+        let mut followed = false;
         let areas: HashMap<u64, (f32, f32)> =
             self.fields.keys().filter_map(|&id| Some((id, self.field_extent(id)?))).collect();
         each(&self.root, &self.laid, &mut |el, i, _| {
@@ -680,11 +775,17 @@ impl<S> Runtime<S> {
                 if view.axis != axis {
                     *view = ScrollView::new(axis);
                 }
+                let follow = el.follow_end && view.at_end();
                 view.laid(l.rect, extent, t);
+                if follow && !view.at_end() {
+                    view.to(view.max, None, t);
+                    followed = true;
+                }
                 seen.insert(l.id);
             }
         });
         self.scrolls.retain(|id, _| seen.contains(id));
+        self.followed |= followed;
     }
 
     /// Keeps the elements of `old` that left with a transition (their parent stays) as ghosts.
@@ -925,10 +1026,16 @@ impl<S> Runtime<S> {
             Event::TextSubmit => return self.rich_edit_submit(),
             Event::Key(0x09) => return self.tab(self.mods.shift),
             Event::Key(vk) if self.key_down(KeyCode(vk)) => return,
+            Event::FilesHover(p) => return self.files_over(Some(p.at)),
+            Event::FilesLeave => return self.files_over(None),
+            Event::FilesDropped(p) => return self.drop_files(p.at.x, p.at.y, crate::take_dropped_files()),
             Event::Wheel(p, delta) => {
                 self.pointer = Some(p);
                 // Scrolling closes a tooltip; its trigger shows none until the pointer leaves.
                 self.hide_tip();
+                if self.wheel_handler(p.at, delta) {
+                    return;
+                }
                 return self.wheel(p.at, delta);
             }
             Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) => self.pointer = Some(p),
@@ -945,6 +1052,7 @@ impl<S> Runtime<S> {
         if let Response::Activate(hit) = self.ix.handle(self.pointing.as_ref().unwrap_or(&self.list), event) {
             self.queue.push(Action::Press(hit));
         }
+        self.pointer_input(event);
         if !self.fields.is_empty()
             && matches!(event, Event::Press(..) | Event::Move(_) | Event::Release(..) | Event::CaptureLost | Event::Cancelled | Event::Leave)
         {
@@ -969,6 +1077,7 @@ impl<S> Runtime<S> {
         }
         if self.ix != before {
             self.stale_paint = true;
+            self.follow_states();
             // Assistive technology moved the focus: show it.
             if self.ix.focus_visible
                 && self.ix.focus != before.focus
@@ -977,6 +1086,218 @@ impl<S> Runtime<S> {
                 self.reveal_index(index);
             }
         }
+    }
+
+    /// Runs the view with each virtual list's scroll place in reach ([`super::virtual_list`]).
+    fn run_view(&mut self) -> El<S> {
+        let places = self.virtual_places();
+        super::virtualize::with_viewports(places, || (self.view)(&self.state))
+    }
+
+    /// Each keyed virtual list's offset and viewport now, design px.
+    fn virtual_places(&self) -> HashMap<Key, (f32, f32)> {
+        let mut places = HashMap::new();
+        let (s, t) = (self.scale, self.anim.t);
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if el.virt.is_some()
+                && let (Some(key), Some(view)) = (&el.key, self.laid.get(i).and_then(|l| self.scrolls.get(&l.id)))
+            {
+                places.insert(key.clone(), (view.offset(t) / s, view.viewport / s));
+            }
+        });
+        places
+    }
+
+    /// Whether a virtual list's rows in sight left what it built.
+    fn virtual_stale(&self) -> bool {
+        let (s, t) = (self.scale, self.anim.t);
+        let mut stale = false;
+        each(&self.root, &self.laid, &mut |el, i, _| {
+            if let Some(v) = &el.virt
+                && let Some(view) = self.laid.get(i).and_then(|l| self.scrolls.get(&l.id))
+            {
+                stale |= v.stale(view.offset(t) / s, view.viewport / s);
+            }
+        });
+        stale
+    }
+
+    /// Where each [`native`](super::native) element shows now: its name and its visible box in
+    /// device px (cut to the scroll views around it), in paint order. Hosts place the surface's
+    /// layers there after each frame ([`crate::Surface::place_native_layer`]); a name missing
+    /// from the list is hidden (its element went away or scrolled out of sight).
+    pub fn natives(&self) -> Vec<(Key, Rect)> {
+        let flat = flatten(&self.root);
+        let mut out = Vec::new();
+        for (i, el) in flat.iter().enumerate() {
+            let What::Native(name) = &el.what else { continue };
+            let (Some(laid), Some(pose)) = (self.laid.get(i), self.poses.get(i)) else { continue };
+            let mut rect = pose.rect;
+            let mut at = laid.parent;
+            while let Some(p) = at {
+                if flat.get(p).is_some_and(|el| el.scrolls().is_some())
+                    && let Some(view) = self.poses.get(p)
+                {
+                    rect = rect.intersect(view.rect);
+                }
+                at = self.laid.get(p).and_then(|l| l.parent);
+            }
+            if !rect.is_empty() && pose.opacity > 0.0 {
+                out.push((name.clone(), rect));
+            }
+        }
+        out
+    }
+
+    /// Files dragged from another app are over `at` (device px; `None`: they left): the
+    /// innermost element there with [`on_drop_files`](super::El::on_drop_files) takes its
+    /// [`dropping`](super::El::dropping) look.
+    pub fn files_over(&mut self, at: Option<Point>) {
+        let target = at.and_then(|p| self.drop_target_at(p));
+        if target != self.drop_target {
+            self.drop_target = target;
+            self.follow_states();
+            self.stale_paint = true;
+        }
+    }
+
+    /// Files dropped at (`x`, `y`) device px: the innermost element there with
+    /// [`on_drop_files`](super::El::on_drop_files) gets their paths. Hosts call it with
+    /// [`take_dropped_files`](crate::take_dropped_files) on `Event::FilesDropped`
+    /// ([`handle`](Self::handle) does).
+    pub fn drop_files(&mut self, x: f32, y: f32, paths: Vec<std::path::PathBuf>) {
+        let target = self.drop_target_at(Point::new(x, y));
+        self.files_over(None);
+        if let Some(i) = target.filter(|_| !paths.is_empty()) {
+            self.queue.push(Action::Files(self.laid[i].hit, paths));
+        }
+    }
+
+    /// The innermost element under `p` that takes dropped files.
+    fn drop_target_at(&self, p: Point) -> Option<usize> {
+        let flat = flatten(&self.root);
+        (0..self.laid.len().min(flat.len()))
+            .rev()
+            .find(|&i| flat[i].on_files.is_some() && self.poses.get(i).is_some_and(|pose| pose.rect.contains(p)))
+    }
+
+    /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
+    /// pass them before each pointer event ([`run`](super::run) does).
+    pub fn set_modifiers(&mut self, mods: Modifiers) {
+        self.held = mods;
+    }
+
+    /// Whether the element hit `hit` takes raw pointer events.
+    fn takes_pointer(&self, hit: HitId) -> bool {
+        element(&self.root, &self.laid, hit).is_some_and(|el| el.on_pointer.is_some())
+    }
+
+    /// Feeds `on_pointer` elements: a press that begins on one holds the pointer until it is
+    /// released; moves over one with nothing held hover it.
+    fn pointer_input(&mut self, event: &Event) {
+        use super::element::PointerPhase as Phase;
+        match *event {
+            Event::Press(p, button) | Event::DoubleClick(p, button) if self.capture.is_none() => {
+                let clicks = if matches!(event, Event::DoubleClick(..)) { 2 } else { 1 };
+                let Some(hit) = self.ix.hover.filter(|&h| self.takes_pointer(h)) else { return };
+                self.capture = Some(Capture { hit, button, origin: p.at, last: p.at });
+                self.push_pointer(hit, Phase::Down, button, p.at, p.at, p.at, clicks);
+            }
+            Event::Move(p) => match self.capture.as_mut() {
+                Some(c) => {
+                    let (hit, button, origin, last) = (c.hit, c.button, c.origin, c.last);
+                    c.last = p.at;
+                    self.push_pointer(hit, Phase::Move, button, p.at, last, origin, 1);
+                }
+                None => {
+                    let hover = self.ix.hover.filter(|&h| self.takes_pointer(h));
+                    let last = self.hovered_at.filter(|(h, _)| Some(*h) == hover).map_or(p.at, |(_, at)| at);
+                    self.hovered_at = hover.map(|h| (h, p.at));
+                    if let Some(hit) = hover {
+                        self.push_pointer(hit, Phase::Hover, Button::Left, p.at, last, p.at, 1);
+                    }
+                }
+            },
+            Event::Release(p, button) if self.capture.is_some_and(|c| c.button == button) => {
+                if let Some(c) = self.capture.take() {
+                    self.push_pointer(c.hit, Phase::Up, button, p.at, c.last, c.origin, 1);
+                }
+            }
+            Event::CaptureLost | Event::Cancelled | Event::Deactivated => {
+                if let Some(c) = self.capture.take() {
+                    self.push_pointer(c.hit, Phase::Cancel, c.button, c.last, c.last, c.origin, 1);
+                }
+            }
+            Event::Leave => self.hovered_at = None,
+            _ => {}
+        }
+    }
+
+    /// Queues a pointer event for `hit` (device px in; design px out). A move right after a
+    /// queued move of the same element merges into it, its deltas added.
+    #[allow(clippy::too_many_arguments)]
+    fn push_pointer(
+        &mut self,
+        hit: HitId,
+        phase: super::element::PointerPhase,
+        button: Button,
+        at: Point,
+        last: Point,
+        origin: Point,
+        clicks: u8,
+    ) {
+        use super::element::PointerPhase as Phase;
+        let s = self.scale;
+        let rect = self
+            .laid
+            .iter()
+            .position(|l| l.hit == hit)
+            .map(|i| self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect))
+            .unwrap_or_default();
+        let design = |p: Point| Point::new(p.x / s, p.y / s);
+        let mut event = super::element::PointerEvent {
+            phase,
+            button,
+            at: design(at),
+            local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+            delta: Point::new((at.x - last.x) / s, (at.y - last.y) / s),
+            origin: design(origin),
+            size: (rect.width() / s, rect.height() / s),
+            mods: self.held,
+            clicks,
+        };
+        if matches!(phase, Phase::Move | Phase::Hover)
+            && let Some(Action::Pointer(h, prev)) = self.queue.last()
+            && *h == hit
+            && prev.phase == phase
+        {
+            event.delta = Point::new(event.delta.x + prev.delta.x, event.delta.y + prev.delta.y);
+            self.queue.pop();
+        }
+        self.queue.push(Action::Pointer(hit, event));
+    }
+
+    /// Gives the wheel to the innermost element under the pointer with `on_wheel`; whether
+    /// one took it.
+    fn wheel_handler(&mut self, at: Point, delta: i16) -> bool {
+        let s = self.scale;
+        let mut index = self.ix.hover.and_then(|h| self.index_of_hit(h));
+        let flat = if index.is_some() { flatten(&self.root) } else { Vec::new() };
+        while let Some(i) = index.filter(|&i| i < self.laid.len()) {
+            if flat.get(i).is_some_and(|el| el.on_wheel.is_some()) {
+                let rect = self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect);
+                let event = super::element::WheelEvent {
+                    at: Point::new(at.x / s, at.y / s),
+                    local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+                    delta: f32::from(delta) / 120.0,
+                    mods: self.held,
+                };
+                self.queue.push(Action::Wheel(self.laid[i].hit, event));
+                return true;
+            }
+            index = self.laid[i].parent;
+        }
+        false
     }
 
     fn drag(&mut self, at: Point) {
@@ -1334,6 +1655,14 @@ impl<S> Runtime<S> {
     pub fn update(&mut self, change: impl FnOnce(&mut S)) {
         change(&mut self.state);
         self.stale_view = true;
+    }
+
+    /// Runs `f` on the state without running the view: for host bookkeeping the view doesn't
+    /// show (draining a model's outgoing requests, landing a cache), returning what `f`
+    /// returns. Anything the view depends on goes through [`update`](Self::update) instead,
+    /// or the screen keeps the old picture until the view next runs.
+    pub fn touch<R>(&mut self, f: impl FnOnce(&mut S) -> R) -> R {
+        f(&mut self.state)
     }
 
     /// [`update`](Self::update) with no motion: everything lands on its target at once.
@@ -1732,16 +2061,13 @@ fn keyed<S>(root: &El<S>, laid: &[Laid], theme: &Theme) -> HashMap<u64, (Key, Sn
 
 /// Each laid-out element's targets, in the same order. Motion and `instant` reach down the
 /// subtree. Elements in `within` (identities) take their focus-within look.
-fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]) -> Vec<Target> {
-    type Cx<'a> = (&'a [Laid], &'a Theme, f32, &'a [u64]);
-    fn walk<S>(el: &El<S>, cx: Cx, i: &mut usize, motion: Option<crate::Spring>, instant: bool, out: &mut Vec<Target>) {
-        let (laid, theme, s, within) = cx;
+fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::element::Active) -> Vec<Target> {
+    type Cx<'a> = (&'a [Laid], &'a Theme, f32, &'a super::element::Active);
+    fn walk<S>(el: &El<S>, cx: Cx, i: &mut usize, motion: Option<crate::Spring>, instant: bool, inherited: Option<Rgba>, out: &mut Vec<Target>) {
+        let (laid, theme, s, on) = cx;
         let Some(&me) = laid.get(*i) else { return };
         *i += 1;
-        let look = match el.within {
-            Some(patch) if within.contains(&me.id) => el.look.with(patch),
-            _ => el.look,
-        };
+        let look = on.look(me.id, el.look, &el.states);
         let instant = instant || el.anim.instant;
         let motion = if instant {
             None
@@ -1750,14 +2076,19 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]
         };
         let origin = me.parent.map_or(Point::new(0.0, 0.0), |p| Point::new(laid[p].rect.left, laid[p].rect.top));
         let r = me.rect;
+        // Its own ink, else (inside a `cascade_ink` element) the ink it inherits, else the label.
+        let own = look.color.map(|p| p.resolve(theme));
         let (ink, value) = match &el.what {
-            What::Arc(a) => (look.color.unwrap_or(token::ACCENT), a.fraction),
-            _ => (look.color.unwrap_or(token::LABEL), 0.0),
+            What::Arc(a) => (own.unwrap_or_else(|| token::ACCENT.resolve(theme)), a.fraction),
+            _ => (own.or(inherited).unwrap_or_else(|| token::LABEL.resolve(theme)), 0.0),
         };
+        let passed = (el.cascade || inherited.is_some()).then_some(ink);
         out.push(Target {
             rel: [r.left - origin.x, r.top - origin.y, r.right - origin.x, r.bottom - origin.y],
             fill: look.fill.map(|p| p.resolve(theme)),
-            ink: ink.resolve(theme),
+            border: look.border.map(|b| b.paint.resolve(theme)),
+            border_width: look.border.map_or(0.0, |b| (b.width.resolve(theme) * s).max(0.0)),
+            ink,
             opacity: look.opacity,
             radius: look
                 .radius
@@ -1775,11 +2106,11 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, within: &[u64]
             }),
         });
         for child in &el.children {
-            walk(child, cx, i, motion, instant, out);
+            walk(child, cx, i, motion, instant, passed, out);
         }
     }
     let mut out = Vec::with_capacity(laid.len());
-    walk(root, (laid, theme, s, within), &mut 0, None, false, &mut out);
+    walk(root, (laid, theme, s, on), &mut 0, None, false, None, &mut out);
     out
 }
 
@@ -1974,7 +2305,8 @@ fn paint_el<S>(
     // A shadowed box keeps its ops while they fade in (popups size themselves by them).
     if pose.shadow > 0.0 || el.look.shadow.is_some() {
         // A shadow fading out after its box dropped it fades the default level.
-        let cast = el.look.shadow.or(el.within.and_then(|w| w.shadow));
+        let states = [el.states.within, el.states.hover, el.states.press];
+        let cast = el.look.shadow.or(states.iter().flatten().find_map(|w| w.shadow));
         let cast = cast.unwrap_or(super::element::Cast::Level(Default::default()));
         for layer in cast.layers(theme).iter().filter(|l| l.color.a > 0.0) {
             f.push(Op::SoftShadow {
@@ -1996,10 +2328,20 @@ fn paint_el<S>(
         let wash = if enabled { w.feedback.wash(me.hit, w.t, c.hover, c.pressed) } else { Rgba::TRANSPARENT };
         f.fill(rect, radius, wash);
     }
+    if let Some(color) = pose.border.filter(|c| c.a > 0.0 && pose.border_width > 0.0) {
+        let bw = (pose.border_width * pose.xf.s).max(1.0);
+        f.push(Op::Stroke {
+            rect: rect.inflate(-bw / 2.0),
+            radius: (radius - bw / 2.0).max(0.0),
+            width: bw,
+            color,
+        });
+    }
     // Text fits its laid-out width, so a box springing narrower never cuts it short.
     let width = me.rect.width();
     match &el.what {
         What::Box(_) => {}
+        What::Native(_) => f.push(Op::Hole { rect }),
         What::Field(spec) => {
             if let Some(field) = w.fields.get(&me.id) {
                 let focused = w.focus == Some(me.hit);
@@ -2030,21 +2372,20 @@ fn paint_el<S>(
                 }
             }
         }
-        What::Text { text, role, wrap: None } => {
-            let style = theme.font.style(*role, s);
+        What::Text { text, face, wrap: None } => {
+            let style = face.style(theme, s);
             let fitted = f.text.fit(text, &style, width);
             let (w, h) = f.text.measure(&fitted, &style);
             let top = (rect.top + (rect.height() - h) / 2.0).round();
+            let left = align_x(rect, w, face.align);
             f.push(Op::Text {
-                rect: Rect::new(rect.left, top, w, h),
+                rect: Rect::new(left, top, w, h),
                 text: fitted,
                 style,
                 color: ink,
             });
         }
-        What::Text { text, role, wrap: Some(lines) } => {
-            f.paragraph(rect.left, rect.top, width, text, *role, ink, *lines);
-        }
+        What::Text { text, face, wrap: Some(lines) } => paragraph(f, rect, text, face, ink, *lines),
         What::Icon(icon) => f.icon(rect, *icon, rect.width().min(rect.height()) / s, ink),
         What::Image(image) if radius > 0.0 => f.push(Op::RoundedImage {
             rect,
@@ -2132,7 +2473,7 @@ fn paint_el<S>(
             scrollbar(f, rect, me.extent, *bar);
         }
     }
-    if controls {
+    if controls && !el.quiet {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
     }
     // A turn (its own and its spin's) at draw time: what it drew, and its hits' boxes.
@@ -2303,7 +2644,7 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
             Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
             Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
-            Op::TextField { .. } | Op::Clip { .. } | Op::Unclip => {}
+            Op::TextField { .. } | Op::Clip { .. } | Op::Hole { .. } | Op::Unclip => {}
         }
     }
 }
@@ -2319,5 +2660,35 @@ fn hit<S>(el: &El<S>, id: HitId, rect: Rect) -> Hit {
         enabled: !el.sem.disabled,
         actionable: el.interactive() && !el.sem.disabled,
         checked: el.sem.checked,
+    }
+}
+
+/// Where a line `w` wide starts in `rect` for `align`, on a whole device pixel.
+fn align_x(rect: Rect, w: f32, align: super::element::TextAlign) -> f32 {
+    use super::element::TextAlign;
+    match align {
+        TextAlign::Start => rect.left,
+        TextAlign::Center => (rect.left + (rect.width() - w) / 2.0).round(),
+        TextAlign::End => (rect.right - w).round(),
+    }
+}
+
+/// Wrapped text in `face`: at most `lines` lines of `rect`'s width, each centred in the
+/// face's line height and placed across by its alignment.
+fn paragraph(f: &mut Frame, rect: Rect, text: &str, face: &super::element::Face, color: Rgba, lines: usize) {
+    let style = face.style(f.theme, f.s);
+    let line = face.line(f.theme, f.s);
+    let (_, h) = f.text.measure("Ag", &style);
+    let lead = ((line - h) / 2.0).round();
+    let mut top = rect.top.round();
+    for text in f.text.lines(text, &style, rect.width(), lines) {
+        let (w, h) = f.text.measure(&text, &style);
+        f.push(Op::Text {
+            rect: Rect::new(align_x(rect, w, face.align), top + lead, w, h),
+            text,
+            style: style.clone(),
+            color,
+        });
+        top += line;
     }
 }

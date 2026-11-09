@@ -370,6 +370,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     #[cfg(any(windows, target_os = "macos"))]
     let (mut client, mut popups, mut around) = (origin, Popups::default(), None);
     // Events our own calls queued (showing, presenting) wait here instead of in the queue.
+    let mut shown_cursor = crate::Cursor::Arrow;
     let mut held = next_event();
     loop {
         if held.is_none() {
@@ -386,6 +387,9 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
             #[cfg(any(windows, target_os = "macos"))]
             if let Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) = event {
                 client = (p.screen.0 - p.at.x as i32, p.screen.1 - p.at.y as i32);
+            }
+            if let Event::Move(_) | Event::Press(..) | Event::Release(..) | Event::DoubleClick(..) | Event::Wheel(..) = event {
+                rt.set_modifiers(modifiers());
             }
             match event {
                 Event::Close => return Ok(()),
@@ -429,6 +433,12 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
         }
         // ...and after it, so a value the view refused or changed reaches RichEdit at once.
         rt.sync_text_input(&surface);
+        // The shape of whatever the pointer is over (a splitter, a field, a drag).
+        let cursor = rt.cursor();
+        if cursor != shown_cursor {
+            surface.set_cursor(cursor);
+            shown_cursor = cursor;
+        }
         if !rt.animating() {
             frames = None;
         } else if frames.as_ref().is_none_or(|(_, since)| since.elapsed() >= FRAMES) {

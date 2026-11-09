@@ -1,6 +1,7 @@
 //! Compile-only backend. Native services are unavailable until a backend is installed.
 /// Glass.
 pub mod glass;
+pub(crate) mod dialog;
 /// Caret.
 pub mod caret;
 /// Host.
@@ -32,7 +33,22 @@ pub mod app_window {
         Close,
     }
     /// Cursor.
-    pub enum Cursor {}
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub enum Cursor {
+        #[default]
+        Arrow,
+        Text,
+        Hand,
+        Move,
+        Resize,
+        ResizeHorizontal,
+        ResizeVertical,
+        Grab,
+        Grabbing,
+        Crosshair,
+        NotAllowed,
+        Copy,
+    }
     /// Sets modal hook.
     pub fn set_modal_hook(_: Option<fn(bool)>) {
         unimplemented!("native windows")
@@ -67,4 +83,9 @@ impl super::Backend for Backend {
     type Text = Text;
     type Window = Surface;
     type TextInput = TextField;
+}
+/// No system clipboard here: a process-local one.
+pub mod clipboard {
+    /// The system clipboard (process-local on this platform).
+    pub type System = crate::el::MemoryClipboard;
 }
