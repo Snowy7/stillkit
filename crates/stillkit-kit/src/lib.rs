@@ -1153,7 +1153,7 @@ pub use tooltip::Tooltip;
 mod chart;
 mod data;
 mod virtual_data;
-pub use virtual_data::{DataSelection, TableColumn, TableModel};
+pub use virtual_data::{DataSelection, TableColumn, TableModel, TreeModel, natural_cmp};
 mod feedback;
 mod navigation;
 mod color;

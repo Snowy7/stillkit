@@ -60,3 +60,5 @@ fn main() -> anyhow::Result<()> {
 [All guides](../../README.md#guides) | [Element reference](../el.md)
 
 Large datasets use `Table::virtual_rows` with app-owned `TableModel`; only visible cells are built. See the kit README for selection, sorting and bounded column widths.
+
+`Tree::virtual_rows` uses cached `TreeModel` visibility for file-like trees. Deep reveal opens ancestors; filtering retains paths to matches. The `data_grid` example combines both controls with 100,000 table rows.

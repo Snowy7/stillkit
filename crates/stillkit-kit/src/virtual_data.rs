@@ -321,3 +321,390 @@ impl<S: 'static> Table<S> {
         })
     }
 }
+
+struct ModelNode {
+    key: Arc<str>,
+    label: Arc<str>,
+    parent: Option<usize>,
+    children: Vec<usize>,
+    expanded: bool,
+    level: usize,
+    position: usize,
+    set_size: usize,
+}
+/// Cached flattened tree with keyed selection. Rebuilds visibility only on model edits.
+pub struct TreeModel {
+    nodes: Vec<ModelNode>,
+    roots: Vec<usize>,
+    visible: Vec<usize>,
+    keys: Vec<Arc<str>>,
+    labels: Vec<Arc<str>>,
+    shown: Option<HashSet<usize>>,
+    rows: VirtualRows,
+    /// Selection in visible tree order.
+    pub selection: DataSelection,
+}
+impl TreeModel {
+    /// Takes a forest with stable, globally unique node keys.
+    pub fn new(nodes: Vec<TreeNode>) -> Self {
+        fn append(
+            nodes: Vec<TreeNode>,
+            parent: Option<usize>,
+            level: usize,
+            out: &mut Vec<ModelNode>,
+            selected: &mut HashSet<Arc<str>>,
+        ) -> Vec<usize> {
+            nodes
+                .into_iter()
+                .map(|n| {
+                    let i = out.len();
+                    if n.selected {
+                        selected.insert(n.key.clone());
+                    }
+                    out.push(ModelNode {
+                        key: n.key,
+                        label: n.label,
+                        parent,
+                        children: Vec::new(),
+                        expanded: n.expanded,
+                        level,
+                        position: 0,
+                        set_size: 0,
+                    });
+                    let children = append(n.children, Some(i), level + 1, out, selected);
+                    out[i].children = children;
+                    i
+                })
+                .collect()
+        }
+        let mut m = Self {
+            nodes: Vec::new(),
+            roots: Vec::new(),
+            visible: Vec::new(),
+            keys: Vec::new(),
+            labels: Vec::new(),
+            shown: None,
+            rows: VirtualRows::new(28.),
+            selection: DataSelection::default(),
+        };
+        m.roots = append(nodes, None, 1, &mut m.nodes, &mut m.selection.selected);
+        m.rebuild();
+        m
+    }
+    fn rebuild(&mut self) {
+        let sets = std::iter::once(self.roots.clone())
+            .chain(self.nodes.iter().map(|n| n.children.clone()))
+            .collect::<Vec<_>>();
+        for set in sets {
+            let shown: Vec<_> = set
+                .into_iter()
+                .filter(|i| self.shown.as_ref().is_none_or(|s| s.contains(i)))
+                .collect();
+            for (pos, &i) in shown.iter().enumerate() {
+                self.nodes[i].position = pos + 1;
+                self.nodes[i].set_size = shown.len();
+            }
+        }
+        self.visible.clear();
+        let mut stack: Vec<_> = self.roots.iter().rev().copied().collect();
+        while let Some(i) = stack.pop() {
+            if self.shown.as_ref().is_some_and(|s| !s.contains(&i)) {
+                continue;
+            }
+            self.visible.push(i);
+            if self.nodes[i].expanded {
+                stack.extend(self.nodes[i].children.iter().rev().copied());
+            }
+        }
+        self.keys = self
+            .visible
+            .iter()
+            .map(|&i| self.nodes[i].key.clone())
+            .collect();
+        self.labels = self
+            .visible
+            .iter()
+            .map(|&i| self.nodes[i].label.clone())
+            .collect();
+        self.rows.set_keys(self.keys.iter().cloned());
+    }
+    /// Number of visible rows, including ancestors kept by a filter.
+    pub fn visible_len(&self) -> usize {
+        self.visible.len()
+    }
+    /// Key at a visible row.
+    pub fn visible_key(&self, row: usize) -> Option<&str> {
+        self.keys.get(row).map(AsRef::as_ref)
+    }
+    /// Expands or collapses a branch. A cursor inside a closing branch moves to it.
+    pub fn set_expanded(&mut self, key: &str, expanded: bool) {
+        let Some(i) = self.nodes.iter().position(|n| n.key.as_ref() == key) else {
+            return;
+        };
+        self.nodes[i].expanded = expanded;
+        if !expanded && let Some(cursor) = &self.selection.cursor {
+            let mut at = self.nodes.iter().position(|n| &n.key == cursor);
+            while let Some(j) = at {
+                if self.nodes[j].parent == Some(i) {
+                    self.selection.cursor = Some(self.nodes[i].key.clone());
+                    break;
+                }
+                at = self.nodes[j].parent;
+            }
+        }
+        self.rebuild();
+    }
+    /// Opens every ancestor, selects the node and reveals it even under a filter.
+    pub fn reveal(&mut self, key: &str) -> bool {
+        let Some(i) = self.nodes.iter().position(|n| n.key.as_ref() == key) else {
+            return false;
+        };
+        let mut at = Some(i);
+        while let Some(j) = at {
+            if let Some(shown) = &mut self.shown {
+                shown.insert(j);
+            }
+            if j != i {
+                self.nodes[j].expanded = true;
+            }
+            at = self.nodes[j].parent;
+        }
+        self.rebuild();
+        if let Some(row) = self.keys.iter().position(|k| k.as_ref() == key) {
+            self.selection.click(&self.keys, row, Modifiers::NONE);
+        }
+        self.rows.reveal(self.nodes[i].key.clone());
+        true
+    }
+    /// Shows matching labels and their ancestors; paths to matches open automatically.
+    pub fn filter(&mut self, keep: impl Fn(&str) -> bool) {
+        let mut shown = HashSet::new();
+        for i in 0..self.nodes.len() {
+            if !keep(&self.nodes[i].label) {
+                continue;
+            }
+            shown.insert(i);
+            let mut at = self.nodes[i].parent;
+            while let Some(j) = at {
+                shown.insert(j);
+                self.nodes[j].expanded = true;
+                at = self.nodes[j].parent;
+            }
+        }
+        self.shown = Some(shown);
+        self.rebuild();
+    }
+    /// Removes a filter, keeping current expansion state.
+    pub fn clear_filter(&mut self) {
+        self.shown = None;
+        self.rebuild();
+    }
+    /// Sorts each sibling set with natural filename ordering.
+    pub fn sort_natural(&mut self) {
+        let nodes = &self.nodes;
+        self.roots
+            .sort_by(|&a, &b| natural_cmp(&nodes[a].label, &nodes[b].label));
+        let orders: Vec<Vec<usize>> = nodes
+            .iter()
+            .map(|n| {
+                let mut c = n.children.clone();
+                c.sort_by(|&a, &b| natural_cmp(&nodes[a].label, &nodes[b].label));
+                c
+            })
+            .collect();
+        for (n, c) in self.nodes.iter_mut().zip(orders) {
+            n.children = c;
+        }
+        self.rebuild();
+    }
+    fn reveal_cursor(&self) {
+        if let Some(k) = &self.selection.cursor {
+            self.rows.reveal(k.clone());
+        }
+    }
+    fn activate(&mut self) -> Option<Arc<str>> {
+        let key = self.selection.cursor.clone()?;
+        let index = self.nodes.iter().position(|node| node.key == key)?;
+        if self.branch(index) {
+            self.set_expanded(&key, !self.nodes[index].expanded);
+            None
+        } else {
+            Some(key)
+        }
+    }
+    fn branch(&self, index: usize) -> bool {
+        self.nodes[index].children.iter().any(|child| {
+            self.shown
+                .as_ref()
+                .is_none_or(|shown| shown.contains(child))
+        })
+    }
+    fn key(&mut self, key: KeyCode, mods: Modifiers, page: usize) -> bool {
+        let at = self
+            .selection
+            .cursor
+            .as_ref()
+            .and_then(|k| self.keys.iter().position(|v| v == k));
+        if key == KeyCode::LEFT || key == KeyCode::RIGHT {
+            let Some(r) = at else {
+                if !self.keys.is_empty() {
+                    self.selection.click(&self.keys, 0, mods);
+                    self.reveal_cursor();
+                }
+                return true;
+            };
+            let i = self.visible[r];
+            if key == KeyCode::RIGHT {
+                if !self.branch(i) {
+                    return true;
+                }
+                if !self.nodes[i].expanded {
+                    self.nodes[i].expanded = true;
+                    self.rebuild();
+                } else if r + 1 < self.keys.len() {
+                    self.selection.click(&self.keys, r + 1, mods);
+                }
+            } else if self.nodes[i].expanded && self.branch(i) {
+                let k = self.nodes[i].key.clone();
+                self.set_expanded(&k, false);
+            } else if let Some(parent) = self.nodes[i].parent
+                && let Some(r) = self.visible.iter().position(|&v| v == parent)
+            {
+                self.selection.click(&self.keys, r, mods);
+            }
+            self.reveal_cursor();
+            true
+        } else {
+            let used = self.selection.navigate(&self.keys, key, mods, page);
+            if used {
+                self.reveal_cursor();
+            }
+            used
+        }
+    }
+}
+/// Compares file-like names without parsing digit runs into bounded integers.
+/// Equal numeric runs use digit count as a deterministic leading-zero tie-break.
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let a = a.to_lowercase();
+    let b = b.to_lowercase();
+    let (mut a, mut b) = (a.as_str(), b.as_str());
+    while !a.is_empty() && !b.is_empty() {
+        let ca = a.chars().next().unwrap();
+        let cb = b.chars().next().unwrap();
+        if ca.is_ascii_digit() && cb.is_ascii_digit() {
+            let na = a.bytes().take_while(u8::is_ascii_digit).count();
+            let nb = b.bytes().take_while(u8::is_ascii_digit).count();
+            let va = a[..na].trim_start_matches('0');
+            let vb = b[..nb].trim_start_matches('0');
+            let cmp = va
+                .len()
+                .cmp(&vb.len())
+                .then_with(|| va.cmp(vb))
+                .then_with(|| na.cmp(&nb));
+            if cmp != Ordering::Equal {
+                return cmp;
+            }
+            a = &a[na..];
+            b = &b[nb..];
+        } else {
+            let cmp = ca.cmp(&cb);
+            if cmp != Ordering::Equal {
+                return cmp;
+            }
+            a = &a[ca.len_utf8()..];
+            b = &b[cb.len_utf8()..];
+        }
+    }
+    a.len().cmp(&b.len())
+}
+impl<S: 'static> Tree<S> {
+    /// Builds cached visible rows with tree keyboard navigation and indexed semantics.
+    pub fn virtual_rows(
+        key: impl Into<Arc<str>>,
+        label: impl Into<Arc<str>>,
+        state: &TreeModel,
+        model: fn(&mut S) -> &mut TreeModel,
+        height: f32,
+        open: impl Fn(&mut S, Arc<str>) + 'static,
+    ) -> El<S> {
+        let key = key.into();
+        let body = variable_list(format!("{key}/body"), &state.rows, |r| {
+            let i = state.visible[r];
+            let n = &state.nodes[i];
+            let selected = state.selection.selected.contains(&n.key);
+            let mut line = row()
+                .h(28.)
+                .pad_x((n.level - 1) as f32 * 18.)
+                .align(Align::Center)
+                .role(Role::TreeItem)
+                .label(n.label.clone())
+                .level(n.level)
+                .size_of_set(n.set_size)
+                .position_in_set(n.position)
+                .selected(selected)
+                .fill(if selected {
+                    Paint::Theme(|t| t.color.accent_wash)
+                } else {
+                    Paint::Rgba(Rgba::TRANSPARENT)
+                });
+            if state.branch(i) {
+                let id = n.key.clone();
+                let expanded = n.expanded;
+                line = line.expanded(expanded).child(
+                    icon(if expanded {
+                        Icon::ChevronDown
+                    } else {
+                        Icon::ChevronRight
+                    })
+                    .size(14.)
+                    .w(22.)
+                    .key(format!("{key}/toggle/{}", n.key))
+                    .on_press(move |s| model(s).set_expanded(&id, !expanded)),
+                );
+            } else {
+                line = line.child(el().w(22.));
+            }
+            let id = n.key.clone();
+            let focus_key = key.clone();
+            line.child(text(n.label.clone()))
+                .on_press_with(move |s, tx| {
+                    let m = model(s);
+                    if let Some(r) = m.keys.iter().position(|k| k == &id) {
+                        m.selection.click(&m.keys, r, tx.modifiers());
+                        tx.focus(focus_key.clone());
+                    }
+                })
+        })
+        .h(height);
+        let page = (height / 28.).floor().max(1.) as usize;
+        let mut root = col()
+            .key(key)
+            .role(Role::Tree)
+            .label(label)
+            .focusable()
+            .child(body);
+        if let Some(cursor) = &state.selection.cursor {
+            root = root.active_descendant(cursor.clone());
+        }
+        root.on_key(move |s, k, tx| {
+            let m = model(s);
+            if k == KeyCode::ENTER || k == KeyCode::SPACE {
+                if let Some(id) = m.activate() {
+                    open(s, id);
+                }
+                return Handled::Yes;
+            }
+            m.key(k, tx.modifiers(), page).into()
+        })
+        .on_char(move |s, c, _| {
+            let m = model(s);
+            let used = m.selection.type_ahead(&m.keys, &m.labels, c);
+            if used {
+                m.reveal_cursor();
+            }
+            used.into()
+        })
+    }
+}

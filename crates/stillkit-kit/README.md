@@ -420,3 +420,16 @@ PageUp/PageDown, type-ahead and Enter operate over the whole model, including ro
 that have never been built. `reveal(key)` scrolls to an unbuilt row. Grid, row and
 cell semantics include complete counts and indexes. Width persistence across process
 launches belongs to the app; the model retains widths across view runs.
+
+### Virtual trees
+
+`TreeModel::new(nodes)` caches flattened visibility; `Tree::virtual_rows` builds only
+rows near sight. Left/Right collapse, expand and move to parents or first children;
+Up/Down, Home/End, paging and type-ahead use visible order. Set `selection.multi` for
+Ctrl and Shift selection. `reveal(key)` opens the complete ancestor path, selects the
+node and scrolls to it. `filter` keeps matching labels and ancestors; `clear_filter`
+keeps current expansion state. `sort_natural` orders sibling filenames by numeric
+runs without integer overflow. Each tree item reports level, sibling count and position.
+
+Run `cargo run -p stillkit-kit --example data_grid` for a 100,000-row table alongside
+a file-like tree, with resizing, sorting, reveal and filtering.
