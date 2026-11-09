@@ -553,3 +553,13 @@ no syntax highlighting, HTML renderer or streaming parse cache.
 Run `cargo run -p stillkit-kit --features markdown --example markdown_viewer`.
 Without the feature, this example renders the source as selectable plain text, for
 comparing the optional parser/renderer's executable cost.
+
+Measured on Windows x64, 2026-11-10, with the repository release profile (LLVM,
+thin LTO, stripped): `markdown_viewer` is 1,615,360 bytes without the feature and
+1,905,152 bytes with it, an increase of **289,792 bytes (283 KiB)**. This compares
+the example's plain-source path with the complete Markdown parser, renderer and
+copy controls; it is not a parser-only measurement. Reproduce with
+`cargo build --release -p stillkit-kit --example markdown_viewer`, then repeat
+with `--features markdown` and compare the executable sizes. Both viewer import
+tables match, and the bar-spike release imports still match main. The dependency
+graph adds only pulldown-cmark and unicase; bitflags and memchr were already present.
