@@ -265,8 +265,8 @@ impl<S> Runtime<S> {
         for l in &self.laid {
             let Some(d) = self.display.get(&l.id) else { continue };
             let Some(rich) = &d.rich else { continue };
-            for (i, fragment) in rich.fragments.iter().enumerate() {
-                if link_id(d.id, i) == hit && let Some(url) = &fragment.run.link {
+            for fragment in &rich.fragments {
+                if link_id(d.id, fragment.source) == hit && let Some(url) = &fragment.run.link {
                     return Some((l.hit, url.clone()));
                 }
             }
@@ -408,18 +408,18 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
         }); }
     }
     if let Some(rich) = &d.rich {
-        for (i, fragment) in rich.fragments.iter().enumerate().filter(|(_, f)| f.run.link.is_some()) {
-            let hot = f.input.hover == Some(link_id(d.id, i));
+        for fragment in rich.fragments.iter().filter(|f| f.run.link.is_some()) {
+            let hot = f.input.hover == Some(link_id(d.id, fragment.source));
             ops.push(Op::Fill { rect: super::super::rich::bounds(rich, fragment, rect, d.align), radius: 2.0,
                 color: if hot { f.theme.color.hover } else { Rgba::TRANSPARENT } });
         }
         ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme), d.align));
-        for (i, fragment) in rich.fragments.iter().enumerate().filter(|(_, f)| f.run.link.is_some()) {
+        for fragment in rich.fragments.iter().filter(|f| f.run.link.is_some()) {
             let bounds = super::super::rich::bounds(rich, fragment, rect, d.align).intersect(rect);
             if bounds.width() <= 0.0 || bounds.height() <= 0.0 { continue; }
-            f.list.hits.push(crate::Hit { id: link_id(d.id, i),
+            f.list.hits.push(crate::Hit { id: link_id(d.id, fragment.source),
                 rect: bounds, role: crate::Role::Link,
-                label: fragment.run.text.clone(), enabled: true, actionable: true, checked: None });
+                label: fragment.label.clone(), enabled: true, actionable: true, checked: None });
         }
     }
     f.push(Op::Clipped {

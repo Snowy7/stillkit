@@ -2592,7 +2592,9 @@ fn paint_el<S>(
     }
     if live {
         let selected = el.sem.selected == Some(true) || el.sem.checked == Some(true);
+        let nav_start = w.nav.len();
         for h in f.list.hits[hits..].iter().filter(|h| h.actionable) {
+            if w.nav[nav_start..].iter().any(|stop| stop.hit == h.id) { continue; }
             w.nav.push(Stop {
                 hit: h.id,
                 index,

@@ -156,6 +156,8 @@ impl<S> El<S> {
 #[derive(Clone)]
 pub(crate) struct Fragment {
     pub run: Run,
+    pub source: usize,
+    pub label: Arc<str>,
     pub line: usize,
     pub style: TextStyle,
     pub rect: Rect,
@@ -197,7 +199,7 @@ pub(crate) fn layout(
     let (mut x, mut y, mut offset, mut start) = (0.0, 0.0, 0, 0);
     let mut stops = vec![(0, 0.0)];
     let mut drawn = String::new();
-    for run in runs {
+    for (source, run) in runs.iter().enumerate() {
         let style = run.style(base, scale);
         for piece in pieces(&run.text) {
             if piece == "\r" {
@@ -252,6 +254,8 @@ pub(crate) fn layout(
                 fragment.text = part.into();
                 out.fragments.push(Fragment {
                     run: fragment,
+                    source,
+                    label: run.text.clone(),
                     line: (y / line) as usize,
                     style: style.clone(),
                     rect: Rect::new(x, y + baseline - run_baseline, w, h),

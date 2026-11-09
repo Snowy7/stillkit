@@ -4,8 +4,12 @@ use stillkit::{Scheme, Theme};
 #[derive(Clone, Default)]
 struct Board(std::rc::Rc<std::cell::RefCell<String>>);
 impl el::Clipboard for Board {
-    fn get(&mut self) -> Option<String> { Some(self.0.borrow().clone()) }
-    fn set(&mut self, value: &str) { *self.0.borrow_mut() = value.into(); }
+    fn get(&mut self) -> Option<String> {
+        Some(self.0.borrow().clone())
+    }
+    fn set(&mut self, value: &str) {
+        *self.0.borrow_mut() = value.into();
+    }
 }
 fn theme() -> Theme {
     Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE)
@@ -42,7 +46,10 @@ fn runs_wrap_copy_plain_text_and_hold_still() {
     rt.frame(Duration::ZERO);
     assert_eq!(rt.presented("rich").unwrap().selection, Some((0, 42)));
     rt.key_with(KeyCode::of('C').0, Modifiers::CTRL);
-    assert_eq!(&*board.0.borrow(), "regular bold italic code underlined strike");
+    assert_eq!(
+        &*board.0.borrow(),
+        "regular bold italic code underlined strike"
+    );
     let views = rt.view_runs();
     rt.frame(Duration::from_secs(20));
     assert_eq!(rt.view_runs(), views);
@@ -132,8 +139,48 @@ fn dragging_from_a_link_selects_without_opening_it() {
 
 #[test]
 fn linked_runs_expose_the_link_role() {
-    let mut rt = Runtime::new((), |_| el::rich_text([Run::new("documentation").link("app:docs")])
-        .on_link(|_, _| {}), theme(), (200, 80), 1.0).unwrap();
+    let mut rt = Runtime::new(
+        (),
+        |_| el::rich_text([Run::new("documentation").link("app:docs")]).on_link(|_, _| {}),
+        theme(),
+        (200, 80),
+        1.0,
+    )
+    .unwrap();
     rt.frame(Duration::ZERO);
-    assert!(rt.list().hits.iter().any(|h| h.role == stillkit::Role::Link && h.actionable));
+    assert!(
+        rt.list()
+            .hits
+            .iter()
+            .any(|h| h.role == stillkit::Role::Link && h.actionable)
+    );
+}
+
+#[test]
+fn a_wrapped_link_keeps_one_identity_and_its_complete_label() {
+    let mut rt = Runtime::new(
+        (),
+        |_| {
+            el::rich_text([Run::new("Read all the documentation").link("app:docs")])
+                .w(90.0)
+                .on_link(|_, _| {})
+        },
+        theme(),
+        (180, 160),
+        1.0,
+    )
+    .unwrap();
+    rt.frame(Duration::ZERO);
+    let links: Vec<_> = rt
+        .list()
+        .hits
+        .iter()
+        .filter(|h| h.role == stillkit::Role::Link)
+        .collect();
+    assert!(links.len() > 1);
+    assert!(
+        links
+            .iter()
+            .all(|h| h.id == links[0].id && &*h.label == "Read all the documentation")
+    );
 }
