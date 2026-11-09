@@ -113,3 +113,35 @@ fn ctrl_click_toggles_rows_and_type_ahead_reveals_the_match() {
     assert_eq!(rt.state().table.selection.cursor.as_deref(), Some("r90000"));
     assert!(rt.find("r90000").is_some());
 }
+
+#[test]
+fn defaults_fill_parent_and_leave_sort_and_open_unhandled() {
+    fn defaults(s: &State) -> El<State> {
+        VirtualTable::new("grid", &s.table, |s: &mut State| &mut s.table).build()
+    }
+    let mut table = TableModel::new(vec![TableColumn::new("Name", 200., 60., 300.)]);
+    table.set_rows((0..100).map(|i| (format!("r{i}").into(), format!("Record {i}").into())));
+    let mut rt = Runtime::new(
+        State {
+            table,
+            opened: None,
+        },
+        defaults,
+        Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
+        (400, 308),
+        1.,
+    )
+    .unwrap();
+    rt.frame(Duration::ZERO);
+    let body = rt.find("grid/body").unwrap();
+    assert_eq!(body.bottom - body.top, 280.);
+    rt.click("grid/sort/0");
+    rt.frame(Duration::ZERO);
+    assert_eq!(rt.state().table.sort, None);
+    rt.focus("grid");
+    rt.key(KeyCode::HOME.0);
+    rt.frame(Duration::ZERO);
+    rt.key(KeyCode::ENTER.0);
+    rt.frame(Duration::ZERO);
+    assert_eq!(rt.state().opened, None);
+}

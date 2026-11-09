@@ -157,3 +157,50 @@ fn enter_and_space_toggle_branches() {
     rt.frame(Duration::ZERO);
     assert_eq!(rt.state().visible_len(), 1);
 }
+
+#[test]
+fn defaults_fill_parent_and_leaf_open_is_optional() {
+    fn defaults(s: &TreeModel) -> El<TreeModel> {
+        VirtualTree::new("files", s, |s| s).build()
+    }
+    let mut rt = Runtime::new(
+        TreeModel::new(vec![TreeNode::new("leaf", "Leaf")]),
+        defaults,
+        Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
+        (400, 280),
+        1.,
+    )
+    .unwrap();
+    rt.frame(Duration::ZERO);
+    let body = rt.find("files/body").unwrap();
+    assert_eq!(body.bottom - body.top, 280.);
+    rt.focus("files");
+    rt.key(KeyCode::HOME.0);
+    rt.frame(Duration::ZERO);
+    rt.key(KeyCode::ENTER.0);
+    rt.frame(Duration::ZERO);
+}
+
+#[test]
+fn configured_open_receives_the_leaf_key() {
+    fn view(s: &(TreeModel, Option<String>)) -> El<(TreeModel, Option<String>)> {
+        VirtualTree::new("files", &s.0, |s| &mut s.0)
+            .on_open(|s, key| s.1 = Some(key.to_string()))
+            .build()
+    }
+    let mut rt = Runtime::new(
+        (TreeModel::new(vec![TreeNode::new("leaf", "Leaf")]), None),
+        view,
+        Theme::solid(Scheme::Dark, stillkit::theme::SYSTEM_BLUE),
+        (400, 280),
+        1.,
+    )
+    .unwrap();
+    rt.frame(Duration::ZERO);
+    rt.focus("files");
+    rt.key(KeyCode::HOME.0);
+    rt.frame(Duration::ZERO);
+    rt.key(KeyCode::ENTER.0);
+    rt.frame(Duration::ZERO);
+    assert_eq!(rt.state().1.as_deref(), Some("leaf"));
+}

@@ -35,6 +35,7 @@
 - 0.1 metadata groundwork and Windows/Linux CI with an advisory macOS cross-check.
 
 ### Changed
+- Replace positional virtual table/tree constructors with `VirtualTable` and `VirtualTree` builders; default to growing height with optional cell, open and sort callbacks.
 - Display-list damage trims the unchanged start and end before comparing, so an inserted or removed op damages only itself; macOS CPU surfaces repaint each disjoint damaged region alone.
 - Interaction motion has one implementation; `interact::motion` remains a compatibility re-export.
 
