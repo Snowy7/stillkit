@@ -217,6 +217,13 @@ arc(0.25).size(20.0).no_track().spin(Duration::from_secs(1))                   /
   while something visible spins, so a spinner scrolled away, under a dialog or in a hidden
   window leaves no ticker. Its angle moves in thousandths of a radian. The view never runs.
 
+Unused transform support adds one optional pointer to retained element animation configuration,
+layout targets, poses, spring tracks and hit items: each record grows by 8 bytes on 64-bit
+Windows (release LLVM type layouts, compared with `89ac26a`). Transform values, six-channel
+spring storage and precise hit shapes allocate only when used. No new timer, thread or DLL is
+needed. `tests/el_transform.rs` checks interrupted motion, reduced motion, nested clipped hits,
+reflected and collapsed scales, operation translation/scaling and rotated text/image/box pixels.
+
 `tests/el_spin.rs` checks the spinner's clock, every stop and the ticker's end, a turned box's
 drawing, hits, pixels and damage, a chevron springing a quarter turn with native geometry, and an arc
 from half past seven, by its pixels.

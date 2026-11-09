@@ -44,7 +44,7 @@ pub(crate) struct Target {
     pub shadow: f32,
     /// An arc's filled fraction (0 for everything else).
     pub value: f32,
-    /// Its turn about its centre, radians ([`super::El::rotate`]).
+    /// Its turn about its origin, radians ([`super::El::rotate`]).
     pub angle: f32,
     pub transform: Option<std::sync::Arc<[f32; 6]>>,
     /// Its own or an ancestor's spring; `None` lands at once.
@@ -109,7 +109,7 @@ pub(crate) struct Pose {
     pub shadow: f32,
     /// An arc's filled fraction now.
     pub value: f32,
-    /// Its turn about its centre now, radians.
+    /// Its turn about its origin now, radians.
     pub angle: f32,
     pub transform: Option<std::sync::Arc<[f32; 6]>>,
 }

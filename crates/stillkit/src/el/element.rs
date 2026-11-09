@@ -725,7 +725,7 @@ pub(crate) struct Anim {
     pub motion: Option<Motion>,
     pub instant: bool,
     pub transition: Option<Transition>,
-    /// Radians clockwise about its centre, at draw time ([`El::rotate`]).
+    /// Radians clockwise about its origin, at draw time ([`El::rotate`]).
     pub rotate: f32,
     pub transform: Option<Arc<[f32; 6]>>,
     /// One turn every this long while it is visible ([`El::spin`]).
@@ -1643,7 +1643,7 @@ impl<S> El<S> {
         v[5] = if y.is_finite() { y } else { 0.5 };
         self
     }
-    /// Turns the element and everything in it `radians` clockwise about its centre, at draw
+    /// Turns the element and everything in it `radians` clockwise about its origin (centre by default), at draw
     /// time: layout keeps its upright box, while what it draws, its hits (their bounding box)
     /// and its damage are turned. With [`motion`](Self::motion) the angle springs (it snaps
     /// under reduced motion): a disclosure chevron, `.rotate(if open { FRAC_PI_2 } else { 0.0 })`.
