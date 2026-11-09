@@ -2088,6 +2088,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             fill: look.fill.map(|p| p.resolve(theme)),
             border: look.border.map(|b| b.paint.resolve(theme)),
             border_width: look.border.map_or(0.0, |b| (b.width.resolve(theme) * s).max(0.0)),
+            edges: look.edges.map(|(top, bottom)| [top.resolve(theme), bottom.resolve(theme)]),
             ink,
             opacity: look.opacity,
             radius: look
@@ -2321,6 +2322,19 @@ fn paint_el<S>(
     }
     if let Some(fill) = pose.fill {
         f.fill(rect, radius, fill);
+    }
+    // Edges: the box's shape in the edge colour, clipped to one design px at its top and at
+    // its bottom, so they follow the corners like CSS's `inset 0 1px 0`.
+    if let Some([top, bottom]) = pose.edges {
+        let px = (s * pose.xf.s).max(1.0).round();
+        for (color, band) in [
+            (top, Rect::new(rect.left, rect.top, rect.width(), px)),
+            (bottom, Rect::new(rect.left, rect.bottom - px, rect.width(), px)),
+        ] {
+            if color.a > 0.0 {
+                f.push(Op::Clipped { rect: band, ops: Arc::from([Op::Fill { rect, radius, color }]) });
+            }
+        }
     }
     // A scroll view takes focus for its keys, but is no button: no wash; nor is a field.
     if controls && scroll.is_none() && el.field().is_none() {

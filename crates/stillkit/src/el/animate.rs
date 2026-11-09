@@ -31,6 +31,8 @@ pub(crate) struct Target {
     /// Its border's colour, and width in device px ([`super::El::border`]).
     pub border: Option<Rgba>,
     pub border_width: f32,
+    /// Its inner top and bottom edge colours ([`super::El::edges`]); they snap, not spring.
+    pub edges: Option<[Rgba; 2]>,
     /// Text and icon colour.
     pub ink: Rgba,
     pub opacity: f32,
@@ -93,6 +95,7 @@ pub(crate) struct Pose {
     pub border: Option<Rgba>,
     /// Device px.
     pub border_width: f32,
+    pub edges: Option<[Rgba; 2]>,
     pub ink: Rgba,
     /// Its own, presence included; paint multiplies it down the subtree.
     pub opacity: f32,
@@ -208,6 +211,7 @@ struct Track {
     border: Prop<4>,
     border_rest: Option<Rgba>,
     border_width: f32,
+    edges: Option<[Rgba; 2]>,
     ink: Prop<4>,
     ink_rest: Rgba,
     opacity: Prop<1>,
@@ -231,6 +235,7 @@ impl Track {
             border: Prop::at(oklab(target.border)),
             border_rest: target.border,
             border_width: target.border_width,
+            edges: target.edges,
             ink: Prop::at(oklab(Some(target.ink))),
             ink_rest: target.ink,
             opacity: Prop::at([target.opacity]),
@@ -255,6 +260,7 @@ impl Track {
         self.border.set(oklab(target.border), fade, t);
         self.border_rest = target.border;
         self.border_width = target.border_width;
+        self.edges = target.edges;
         self.ink.set(oklab(Some(target.ink)), fade.map(|s| s.faster(2.0)), t);
         self.ink_rest = target.ink;
         self.opacity.set([target.opacity], fade, t);
@@ -403,6 +409,7 @@ impl Animator {
                     fill: target.fill,
                     border: target.border,
                     border_width: target.border_width,
+                    edges: target.edges,
                     ink: target.ink,
                     opacity: target.opacity,
                     radius: target.radius,
@@ -439,6 +446,7 @@ impl Animator {
             fill: color(&track.fill, track.fill_rest),
             border: color(&track.border, track.border_rest),
             border_width: track.border_width,
+            edges: track.edges,
             ink: color(&track.ink, Some(track.ink_rest)).unwrap_or(track.ink_rest),
             opacity: scalar(&track.opacity) * fade,
             radius: track.radius.value(t)[0].max(0.0),
