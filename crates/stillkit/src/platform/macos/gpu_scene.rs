@@ -159,6 +159,21 @@ pub(super) fn draw_ops(
                 draw_ops(ctx, res, text, ops, image_source)?;
                 ctx.pop_layer();
             }
+            Op::Gradient { rect: r, radius, width, gradient } => {
+                use vello_hybrid::peniko::{Gradient, ColorStop};
+                let stops: Vec<_> = gradient.stops.iter().map(|s| ColorStop { offset: s.offset, color: vello_hybrid::color::AlphaColor::<vello_hybrid::color::Srgb>::new([s.color.r, s.color.g, s.color.b, s.color.a]).into() }).collect();
+                let g = if gradient.angle.is_some() {
+                    let (a,b) = gradient.line(*r);
+                    Gradient::new_linear((a.x as f64, a.y as f64), (b.x as f64, b.y as f64))
+                } else {
+                    let c = r.center();
+                    Gradient::new_radial((c.x as f64, c.y as f64), ((r.width() * r.width() + r.height() * r.height()).sqrt() * 0.5).max(0.001))
+                }.with_stops(stops.as_slice());
+                ctx.set_paint(g);
+                let p = rounded(*r, *radius);
+                if *width > 0.0 { ctx.set_stroke(Stroke::new(*width as f64)); ctx.stroke_path(&p); }
+                else { ctx.fill_path(&p); }
+            }
             Op::Fill { rect: r, radius, color } => path(ctx, &rounded(*r, *radius), 0., *color, false),
             Op::Stroke { rect: r, radius, width, color } => path(ctx, &rounded(*r, *radius), *width, *color, false),
             Op::Continuous { rect: r, radius, smoothing, width, color } => {

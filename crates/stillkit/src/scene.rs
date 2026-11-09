@@ -17,6 +17,17 @@ pub type HitId = u32;
 /// One paint operation, in the surface's device pixels, drawn in list order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
+    /// A native gradient on a rounded rectangle; zero width fills, positive width strokes.
+    Gradient {
+        /// Bounds in device pixels.
+        rect: Rect,
+        /// Corner radius.
+        radius: f32,
+        /// Stroke width, or zero for a fill.
+        width: f32,
+        /// Stops and direction.
+        gradient: crate::paint::Gradient,
+    },
     /// A continuous corner surface; `width == 0` fills, otherwise strokes its contour.
     Continuous {
         /// Bounds in device pixels.
@@ -207,7 +218,7 @@ impl Op {
     /// Every pixel this operation may touch, antialiasing included.
     pub fn bounds(&self) -> Rect {
         match self {
-            Self::Continuous { rect, width, .. } => rect.inflate(width * 0.5 + 1.0),
+            Self::Gradient { rect, width, .. } | Self::Continuous { rect, width, .. } => rect.inflate(width * 0.5 + 1.0),
             Self::Clipped { rect, .. } => *rect,
             Self::RoundedClipped { rect, ops, .. } => ops.iter()
                 .map(Op::bounds)
@@ -343,7 +354,8 @@ impl DisplayList {
                         to.x += dx;
                         to.y += dy;
                     }
-                    Op::Continuous { rect, .. }
+                    Op::Gradient { rect, .. }
+                    | Op::Continuous { rect, .. }
                     | Op::Image { rect, .. }
                     | Op::RoundedImage { rect, .. }
                     | Op::TextField { rect, .. }

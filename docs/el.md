@@ -88,6 +88,52 @@ Lengths are design pixels (`f32`) or theme tokens (`token::PAD`, `token::CONTROL
 your own with `Len::Theme(|t| ..)` and `Paint::Theme(|t| ..)`. Tokens resolve when the tree is
 laid out, so a new theme (`Runtime::set_theme`) restyles without running the view.
 
+## Gradients
+
+`Paint::Linear { stops, angle }` and `Paint::Radial { stops }` paint backgrounds,
+fills and borders with native brushes on every backend. Stops are a static slice of
+`stillkit::paint::GradientStop { offset, color }`; positions run from zero to one.
+Linear angles are clockwise radians from the right. Radial gradients are centred
+circles reaching the farthest corner. Colours interpolate in sRGB within each brush;
+animation of stop colours uses the same premultiplied OKLab springs as solid fills.
+
+```rust
+use stillkit::{Rgba, paint::GradientStop};
+use stillkit::el::{el, Paint};
+const STOPS: &[GradientStop] = &[
+    GradientStop { offset: 0.0, color: Rgba::new(0.1, 0.8, 0.9, 1.0) },
+    GradientStop { offset: 1.0, color: Rgba::new(0.3, 0.1, 0.8, 1.0) },
+];
+let card = el::<()>().size(100.0).radius(12.0)
+    .fill(Paint::Linear { stops: STOPS, angle: 0.5 }).animate();
+```
+
+With `.animate()`, matching gradient kinds and stop counts spring their positions,
+colours and linear angle. Retargeting preserves velocity. Changing kind or stop count
+snaps the gradient topology; a solid-to-gradient change also snaps. Reduced motion
+uses the short colour fade. `color`, arc tracks and edge highlights take the first
+stop's colour; gradients apply to box fills and borders. Empty stops paint transparent,
+a single stop is solid, and positions are sorted and clamped. See `el_effects`.
+
+### Windows CPU gradient cost
+
+Measured 2026-11-09 on a Ryzen 7 7800X3D, release LLVM, software D2D on WIC,
+200 draws after 20 warm-up draws. Each sample clears and draws the entire damaged
+surface with one rounded rectangle; gradient brush creation is included. Numbers
+are median / p95 milliseconds. Other workstreams were compiling concurrently, so
+these are observed loaded-machine costs rather than isolated performance budgets.
+
+| Device pixels | Solid | Linear, two stops | Radial, two stops |
+| --- | ---: | ---: | ---: |
+| 100 ? 100 | 0.125 / 0.178 | 0.255 / 0.485 | 0.263 / 0.533 |
+| 320 ? 180 | 0.139 / 0.181 | 0.324 / 0.927 | 0.377 / 1.529 |
+| 800 ? 600 | 0.446 / 1.397 | 1.071 / 2.887 | 1.097 / 1.941 |
+
+Reproduce with `cargo test --release -p stillkit --lib native_gradient_cost -- --ignored --nocapture`.
+Unchanged display lists still produce no damage and no draw. No new imports are
+needed. Gradient stops and spring arrays allocate only when used; each retained
+target, pose and animation track also gains two optional pointers for gradient data.
+
 ## How a frame is made
 
 1. **Handlers** queued by input run on `&mut S` at the start of the frame. If any ran (or the

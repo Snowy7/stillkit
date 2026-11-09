@@ -23,11 +23,13 @@ use crate::{Point, Rect, Rgba, Spring};
 pub(crate) const REDUCED_FADE: Spring = Spring::apple(0.15, 0.0);
 
 /// What an element shows once everything settles, from the latest layout (device px).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Target {
     /// Left, top, right, bottom, from the parent's top-left.
     pub rel: [f32; 4],
     pub fill: Option<Rgba>,
+    pub fill_gradient: Option<std::sync::Arc<crate::paint::Gradient>>,
+    pub border_gradient: Option<std::sync::Arc<crate::paint::Gradient>>,
     /// Its border's colour, and width in device px ([`super::El::border`]).
     pub border: Option<Rgba>,
     pub border_width: f32,
@@ -83,7 +85,7 @@ impl Xf {
 }
 
 /// What an element shows now.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Pose {
     /// On screen, whole device pixels.
     pub rect: Rect,
@@ -92,6 +94,8 @@ pub(crate) struct Pose {
     /// Its own and its ancestors' presence transforms.
     pub xf: Xf,
     pub fill: Option<Rgba>,
+    pub fill_gradient: Option<std::sync::Arc<crate::paint::Gradient>>,
+    pub border_gradient: Option<std::sync::Arc<crate::paint::Gradient>>,
     pub border: Option<Rgba>,
     /// Device px.
     pub border_width: f32,
@@ -205,6 +209,8 @@ impl<const N: usize> Prop<N> {
 #[derive(Debug, Clone)]
 struct Track {
     rect: Prop<4>,
+    fill_gradient: Option<Box<GradientTrack>>,
+    border_gradient: Option<Box<GradientTrack>>,
     /// Premultiplied OKLab, and the exact colour it rests on.
     fill: Prop<4>,
     fill_rest: Option<Rgba>,
@@ -230,6 +236,8 @@ impl Track {
     fn at(target: &Target) -> Self {
         Self {
             rect: Prop::at(target.rel),
+            fill_gradient: target.fill_gradient.as_deref().map(|g| Box::new(GradientTrack::at(g))),
+            border_gradient: target.border_gradient.as_deref().map(|g| Box::new(GradientTrack::at(g))),
             fill: Prop::at(oklab(target.fill)),
             fill_rest: target.fill,
             border: Prop::at(oklab(target.border)),
@@ -255,6 +263,8 @@ impl Track {
         let spatial = motion.filter(|_| !reduced);
         let fade = motion.map(|m| if reduced { REDUCED_FADE } else { m.calm() });
         self.rect.set(target.rel, spatial, t);
+        gradient_retarget(&mut self.fill_gradient, target.fill_gradient.as_deref(), fade, t);
+        gradient_retarget(&mut self.border_gradient, target.border_gradient.as_deref(), fade, t);
         self.fill.set(oklab(target.fill), fade, t);
         self.fill_rest = target.fill;
         self.border.set(oklab(target.border), fade, t);
@@ -287,6 +297,8 @@ impl Track {
         // Every prop settles, so no short-circuiting.
         [
             self.rect.settle(t, 0.1),
+            self.fill_gradient.as_mut().is_some_and(|g| g.settle(t)),
+            self.border_gradient.as_mut().is_some_and(|g| g.settle(t)),
             self.fill.settle(t, color),
             self.border.settle(t, color),
             self.ink.settle(t, color),
@@ -301,7 +313,9 @@ impl Track {
     }
 
     fn moving(&self) -> bool {
-        self.rect.moving.is_some()
+        self.fill_gradient.as_ref().is_some_and(|g| g.moving())
+            || self.border_gradient.as_ref().is_some_and(|g| g.moving())
+            || self.rect.moving.is_some()
             || self.fill.moving.is_some()
             || self.border.moving.is_some()
             || self.ink.moving.is_some()
@@ -407,6 +421,8 @@ impl Animator {
                     local: offset(target.rel, origin),
                     xf,
                     fill: target.fill,
+                    fill_gradient: target.fill_gradient.clone(),
+                    border_gradient: target.border_gradient.clone(),
                     border: target.border,
                     border_width: target.border_width,
                     edges: target.edges,
@@ -444,6 +460,8 @@ impl Animator {
             local,
             xf,
             fill: color(&track.fill, track.fill_rest),
+            fill_gradient: track.fill_gradient.as_ref().map(|g| std::sync::Arc::new(g.sample(t))),
+            border_gradient: track.border_gradient.as_ref().map(|g| std::sync::Arc::new(g.sample(t))),
             border: color(&track.border, track.border_rest),
             border_width: track.border_width,
             edges: track.edges,
@@ -483,7 +501,7 @@ impl Animator {
                     local,
                     xf,
                     opacity: if j == 0 { p.opacity * fade } else { p.opacity },
-                    ..*p
+                    ..p.clone()
                 }
             })
             .collect()
@@ -582,6 +600,43 @@ pub(crate) fn rgba([pl, pa, pb, a]: [f32; 4]) -> Rgba {
         srgb(-0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s),
         quantize(a),
     )
+}
+
+/// Native stops spring independently; changing kind or stop count starts a new topology.
+#[derive(Debug, Clone)]
+struct GradientTrack {
+    rest: crate::paint::Gradient,
+    stops: Vec<(Prop<1>, Prop<4>)>,
+    angle: Prop<1>,
+}
+impl GradientTrack {
+    fn at(g: &crate::paint::Gradient) -> Self {
+        Self { rest: g.clone(), stops: g.stops.iter().map(|s| (Prop::at([s.offset]), Prop::at(oklab(Some(s.color))))).collect(), angle: Prop::at([g.angle.unwrap_or(0.0)]) }
+    }
+    fn moving(&self) -> bool {
+        self.angle.moving.is_some() || self.stops.iter().any(|(p,c)| p.moving.is_some() || c.moving.is_some())
+    }
+    fn sample(&self, t: f64) -> crate::paint::Gradient {
+        if !self.moving() { return self.rest.clone(); }
+        let stops: Vec<_> = self.stops.iter().map(|(p,c)| crate::paint::GradientStop { offset: p.value(t)[0], color: rgba(c.value(t)) }).collect();
+        crate::paint::Gradient::new(&stops, self.rest.angle.map(|_| self.angle.value(t)[0]))
+    }
+    fn settle(&mut self, t: f64) -> bool {
+        let mut moving = self.angle.settle(t, 0.001);
+        for (p,c) in &mut self.stops { moving |= p.settle(t, 0.001); moving |= c.settle(t, 1.0 / 1024.0); }
+        moving
+    }
+}
+fn gradient_retarget(track: &mut Option<Box<GradientTrack>>, target: Option<&crate::paint::Gradient>, spring: Option<Spring>, t: f64) {
+    let Some(g) = target else { *track = None; return };
+    if let Some(tr) = track.as_mut().filter(|tr| tr.stops.len() == g.stops.len() && tr.rest.angle.is_some() == g.angle.is_some()) {
+        for ((p,c), stop) in tr.stops.iter_mut().zip(g.stops.iter()) {
+            p.set([stop.offset], spring, t);
+            c.set(oklab(Some(stop.color)), spring, t);
+        }
+        tr.angle.set([g.angle.unwrap_or(0.0)], spring, t);
+        tr.rest = g.clone();
+    } else { *track = Some(Box::new(GradientTrack::at(g))); }
 }
 
 #[cfg(test)]

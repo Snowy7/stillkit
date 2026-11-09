@@ -171,6 +171,36 @@ fn op(ctx: &CGContext, text: &mut Text, images: &mut Images, op: &Op, damage: Re
             ops(ctx, text, images, inner, rect.intersect(damage));
             CGContext::restore_g_state(c);
         }
+        Op::Gradient { rect, radius, width, gradient } => {
+            use objc2_core_graphics::{CGColorSpace, CGGradient, CGGradientDrawingOptions};
+            let components: Vec<_> = gradient.stops.iter().flat_map(|s| [s.color.r as f64, s.color.g as f64, s.color.b as f64, s.color.a as f64]).collect();
+            let locations: Vec<_> = gradient.stops.iter().map(|s| s.offset as f64).collect();
+            let space = CGColorSpace::new_device_rgb();
+            // SAFETY: four components and one location for every stop, kept alive for this call.
+            let g = unsafe { CGGradient::with_color_components(space.as_deref(), components.as_ptr(), locations.as_ptr(), locations.len()) };
+            if let Some(g) = g {
+                let c = Some(ctx);
+                CGContext::save_g_state(c);
+                CGContext::add_path(c, Some(&rounded(*rect, *radius)));
+                if *width > 0.0 {
+                    CGContext::set_line_width(c, *width as f64);
+                    CGContext::set_line_cap(c, CGLineCap::Butt);
+                    CGContext::set_line_join(c, CGLineJoin::Miter);
+                    CGContext::replace_path_with_stroked_path(c);
+                }
+                CGContext::clip(c);
+                let options = CGGradientDrawingOptions::DrawsBeforeStartLocation | CGGradientDrawingOptions::DrawsAfterEndLocation;
+                if gradient.angle.is_some() {
+                    let (a,b) = gradient.line(*rect);
+                    CGContext::draw_linear_gradient(c, Some(&g), CGPoint::new(a.x as f64, a.y as f64), CGPoint::new(b.x as f64, b.y as f64), options);
+                } else {
+                    let at = rect.center();
+                    let center = CGPoint::new(at.x as f64, at.y as f64);
+                    CGContext::draw_radial_gradient(c, Some(&g), center, 0.0, center, ((rect.width() * rect.width() + rect.height() * rect.height()).sqrt() * 0.5).max(0.001) as f64, options);
+                }
+                CGContext::restore_g_state(c);
+            }
+        }
         Op::Fill { rect, radius, color } => fill(ctx, &rounded(*rect, *radius), *color),
         Op::Hole { rect } => CGContext::clear_rect(c, cg(*rect)),
         Op::Stroke { rect, radius, width, color } => stroke(ctx, &rounded(*rect, *radius), *width, *color, false),
