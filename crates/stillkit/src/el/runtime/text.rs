@@ -352,13 +352,25 @@ impl<S> Runtime<S> {
 
     /// A press, a drag or a release of the primary button, for the field under it: a click
     /// places the caret, a double click selects a word, a triple click the line; dragging
-    /// extends by the same unit. Whether a field took it.
-    pub(super) fn field_pointer(&mut self, event: &crate::Event) -> bool {
+    /// extends by the same unit; a press that just `focused` a `select_all_on_focus` field
+    /// leaves it all selected. Whether a field took it.
+    pub(super) fn field_pointer(&mut self, event: &crate::Event, focused: bool) -> bool {
         use crate::{Button, Event};
         match *event {
             Event::Press(p, Button::Left) => {
                 let Some(hit) = self.ix.pressed else { return false };
-                let Some((id, _)) = self.field_of_hit(hit) else { return false };
+                let Some((id, i)) = self.field_of_hit(hit) else { return false };
+                // The click that focuses a `select_all_on_focus` field selects it all, as a
+                // spreadsheet's or Unity's number field does: typing replaces the value.
+                let select_all = flatten(&self.root).get(i).and_then(|el| el.field()).is_some_and(|f| f.select_all);
+                if select_all && focused {
+                    let Some(f) = self.fields.get_mut(&id) else { return false };
+                    f.ed.preedit = None;
+                    let len = f.ed.text.len();
+                    f.ed.select(0..len);
+                    self.edited(id, false);
+                    return true;
+                }
                 let now = self.clock;
                 let scroll_y = self.scrolls.get(&id).map_or(0.0, |v| v.offset(self.anim.t));
                 let s = self.scale;

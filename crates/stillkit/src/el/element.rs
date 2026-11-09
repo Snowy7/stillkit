@@ -1030,7 +1030,8 @@ impl<S> El<S> {
         self
     }
 
-    /// Selects a field's whole text whenever it gets focus (a search or rename field).
+    /// Selects a field's whole text whenever it gets focus (a search or rename field), the
+    /// click that focuses it included; clicks after that place the caret.
     pub fn select_all_on_focus(mut self) -> Self {
         self.spec(|f| f.select_all = true);
         self
