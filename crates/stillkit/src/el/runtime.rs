@@ -1868,8 +1868,7 @@ impl<S> Runtime<S> {
     pub fn set_reduced_motion(&mut self, reduced: bool) {
         if reduced != self.anim.reduced {
             self.anim.reduced = reduced;
-            // Retarget active spatial springs under the new motion policy.
-            self.stale_layout = true;
+            if reduced { self.anim.land_spatial(); }
             // Spinners stop or start.
             self.stale_paint = true;
         }

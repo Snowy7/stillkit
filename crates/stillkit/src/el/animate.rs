@@ -287,18 +287,10 @@ impl Track {
         self.shadow.set([target.shadow], fade, t);
         self.value.set([target.value], spatial, t);
         self.angle.set([target.angle], spatial, t);
-        if spatial.is_none() {
-            self.rect.moving = None;
-            self.radius.moving = None;
-            self.value.moving = None;
-            self.angle.moving = None;
-        }
         if self.transform.is_some() || target.transform.is_some() {
             self.transform.get_or_insert_with(||Box::new(Prop::at([0.,0.,1.,1.,0.5,0.5]))).set(target.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]),spatial,t);
         }
-        if spatial.is_none() && let Some(transform) = &mut self.transform {
-            transform.moving = None;
-        }
+        if spatial.is_none() { self.land_spatial(); }
         self.transition = target.transition;
         self.open = target.open;
         if self.leaving {
@@ -306,6 +298,14 @@ impl Track {
             let spring = (mode == Mode::Animate).then(|| self.presence_spring(reduced));
             self.presence.set([1.0], spring, t);
         }
+    }
+
+    fn land_spatial(&mut self) {
+        self.rect.moving = None;
+        self.radius.moving = None;
+        self.value.moving = None;
+        self.angle.moving = None;
+        if let Some(transform) = &mut self.transform { transform.moving = None; }
     }
 
     fn presence_spring(&self, reduced: bool) -> Spring {
@@ -455,6 +455,11 @@ impl Animator {
             self.tracks.remove(id);
         }
         left
+    }
+
+    /// Lands spatial motion without invalidating layout or disturbing scroll anchors.
+    pub fn land_spatial(&mut self) {
+        for track in self.tracks.values_mut() { track.land_spatial(); }
     }
 
     /// Whether anything moves (the host keeps frames coming while it does).
