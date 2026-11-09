@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - `stillkit::waker()`: a `Send + Sync` `Waker` that ends the UI thread's idle wait from any thread (worker results, sockets), coalesced, with no timer.
 - `Icon::Path(&IconPath)`: apps draw their own SVG-path icons (any Lucide glyph, a brand mark) through every renderer, beside the built-in set.
 - `stillkit::dialog`: native folder/file pickers, save panel and error alert (macOS, Windows; Linux has no portal client yet).
