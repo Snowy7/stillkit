@@ -182,7 +182,6 @@ impl<const N: usize> Prop<N> {
     /// spring, lands on it. An unchanged target keeps its flight.
     pub(crate) fn set(&mut self, target: [f32; N], spring: Option<Spring>, t: f64) {
         if target == self.target {
-            if spring.is_none() { self.moving = None; }
             return;
         }
         let (x, v) = self.sample(t);
@@ -288,8 +287,17 @@ impl Track {
         self.shadow.set([target.shadow], fade, t);
         self.value.set([target.value], spatial, t);
         self.angle.set([target.angle], spatial, t);
+        if spatial.is_none() {
+            self.rect.moving = None;
+            self.radius.moving = None;
+            self.value.moving = None;
+            self.angle.moving = None;
+        }
         if self.transform.is_some() || target.transform.is_some() {
             self.transform.get_or_insert_with(||Box::new(Prop::at([0.,0.,1.,1.,0.5,0.5]))).set(target.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]),spatial,t);
+        }
+        if spatial.is_none() && let Some(transform) = &mut self.transform {
+            transform.moving = None;
         }
         self.transition = target.transition;
         self.open = target.open;
@@ -365,7 +373,9 @@ impl Animator {
                 track.retarget(target, mode, reduced, t);
                 if track.screen {
                     let r = l.rect;
-                    track.rect.set([r.left, r.top, r.right, r.bottom], target.motion.filter(|_| mode == Mode::Animate && !reduced), t);
+                    let spring = target.motion.filter(|_| mode == Mode::Animate && !reduced);
+                    track.rect.set([r.left, r.top, r.right, r.bottom], spring, t);
+                    if spring.is_none() { track.rect.moving = None; }
                 }
                 continue;
             }
