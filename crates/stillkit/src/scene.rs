@@ -404,22 +404,26 @@ fn changed_span<'a>(old: &'a [Op], new: &'a [Op]) -> (&'a [Op], &'a [Op]) {
     (&old[..old.len() - suffix], &new[..new.len() - suffix])
 }
 
+/// How far ahead a mismatch looks for the lists to line up again (an inserted or removed
+/// run of up to this many ops costs only itself).
+const RESYNC: usize = 24;
+
 fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect>) {
     let (old, new) = changed_span(old, new);
-    // Lists of different lengths no longer line up op for op: each op that remains is damage.
-    if old.len() != new.len() {
-        for op in old.iter().chain(new) {
-            let bounds = op.bounds();
-            let bounds = clip.map_or(bounds, |clip| intersection(bounds, clip));
-            if !bounds.is_empty() {
-                out.push(bounds);
-            }
+    // A changed rect, kept to the clip it draws in.
+    fn push(out: &mut Vec<Rect>, clip: Option<Rect>, rect: Rect) {
+        let rect = clip.map_or(rect, |clip| intersection(rect, clip));
+        if !rect.is_empty() {
+            out.push(rect);
         }
-        return;
     }
-    for i in 0..old.len().max(new.len()) {
-        let changed = match (old.get(i), new.get(i)) {
-            (Some(a), Some(b)) if a == b => continue,
+    let (mut i, mut j) = (0, 0);
+    while i < old.len() || j < new.len() {
+        match (old.get(i), new.get(j)) {
+            (Some(a), Some(b)) if a == b => {
+                i += 1;
+                j += 1;
+            }
             (
                 Some(Op::Clipped {
                     rect: a,
@@ -430,17 +434,47 @@ fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect
                     ops: after,
                 }),
             ) if a == b => {
-                let clip = clip.map_or(*a, |outer| intersection(outer, *a));
-                collect_damage(before, after, Some(clip), out);
-                continue;
+                let inner = clip.map_or(*a, |outer| intersection(outer, *a));
+                collect_damage(before, after, Some(inner), out);
+                i += 1;
+                j += 1;
             }
-            (Some(a), Some(b)) => arc_change(a, b).unwrap_or_else(|| a.bounds().union(b.bounds())),
-            (Some(one), None) | (None, Some(one)) => one.bounds(),
-            (None, None) => continue,
-        };
-        let changed = clip.map_or(changed, |clip| intersection(changed, clip));
-        if !changed.is_empty() {
-            out.push(changed);
+            (Some(a), Some(b)) => {
+                // Ops inserted (or removed) here: the lists line up again a few ops on.
+                let inserted = (1..=RESYNC).find(|k| new.get(j + k) == Some(a));
+                let removed = (1..=RESYNC).find(|k| old.get(i + k) == Some(b));
+                match (inserted, removed) {
+                    (Some(k), r) if r.is_none_or(|r| k <= r) => {
+                        new[j..j + k].iter().for_each(|op| push(out, clip, op.bounds()));
+                        j += k;
+                    }
+                    (_, Some(k)) => {
+                        old[i..i + k].iter().for_each(|op| push(out, clip, op.bounds()));
+                        i += k;
+                    }
+                    _ => {
+                        // Changed in place: where it was and where it is (apart, if it moved).
+                        match arc_change(a, b) {
+                            Some(arc) => push(out, clip, arc),
+                            None => {
+                                push(out, clip, a.bounds());
+                                push(out, clip, b.bounds());
+                            }
+                        }
+                        i += 1;
+                        j += 1;
+                    }
+                }
+            }
+            (Some(one), None) => {
+                push(out, clip, one.bounds());
+                i += 1;
+            }
+            (None, Some(one)) => {
+                push(out, clip, one.bounds());
+                j += 1;
+            }
+            (None, None) => break,
         }
     }
 }
@@ -513,47 +547,9 @@ fn intersection(a: Rect, b: Rect) -> Rect {
 }
 
 fn damage_ops(old: &[Op], new: &[Op]) -> Option<Rect> {
-    let (old, new) = changed_span(old, new);
-    if old.len() != new.len() {
-        return old
-            .iter()
-            .chain(new)
-            .map(Op::bounds)
-            .filter(|r| !r.is_empty())
-            .reduce(Rect::union);
-    }
-    let count = new.len().max(old.len());
-    (0..count)
-        .filter_map(|i| match (old.get(i), new.get(i)) {
-            (Some(a), Some(b)) if a == b => None,
-            (
-                Some(Op::Clipped {
-                    rect: a,
-                    ops: before,
-                }),
-                Some(Op::Clipped {
-                    rect: b,
-                    ops: after,
-                }),
-            ) if a == b => {
-                let changed = damage_ops(before, after)?;
-                let clipped = Rect {
-                    left: changed.left.max(a.left),
-                    top: changed.top.max(a.top),
-                    right: changed.right.min(a.right),
-                    bottom: changed.bottom.min(a.bottom),
-                };
-                (!clipped.is_empty()).then_some(clipped)
-            }
-            (a, b) => {
-                let bounds = |op: Option<&Op>| op.map(Op::bounds).filter(|r| !r.is_empty());
-                match (bounds(a), bounds(b)) {
-                    (Some(a), Some(b)) => Some(a.union(b)),
-                    (one, other) => one.or(other),
-                }
-            }
-        })
-        .reduce(Rect::union)
+    let mut regions = Vec::new();
+    collect_damage(old, new, None, &mut regions);
+    regions.into_iter().reduce(Rect::union)
 }
 
 #[cfg(test)]
@@ -573,6 +569,18 @@ mod tests {
             ops,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn changes_far_apart_damage_only_themselves() {
+        let old = list((0..40).map(|i| fill(i as f32 * 20.0)).collect());
+        let mut ops: Vec<Op> = (0..40).map(|i| fill(i as f32 * 20.0)).collect();
+        ops.insert(2, fill(2000.0));
+        ops[39] = fill(3000.0);
+        let new = list(ops);
+        let regions = new.damage_regions(&old);
+        let area: f32 = regions.iter().map(|r| r.width() * r.height()).sum();
+        assert!(area < 4.0 * 12.0 * 12.0, "only the inserted and the changed op: {regions:?}");
     }
 
     #[test]
