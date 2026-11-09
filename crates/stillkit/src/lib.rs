@@ -26,6 +26,7 @@ pub use platform::current::compose;
 pub mod controls;
 pub mod damage;
 pub mod dialog;
+pub mod tray;
 pub mod el;
 pub mod focus;
 pub mod geom;

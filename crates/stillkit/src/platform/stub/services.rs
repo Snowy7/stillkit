@@ -1,0 +1,14 @@
+//! NSStatusItem integration is reserved; unsupported calls allocate no native resources.
+pub(crate) struct Tray;
+impl Tray {
+    pub fn new(_: &str, _: &str, _: crate::tray::Icon) -> anyhow::Result<Self> {
+        anyhow::bail!("NSStatusItem is not implemented")
+    }
+    pub fn next_event(&mut self) -> Option<crate::tray::Event> {
+        None
+    }
+    pub fn set_tooltip(&mut self, _: &str) -> anyhow::Result<()> {
+        anyhow::bail!("NSStatusItem is not implemented")
+    }
+}
+

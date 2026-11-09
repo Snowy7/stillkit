@@ -93,7 +93,7 @@ fn connect() -> Option<(UnixStream, Session)> {
 }
 /// A non-blocking connect: a local socket either accepts at once or is refused (a full backlog
 /// returns EAGAIN), so startup never waits on the bus.
-fn open(address: &Address) -> Option<UnixStream> {
+pub(super) fn open(address: &Address) -> Option<UnixStream> {
     let (prefix, name): (&[u8], &[u8]) = match address {
         Address::Path(path) => (b"", path),
         Address::Abstract(name) => (b"\0", name),

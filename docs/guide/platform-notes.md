@@ -41,3 +41,19 @@ fn main() -> anyhow::Result<()> {
 
 
 [All guides](../../README.md#guides) | [Element reference](../el.md)
+
+## Opt-in desktop services
+
+`tray::Tray::new` creates an icon from validated straight RGBA pixels. Keep it on the
+UI thread, drain `next_event`, and sleep with `platform::current::host::wait`.
+Creation never shows or activates a window. Drop removes the icon. The `services`
+example is a tray-only app; right-click exits it.
+
+Windows resolves shell APIs on first use and restores icons after Explorer restarts.
+Linux uses StatusNotifierItem on the session bus, sharing the AT-SPI wire reader and
+joining the Wayland poll set. A StatusNotifier host is required (GNOME needs an extension).
+Tooltip changes signal the host. Primary and context-menu requests return screen
+coordinates; `Tray::open_menu` opens stillkit's own `Menu` there. The app routes menu
+surface events to the menu as usual. Wayland compositors control global placement;
+tray-menu placement is therefore compositor-dependent. macOS currently reports an
+unsupported NSStatusItem stub.
