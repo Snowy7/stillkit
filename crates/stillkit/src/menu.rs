@@ -439,8 +439,9 @@ pub fn view_animated<C>(
             continue;
         }
         if let Entry::Header(label)=item {
-            let mut style=label_style.clone();style.size*=0.86;
-            ops.push(Op::Text {rect:Rect::new(body.left+m.pad+8.0*s,top+(row.height-row.label.1*0.86)/2.0,(body.width()-2.0*m.pad-16.0*s).max(1.0),row.label.1),text:label.as_str().into(),style,color:c.text_dim});
+            // Section headings read like Windows 11 jump lists: semibold secondary ink, not disabled ink.
+            let mut style=label_style.clone();style.size*=0.86;style.weight=600;
+            ops.push(Op::Text {rect:Rect::new(body.left+m.pad+8.0*s,top+(row.height-row.label.1*0.86)/2.0,(body.width()-2.0*m.pad-16.0*s).max(1.0),row.label.1),text:label.as_str().into(),style,color:c.text.with_alpha(c.text.a*0.72)});
             continue;
         }
         let selectable = item.selectable();
