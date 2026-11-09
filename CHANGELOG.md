@@ -8,6 +8,7 @@
 - Component story browser (including ColorPicker), headless story baselines and a runnable ten-minute settings guide.
 - Opt-in F12 element inspector and native look-file reloads, with no inspection code in ordinary builds.
 - Native linear and radial element gradients for fills and borders, with sprung stops and direction (`el_effects`).
+- Display text and containers can opt into document selection, keyboard copy and accessible text ranges.
 - `stillkit_kit::ColorPicker`: a controlled saturation/brightness square with hue and optional alpha strips; `on_change` previews every drag move and commits on release (`Hsva` keeps the hue through greys).
 - Linux folder/file/save pickers through the XDG FileChooser portal with local URI decoding.
 - Single-instance guards forward launch arguments and activation URLs to the UI thread.

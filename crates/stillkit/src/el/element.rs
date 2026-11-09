@@ -804,6 +804,7 @@ pub struct El<S> {
     pub(crate) virt: Option<super::virtualize::Virt>,
     /// Draws no focus ring of its own ([`El::focus_ring`]).
     pub(crate) quiet: bool,
+    pub(crate) selectable: bool,
     pub(crate) children: Vec<El<S>>,
 }
 
@@ -846,6 +847,7 @@ fn new<S>(what: What) -> El<S> {
         virt: None,
         cascade: false,
         quiet: false,
+        selectable: false,
         children: Vec::new(),
     }
 }
@@ -965,15 +967,43 @@ impl<S> El<S> {
         self
     }
 
+    /// Makes display text selectable. A container joins descendants in reading order,
+    /// with a newline between elements. Fields keep their own editing selection.
+    /// Unwrapped labels become fully wrapped text.
+    pub fn selectable(mut self) -> Self {
+        if self.field().is_some() || self.on_press.is_some() || self.on_drag.is_some() || self.on_pointer.is_some() {
+            return self;
+        }
+        self.selectable = true;
+        if let What::Text { wrap, .. } = &mut self.what {
+            *wrap = Some(wrap.unwrap_or(usize::MAX));
+        }
+        self.children = self.children.into_iter().map(El::selectable).collect();
+        self
+    }
+
+    // A control added after `selectable()` takes its subtree out of document input.
+    fn clear_selection(&mut self) {
+        self.selectable = false;
+        for child in &mut self.children {
+            child.clear_selection();
+        }
+    }
+
     /// Child.
     pub fn child(mut self, child: El<S>) -> Self {
+        let child = if self.selectable { child.selectable() } else { child };
         self.children.push(child);
         self
     }
 
     /// Children.
     pub fn children(mut self, children: impl IntoIterator<Item = El<S>>) -> Self {
-        self.children.extend(children);
+        if self.selectable {
+            self.children.extend(children.into_iter().map(El::selectable));
+        } else {
+            self.children.extend(children);
+        }
         self
     }
 
@@ -1632,6 +1662,7 @@ impl<S> El<S> {
     /// Space while focused, or assistive technology's invoke. The view then runs again.
     pub fn on_press(mut self, handler: impl Fn(&mut S) + 'static) -> Self {
         self.on_press = Some(Box::new(move |s, _| handler(s)));
+        self.clear_selection();
         self
     }
 
@@ -1639,6 +1670,7 @@ impl<S> El<S> {
     /// with no motion, `tx.set_theme(..)` switches the look.
     pub fn on_press_with(mut self, handler: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
         self.on_press = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1647,6 +1679,7 @@ impl<S> El<S> {
     /// follows the pointer), with no motion.
     pub fn on_drag(mut self, handler: impl Fn(&mut S, f32, f32) + 'static) -> Self {
         self.on_drag = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1661,6 +1694,7 @@ impl<S> El<S> {
     /// Changes land at once, with no motion, as a drag's do. Presses still reach `on_press`.
     pub fn on_pointer(mut self, handler: impl Fn(&mut S, &PointerEvent, &mut Tx) -> bool + 'static) -> Self {
         self.on_pointer = Some(Box::new(handler));
+        self.clear_selection();
         self
     }
 
@@ -1748,7 +1782,8 @@ impl<S> El<S> {
 
     /// Whether input lands on it (it takes a hit item that can be enabled).
     pub(crate) fn interactive(&self) -> bool {
-        self.on_press.is_some()
+        (self.selectable && matches!(self.what, What::Text { .. }))
+            || self.on_press.is_some()
             || self.on_drag.is_some()
             || self.on_pointer.is_some()
             || self.on_wheel.is_some()

@@ -221,7 +221,7 @@ impl Snapshot {
                     }
                     Semantics::Text(value) => {
                         node.set_value(&**value);
-                        if hit.actionable {
+                        if hit.actionable && matches!(hit.role, Role::TextInput | Role::MultilineTextInput | Role::SearchInput) {
                             node.add_action(Action::SetValue);
                         }
                     }

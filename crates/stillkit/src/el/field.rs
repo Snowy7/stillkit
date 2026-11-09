@@ -240,7 +240,7 @@ impl Field {
 }
 
 /// Lays `shown` out: one line, or wrapped at `width` (hard line breaks kept).
-fn shape(text: &mut Text, shown: &str, look: &Look, width: Option<f32>) -> Shape {
+pub(crate) fn shape(text: &mut Text, shown: &str, look: &Look, width: Option<f32>) -> Shape {
     let mut lines = Vec::new();
     let mut start = 0;
     for hard in shown.split('\n') {

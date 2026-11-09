@@ -572,3 +572,20 @@ anchor survives prepends and measurements above the viewport. `rows.reveal(key)`
 inside an app update builds and reveals an unmounted row. Focused rows remain built.
 Call `invalidate()` after changing the available width or font. Fixed-height
 `virtual_list` keeps its arithmetic path and has no measurement cache.
+
+## Selectable documents
+
+`text("Version 1.0").selectable()` enables drag selection, double-click words,
+triple-click paragraphs, Shift-click extension, Ctrl+A and Ctrl+C (Command+A/C
+also work). Selection uses `token::SELECTION` and exposes character ranges to
+assistive technology. It does not run the view or start a caret timer.
+
+Use `col().selectable().children(...)` for a document: its display text shares
+one selection and copies in tree reading order, with a newline between elements.
+Text fields retain their independent editing state; interactive controls are excluded.
+Descendants added before or after `.selectable()` participate. Give dynamic documents stable element keys.
+Selectable labels wrap fully by default; `.wrap(n)` still limits visible lines.
+The window host uses `el::SystemClipboard`; headless runtimes can inject a
+`Clipboard` with `Runtime::set_clipboard`.
+
+See `examples/display_selection.rs` for a scrollable help document.
