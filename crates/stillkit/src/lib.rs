@@ -28,6 +28,7 @@ pub mod damage;
 pub mod dialog;
 pub mod tray;
 pub mod hotkey;
+pub mod notify;
 pub mod el;
 pub mod focus;
 pub mod geom;

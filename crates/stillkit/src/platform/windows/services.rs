@@ -444,3 +444,79 @@ mod hotkey_tests {
     }
 }
 
+pub(crate) struct Notifications {
+    tray: Tray,
+    serial: u32,
+}
+impl Notifications {
+    pub fn new(id: &str, icon: Icon) -> Result<Self> {
+        Ok(Self {
+            tray: Tray::new(id, id, icon)?,
+            serial: 0,
+        })
+    }
+    pub fn show(&mut self, title: &str, body: &str) -> Result<u32> {
+        use windows::Win32::UI::Shell::{NIF_INFO, NIIF_INFO};
+        ensure!(
+            self.tray.state.notification == 0,
+            "a notification balloon is still active"
+        );
+        self.serial = self
+            .serial
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("notification identifier exhausted"))?;
+        let data = &mut self.tray.state.data;
+        copy_wide(&mut data.szInfoTitle, title);
+        copy_wide(&mut data.szInfo, body);
+        data.dwInfoFlags = NIIF_INFO;
+        let old = data.uFlags;
+        data.uFlags = NIF_INFO;
+        // SAFETY: the initialized notification data refers to this object's live icon.
+        let shown = unsafe { (self.tray.state.notify)(NIM_MODIFY.0, data) } != 0;
+        data.uFlags = old;
+        ensure!(shown, "notification delivery failed");
+        self.tray.state.notification = self.serial;
+        Ok(self.serial)
+    }
+    pub fn next_action(&mut self) -> Option<crate::notify::Action> {
+        self.tray
+            .state
+            .clicked
+            .pop_front()
+            .map(|id| crate::notify::Action {
+                id,
+                action: "default".into(),
+            })
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+    #[test]
+    fn balloon_click_delivers_its_identifier_once() -> Result<()> {
+        let mut notifications = Notifications::new(
+            "stillkit.notification.test",
+            Icon::rgba(1, 1, vec![255; 4])?,
+        )?;
+        notifications.tray.state.notification = 17;
+        // SAFETY: directly exercises our callback with its owned window; no input or balloon is sent.
+        unsafe {
+            window_proc(
+                notifications.tray.window,
+                WM_APP + 37,
+                WPARAM(0),
+                LPARAM(0x405),
+            );
+        }
+        assert_eq!(
+            notifications.next_action(),
+            Some(crate::notify::Action {
+                id: 17,
+                action: "default".into()
+            })
+        );
+        assert_eq!(notifications.next_action(), None);
+        Ok(())
+    }
+}

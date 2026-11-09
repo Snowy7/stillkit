@@ -18,3 +18,10 @@ impl Hotkey {
  pub fn activated(&mut self)->bool { false }
 }
 
+pub(crate) struct Notifications;
+impl Notifications {
+ pub fn new(_:&str,_:crate::tray::Icon)->anyhow::Result<Self> {anyhow::bail!("notifications unsupported")}
+ pub fn show(&mut self,_:&str,_:&str)->anyhow::Result<u32> {anyhow::bail!("notifications unsupported")}
+ pub fn next_action(&mut self)->Option<crate::notify::Action> {None}
+}
+

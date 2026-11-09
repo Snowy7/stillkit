@@ -62,3 +62,9 @@ unsupported NSStatusItem stub.
 Drain `activated()` after the wait. Drop unregisters it. Linux uses GlobalShortcuts,
 requires compositor support and may show a consent dialog (up to two minutes).
 The compositor chooses the actual trigger. macOS hotkeys are currently unsupported.
+
+`notify::Notifications::new(id, icon)` owns desktop notifications. `show(title, body)`
+returns an id; `next_action` reports the id and action key after dispatch. Windows
+uses tray balloons (one active balloon at a time, default action, shell text limits), avoiding
+WinRT startup and registration. Linux uses org.freedesktop.Notifications; action
+support depends on the notification server. Drop closes owned notifications.

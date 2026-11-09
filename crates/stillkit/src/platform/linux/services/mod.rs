@@ -34,6 +34,8 @@ mod hotkey;
 pub(super) mod portal;
 pub(crate) use hotkey::Hotkey;
 
+mod notify;
+pub(crate) use notify::Notifications;
 
 
 mod wire;
