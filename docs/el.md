@@ -57,7 +57,7 @@ notes area).
   popup's window grows by its shadows' reach.
 - **Text:** `font(TextRole)`, and `family(..)`, `weight(..)`, `text_size(..)` (its line scales with it) and `text_align(TextAlign::Start | Center | End)` over the role; fields take them too.
 - **Pointer:** `cursor(Cursor)`: the shape over it (innermost wins; fields show an I-beam), kept through a press that began on it. `Runtime::cursor()` reads it; `el::run` applies it. Shapes: arrow, text, hand, move, resize (both ways), grab, grabbing, crosshair, not allowed, copy.
-- **Transform:** `rotate(radians)` and `spin(period)`. See [Rotation and
+- **Transform:** `translate(x, y)`, `scale(factor)`, `scale_xy(x, y)`, `rotate(radians)`, `origin(x, y)` and `spin(period)`. Transform origins are fractions of the upright box (centre by default). Translation uses design pixels. Scale and rotation apply about that origin, followed by translation; nested transforms compose. All painted content, including text, images and clips, follows the transform on CPU and GPU. Layout stays upright. With `.animate()` spatial properties spring, keep velocity when retargeted, and snap under reduced motion. Pointer hits follow the exact transformed region. See [Rotation and
   spinners](#rotation-and-spinners).
 - **Semantics:** `key`, `role`, `label`, `checked`, `disabled`, `focusable`, `description`,
   `value` (the value as text, "40%"), `selected`, `expanded`, `range(min, max, step, value)`,
