@@ -720,14 +720,14 @@ impl Cast {
 }
 
 /// How an element animates (`motion` and `instant` reach its whole subtree).
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone)]
 pub(crate) struct Anim {
     pub motion: Option<Motion>,
     pub instant: bool,
     pub transition: Option<Transition>,
     /// Radians clockwise about its centre, at draw time ([`El::rotate`]).
     pub rotate: f32,
-    pub transform: Option<[f32; 6]>,
+    pub transform: Option<Arc<[f32; 6]>>,
     /// One turn every this long while it is visible ([`El::spin`]).
     pub spin: Option<Duration>,
 }
@@ -1622,7 +1622,7 @@ impl<S> El<S> {
 
     /// Translates the painted subtree in design pixels without moving its layout.
     pub fn translate(mut self, x: f32, y: f32) -> Self {
-        let v = self.anim.transform.get_or_insert([0.,0.,1.,1.,0.5,0.5]);
+        let v = Arc::make_mut(self.anim.transform.get_or_insert_with(||Arc::new([0.,0.,1.,1.,0.5,0.5])));
         v[0] = if x.is_finite() { x } else { 0. };
         v[1] = if y.is_finite() { y } else { 0. };
         self
@@ -1631,14 +1631,14 @@ impl<S> El<S> {
     pub fn scale(self, factor: f32) -> Self { self.scale_xy(factor,factor) }
     /// Scales the painted subtree on each axis. Negative values reflect it.
     pub fn scale_xy(mut self, x: f32, y: f32) -> Self {
-        let v = self.anim.transform.get_or_insert([0.,0.,1.,1.,0.5,0.5]);
+        let v = Arc::make_mut(self.anim.transform.get_or_insert_with(||Arc::new([0.,0.,1.,1.,0.5,0.5])));
         v[2] = if x.is_finite() { x } else { 1. };
         v[3] = if y.is_finite() { y } else { 1. };
         self
     }
     /// Sets the fractional transform origin: `(0,0)` is top-left, `(0.5,0.5)` centre.
     pub fn origin(mut self, x: f32, y: f32) -> Self {
-        let v = self.anim.transform.get_or_insert([0.,0.,1.,1.,0.5,0.5]);
+        let v = Arc::make_mut(self.anim.transform.get_or_insert_with(||Arc::new([0.,0.,1.,1.,0.5,0.5])));
         v[4] = if x.is_finite() { x } else { 0.5 };
         v[5] = if y.is_finite() { y } else { 0.5 };
         self
@@ -1830,7 +1830,7 @@ impl<S> El<S> {
 
     /// Whether it gets a hit item at all: interactive, or carrying semantics of its own.
     pub(crate) fn hit(&self) -> bool {
-        self.interactive() || self.sem.role.is_some() || self.sem.label.is_some() || self.tip.is_some()
+        self.on_files.is_some() || self.scrolls().is_some() || self.interactive() || self.sem.role.is_some() || self.sem.label.is_some() || self.tip.is_some()
     }
 
     /// The first text in it, for a default label.

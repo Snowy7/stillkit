@@ -1311,7 +1311,7 @@ impl<S> Runtime<S> {
         let flat = flatten(&self.root);
         (0..self.laid.len().min(flat.len()))
             .rev()
-            .find(|&i| flat[i].on_files.is_some() && self.poses.get(i).is_some_and(|pose| pose.rect.contains(p)))
+            .find(|&i| flat[i].on_files.is_some() && self.list.hits.iter().any(|h|h.id==self.laid[i].hit && h.contains(p)))
     }
 
     /// The modifier keys held now, for pointer and wheel events (`PointerEvent::mods`). Hosts
@@ -1393,7 +1393,11 @@ impl<S> Runtime<S> {
             button,
             at: design(at),
             local: { let p=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at)); Point::new((p.x-rect.left)/s,(p.y-rect.top)/s) },
-            delta: Point::new((at.x - last.x) / s, (at.y - last.y) / s),
+            delta: {
+                let shape=self.list.hits.iter().find(|h|h.id==hit);
+                let a=shape.map_or(at,|h|h.unmap(at));let b=shape.map_or(last,|h|h.unmap(last));
+                Point::new((a.x-b.x)/s,(a.y-b.y)/s)
+            },
             origin: design(origin),
             size: (rect.width() / s, rect.height() / s),
             mods: self.held,
@@ -1421,7 +1425,7 @@ impl<S> Runtime<S> {
                 let rect = self.poses.get(i).map_or(self.laid[i].rect, |p| p.rect);
                 let event = super::element::WheelEvent {
                     at: Point::new(at.x / s, at.y / s),
-                    local: Point::new((at.x - rect.left) / s, (at.y - rect.top) / s),
+                    local: {let p=self.list.hits.iter().find(|h|h.id==self.laid[i].hit).map_or(at,|h|h.unmap(at));Point::new((p.x-rect.left)/s,(p.y-rect.top)/s)},
                     delta: f32::from(delta) / 120.0,
                     mods: self.held,
                 };
@@ -1444,6 +1448,7 @@ impl<S> Runtime<S> {
         else {
             return;
         };
+        let at=self.list.hits.iter().find(|h|h.id==hit).map_or(at,|h|h.unmap(at));
         let along = |v: f32, start: f32, len: f32| ((v - start) / len.max(1.0)).clamp(0.0, 1.0);
         let (x, y) = (
             along(at.x, rect.left, rect.width()),
@@ -1697,7 +1702,7 @@ impl<S> Runtime<S> {
             .iter()
             .enumerate()
             .filter(|(i, l)| {
-                self.scrolls.contains_key(&l.id) && self.poses.get(*i).is_some_and(|p| p.rect.contains(at))
+                self.scrolls.contains_key(&l.id) && self.list.hits.iter().any(|h|h.id==self.laid[*i].hit && h.contains(at))
             })
             .map(|(_, l)| l.id)
             .collect();
@@ -2235,7 +2240,7 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             shadow: if look.shadow.is_some() { 1.0 } else { 0.0 },
             value,
             angle: el.anim.rotate,
-            transform: el.anim.transform.unwrap_or([0.,0.,1.,1.,0.5,0.5]),
+            transform: el.anim.transform.clone(),
             motion,
             open: motion.unwrap_or(theme.motion.open),
             transition: el.anim.transition.filter(|_| !instant).map(|t| Transition {
@@ -2648,7 +2653,7 @@ fn paint_el<S>(
     }
     // Paint and hits share one affine scope; layout stays upright.
     let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
-    let [x,y,sx,sy,ox,oy] = pose.transform;
+    let [x,y,sx,sy,ox,oy] = pose.transform.as_deref().copied().unwrap_or([0.,0.,1.,1.,0.5,0.5]);
     let origin = Point::new(rect.left + rect.width()*ox, rect.top + rect.height()*oy);
     let transform = crate::Transform::new(origin,angle,(sx,sy),(x*f.s*pose.xf.s,y*f.s*pose.xf.s));
     if transform != crate::Transform::IDENTITY {

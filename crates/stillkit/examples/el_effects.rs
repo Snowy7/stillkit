@@ -48,7 +48,7 @@ pub fn view(on: &bool) -> El<bool> {
         )
         .child(
             el().key("radial")
-                .rotate(if *on { 0.22 } else { -0.12 })
+                .rotate(if *on { 0.22 } else { 0.0 })
                 .scale(if *on { 0.85 } else { 1.0 })
                 .translate(if *on { 16.0 } else { 0.0 },0.0)
                 .origin(0.0,0.5)

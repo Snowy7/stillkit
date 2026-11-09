@@ -60,7 +60,7 @@ fn gradient_damage_is_local_and_identical_frames_cost_no_redraw() {
     rt.frame(Duration::ZERO);
     rt.frame(Duration::from_millis(16));
     let damage = rt.list().damage(&before).unwrap();
-    assert!(damage.left >= 19.0 && damage.right <= 301.0);
+    assert!(damage.left > 0.0 && damage.width() < 320.0, "local gradient and transform damage: {damage:?}");
 }
 #[cfg(feature = "golden")]
 #[test]

@@ -893,6 +893,12 @@ impl Painter {
                     }
                 }
                 Op::Clipped { rect, ops } => {
+                    let mut xf=windows_numerics::Matrix3x2::identity();
+                    t.GetTransform(&mut xf);
+                    if xf.M12 != 0.0 || xf.M21 != 0.0 {
+                        self.op(text,&Op::RoundedClipped {rect:*rect,radius:0.0,ops:ops.clone()},damage);
+                        return;
+                    }
                     t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
                     let damage = Rect {
                         left: rect.left.max(damage.left),

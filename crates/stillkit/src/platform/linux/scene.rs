@@ -198,6 +198,7 @@ pub(super) fn draw_ops(
                             weight: (style.size / 12.).max(1.),
                             color: *color,
                         }],
+                        scene_transform,
                         image_source,
                     )?;
                     continue;

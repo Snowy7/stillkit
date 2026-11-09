@@ -227,7 +227,7 @@ pub(super) fn draw_ops(
                     && let Some(icon) = label.chars().next().and_then(crate::icons::from_system_glyph)
                 {
                     let icon = Op::Icon { rect: Rect::new(r.left, r.top, style.size, style.size), icon, weight: (style.size / 12.).max(1.), color: *color };
-                    draw_ops(ctx, res, text, &[icon], image_source)?;
+                    draw_ops(ctx, res, text, &[icon], scene_transform, image_source)?;
                     continue;
                 }
                 let italic = matches!(op, Op::Emphasis { italic: true, .. });

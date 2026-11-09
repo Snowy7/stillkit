@@ -1,6 +1,6 @@
 //! Opt-in popup presentation. A short-lived bitmap scales together with its hit regions and
 //! glass body; settlement restores the original list and releases the bitmap.
-use crate::{DisplayList, Hit, Image, Op, Point, Rect, Ui};
+use crate::{DisplayList, Image, Op, Point, Rect, Ui};
 
 /// The same uniform transform for pixels, glass, hits and pointer coordinates.
 #[derive(Debug, Clone, Copy)]
@@ -128,10 +128,11 @@ impl Snapshot {
                 .original
                 .hits
                 .iter()
-                .map(|hit| Hit {
-                    shape: None,
-                    rect: rect(hit.rect),
-                    ..hit.clone()
+                .map(|hit| {
+                    let mut hit=hit.clone();
+                    let s=transform.scale();
+                    hit.transform(crate::Transform::new(Point::new(0.,0.),0.,(s,s),(body.left-full.left*s,body.top-full.top*s)));
+                    hit
                 })
                 .collect(),
             focus: self.original.focus,
