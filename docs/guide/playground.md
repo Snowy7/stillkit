@@ -11,7 +11,7 @@ cargo run -p stillkit-playground --example stories -- --goldens story-images
 cargo run -p stillkit-playground --example stories -- --check-goldens story-images
 ```
 
-The browser lists every supported kit component (including all five button kinds).
+The browser lists every supported kit component (including ColorPicker and all five button kinds).
 ChartSeries, TreeNode, MenuItem and Command are demonstrated in their parent story;
 the deprecated TextFieldFrame compatibility shim also has a named story.
 Select a look, light/dark, material and shape independently. Scale changes raster
@@ -25,7 +25,7 @@ knobs in `Session::model`; a story can include controls for that model beside it
 subject. Names must have unique filename slugs.
 
 Headless rendering uses fresh model state, a fixed zero clock and reduced motion.
-It writes one 640x480 PNG per story per look/scheme (510 images for the current
+It writes one 640x480 PNG per story per look/scheme (520 images for the current
 catalog). It does not overwrite the existing repository goldens. Review generated
 images before committing them as a baseline. The focused catalog test runs this
 same render path and decodes every output; use `--check-goldens DIR` in CI to compare against a committed visual baseline.

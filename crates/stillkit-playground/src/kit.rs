@@ -16,6 +16,8 @@ pub struct Model {
     pub text: String,
     /// Combobox and palette state.
     pub query: QueryState,
+    /// Current colour, including hue while grey.
+    pub color: Option<Hsva>,
 }
 type S = Session<Model>;
 /// Every supported kit component has a named story; all button kinds have separate stories.
@@ -73,6 +75,7 @@ pub fn stories() -> Vec<Story<Model>> {
         "Ring",
         "Skeleton",
         "Spinner",
+        "ColorPicker",
     ] {
         stories.push(Story {
             name,
@@ -147,6 +150,7 @@ fn move_view(name: &'static str) -> fn(&S) -> El<S> {
     "Avatar" => |_: &S| Avatar::new("Islam","IS").status("Online").build(),
     "Ring" => |_: &S| Ring::new("Complete",0.7).build(),
     "Skeleton" => |_: &S| Skeleton::new(200.,24.).build(),
+    "ColorPicker" => |s: &S| ColorPicker::new(s.model.color.unwrap_or_else(|| Hsva::from_rgba(stillkit::theme::SYSTEM_BLUE))).alpha(true).on_change(|s: &mut S, color, _| s.model.color=Some(color)).build(),
     "Spinner" => |_: &S| Spinner::new("Loading",0).build()
     }
 }
