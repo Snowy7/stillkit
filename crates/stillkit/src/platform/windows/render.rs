@@ -577,7 +577,7 @@ impl Painter {
             for op in ops {
                 match op {
                     Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
-                    Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
+                    Op::Blurred { ops, .. } | Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
                     _ => {}
                 }
             }
@@ -763,6 +763,9 @@ impl Painter {
     /// Runs between BeginDraw/EndDraw. Marker clips are scoped to this slice, including
     /// inside a retained clipped group, so an unmatched Unclip cannot pop a caller's clip.
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
+        let prepared = crate::blur::prepare(ops, damage);
+        let Ok(prepared) = prepared else { return };
+        let ops = prepared.as_ref();
         // D2D axis clips expand rotated rectangles to their bounding boxes. Preserve
         // marker clips as geometry scopes when an affine turn is active.
         // SAFETY: the caller owns the active draw scope; recursive scopes balance their layers.
@@ -822,6 +825,7 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
+                Op::Blurred { .. } | Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
                 Op::Transformed { transform, ops } => {
                     let mut saved = windows_numerics::Matrix3x2::identity();
                     t.GetTransform(&mut saved);

@@ -39,6 +39,8 @@ pub(crate) struct Target {
     /// Text and icon colour.
     pub ink: Rgba,
     pub opacity: f32,
+    pub blur: f32,
+    pub backdrop_blur: f32,
     /// Clamped to a capsule.
     pub radius: f32,
     /// The theme's shadow at this strength (0 or 1).
@@ -106,6 +108,8 @@ pub(crate) struct Pose {
     pub ink: Rgba,
     /// Its own, presence included; paint multiplies it down the subtree.
     pub opacity: f32,
+    pub blur: f32,
+    pub backdrop_blur: f32,
     /// Local (before `xf.s`).
     pub radius: f32,
     pub shadow: f32,
@@ -227,6 +231,8 @@ struct Track {
     ink: Prop<4>,
     ink_rest: Rgba,
     opacity: Prop<1>,
+    blur: Prop<1>,
+    backdrop_blur: Prop<1>,
     radius: Prop<1>,
     shadow: Prop<1>,
     value: Prop<1>,
@@ -255,6 +261,8 @@ impl Track {
             ink: Prop::at(oklab(Some(target.ink))),
             ink_rest: target.ink,
             opacity: Prop::at([target.opacity]),
+            blur: Prop::at([target.blur]),
+            backdrop_blur: Prop::at([target.backdrop_blur]),
             radius: Prop::at([target.radius]),
             shadow: Prop::at([target.shadow]),
             value: Prop::at([target.value]),
@@ -283,6 +291,8 @@ impl Track {
         self.ink.set(oklab(Some(target.ink)), fade.map(|s| s.faster(2.0)), t);
         self.ink_rest = target.ink;
         self.opacity.set([target.opacity], fade, t);
+        self.blur.set([target.blur], spatial, t);
+        self.backdrop_blur.set([target.backdrop_blur], spatial, t);
         self.radius.set([target.radius], spatial, t);
         self.shadow.set([target.shadow], fade, t);
         self.value.set([target.value], spatial, t);
@@ -324,6 +334,8 @@ impl Track {
             self.border.settle(t, color),
             self.ink.settle(t, color),
             self.opacity.settle(t, color),
+            self.blur.settle(t, 0.01),
+            self.backdrop_blur.settle(t, 0.01),
             self.radius.settle(t, 0.1),
             self.shadow.settle(t, color),
             self.value.settle(t, 1.0 / 2048.0),
@@ -342,6 +354,8 @@ impl Track {
             || self.border.moving.is_some()
             || self.ink.moving.is_some()
             || self.opacity.moving.is_some()
+            || self.blur.moving.is_some()
+            || self.backdrop_blur.moving.is_some()
             || self.radius.moving.is_some()
             || self.shadow.moving.is_some()
             || self.value.moving.is_some()
@@ -499,6 +513,8 @@ impl Animator {
                     edges: target.edges,
                     ink: target.ink,
                     opacity: target.opacity,
+                    blur: target.blur,
+                    backdrop_blur: target.backdrop_blur,
                     radius: target.radius,
                     shadow: target.shadow,
                     value: target.value,
@@ -539,6 +555,8 @@ impl Animator {
             edges: track.edges,
             ink: color(&track.ink, Some(track.ink_rest)).unwrap_or(track.ink_rest),
             opacity: scalar(&track.opacity) * fade,
+            blur: (track.blur.value(t)[0].clamp(0.0,64.0)*100.0).round()/100.0,
+            backdrop_blur: (track.backdrop_blur.value(t)[0].clamp(0.0,64.0)*100.0).round()/100.0,
             radius: track.radius.value(t)[0].max(0.0),
             shadow: scalar(&track.shadow),
             // An arc's sweep to a thousandth of a turn, so its slow tail repaints nothing new.

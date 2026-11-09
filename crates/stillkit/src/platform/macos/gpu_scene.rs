@@ -130,9 +130,12 @@ pub(super) fn draw_ops(
     scene_transform: Affine,
     image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_hybrid::ImageSource,
 ) -> Result<()> {
+    let prepared = crate::blur::prepare(ops, Rect::new(-32768.0,-32768.0,65536.0,65536.0))?;
+    let ops = prepared.as_ref();
     let mut clips = 0;
     for op in ops {
         match op {
+            Op::Blurred { .. } | Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
             Op::Transformed { transform, ops } => {
                 let saved = scene_transform;
                 ctx.set_transform(saved * Affine::new(transform.0.map(f64::from)));

@@ -629,6 +629,8 @@ pub(crate) struct Sizing {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Look {
+    pub blur: f32,
+    pub backdrop_blur: f32,
     pub fill: Option<Paint>,
     /// Text and icon ink.
     pub color: Option<Paint>,
@@ -646,6 +648,8 @@ impl Look {
     /// [`El::focus_within`]) laid over it.
     pub fn with(self, patch: Self) -> Self {
         Self {
+            blur: if patch.blur > 0.0 { patch.blur } else { self.blur },
+            backdrop_blur: if patch.backdrop_blur > 0.0 { patch.backdrop_blur } else { self.backdrop_blur },
             fill: patch.fill.or(self.fill),
             color: patch.color.or(self.color),
             radius: patch.radius.or(self.radius),
@@ -827,6 +831,8 @@ fn new<S>(what: What) -> El<S> {
             radius: None,
             shadow: None,
             opacity: 1.0,
+            blur: 0.0,
+            backdrop_blur: 0.0,
             border: None,
             edges: None,
         },
@@ -1174,6 +1180,18 @@ impl<S> El<S> {
     /// A custom soft shadow under the box, design px.
     pub fn box_shadow(mut self, shadow: crate::SoftShadow) -> Self {
         self.look.shadow = Some(Cast::Custom(shadow));
+        self
+    }
+
+    /// Blurs this element and its children; sigma is in design pixels.
+    pub fn blur(mut self, px: f32) -> Self {
+        self.look.blur = if px.is_finite() { px.clamp(0.0, 64.0) } else { 0.0 };
+        self
+    }
+
+    /// Blurs preceding paint in this surface through this element's rounded bounds.
+    pub fn backdrop_blur(mut self, px: f32) -> Self {
+        self.look.backdrop_blur = if px.is_finite() { px.clamp(0.0, 64.0) } else { 0.0 };
         self
     }
 

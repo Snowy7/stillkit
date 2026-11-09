@@ -2253,6 +2253,8 @@ fn targets<S>(root: &El<S>, laid: &[Laid], theme: &Theme, s: f32, on: &super::el
             edges: look.edges.map(|(top, bottom)| [top.resolve(theme), bottom.resolve(theme)]),
             ink,
             opacity: look.opacity,
+            blur: look.blur * s,
+            backdrop_blur: look.backdrop_blur * s,
             radius: look
                 .radius
                 .map_or(0.0, |r| (r.resolve(theme) * s).round())
@@ -2678,6 +2680,13 @@ fn paint_el<S>(
     if controls && !el.quiet {
         focus_ring(f, rect, radius, w.feedback.ring(me.hit, w.t));
     }
+    if pose.backdrop_blur > 0.0 {
+        f.list.ops.insert(start, Op::BackdropBlur { rect, radius, sigma: pose.backdrop_blur * pose.xf.s, opacity: 1.0 });
+    }
+    if pose.blur > 0.0 {
+        let ops = f.list.ops.split_off(start);
+        f.push(Op::Blurred { sigma: pose.blur * pose.xf.s, ops: ops.into() });
+    }
     // Paint and hits share one affine scope; layout stays upright.
     let angle = pose.angle + el.anim.spin.map_or(0.0, |period| spin(w, me.id, index, rect, live, period));
     if angle != 0.0 || pose.transform.is_some() {
@@ -2844,8 +2853,8 @@ fn fade(ops: &mut [Op], by: f32) {
             | Op::Icon { color, .. }
             | Op::Shadow { color, .. }
             | Op::SoftShadow { color, .. } => *color = color.with_alpha(color.a * by),
-            Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
-            Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
+            Op::BackdropBlur { opacity, .. } | Op::Image { opacity, .. } | Op::RoundedImage { opacity, .. } => *opacity *= by,
+            Op::Blurred { ops, .. } | Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => fade(Arc::make_mut(ops), by),
             Op::TextField { .. } | Op::Clip { .. } | Op::Hole { .. } | Op::Unclip => {}
         }
     }
