@@ -69,3 +69,12 @@ before `.build()`. Without a height they fill available parent height (paging de
 to ten rows); without handlers, opening and sorting are off. Default table cells show
 row labels in column zero. Tree branches still toggle on Enter/Space without `on_open`.
 Table columns have fixed widths, no horizontal scroll, and a header that does not scroll sideways.
+
+For editor windows, compose `WindowTitlebar`, `TabStrip`, nested `SplitView`s and
+`Page`. `SidebarSection`/`SidebarHeader`/`SidebarRow`, `ShortcutRecorder`, `Keybind`,
+`HoverCard` and `RollingText` fill the surrounding shell. Model state owns pane
+sizes, document order, recorded chords and disclosure state; persist those values
+with the app's settings. The [app_shell example](../../crates/stillkit-kit/examples/app_shell.rs)
+shows native chrome registration and host event forwarding for KeyUp, Ctrl+Tab and
+delayed interactive hover cards. These need a custom host loop; `el::run` currently
+registers only a fixed caption band and does not expose component key-up handlers.

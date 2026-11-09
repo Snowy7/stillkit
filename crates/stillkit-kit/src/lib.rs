@@ -1175,10 +1175,16 @@ pub use combobox::{Combobox, QueryState};
 pub use palette::{Command, CommandPalette};
 pub use text::{SearchField, SecureField, TextArea, TextField};
 
-mod split_view;
-pub use split_view::{SplitAxis, SplitState, SplitView};
-
-mod tab_strip;
 mod popup_list;
-pub use tab_strip::{Tab, TabEvent, TabStrip, TabStripState};
+mod shell_pieces;
+mod split_view;
+mod tab_strip;
+mod window_titlebar;
 pub use popup_list::{PopupItem, PopupList};
+pub use shell_pieces::{
+    HoverCard, HoverCardState, KeyChord, Keybind, Page, RollingText, ShortcutRecorder,
+    ShortcutRecorderState, SidebarHeader, SidebarRow, SidebarSection,
+};
+pub use split_view::{SplitAxis, SplitState, SplitView};
+pub use tab_strip::{Tab, TabEvent, TabStrip, TabStripState};
+pub use window_titlebar::{WindowAction, WindowTitlebar};
