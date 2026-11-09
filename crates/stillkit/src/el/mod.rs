@@ -53,6 +53,8 @@ mod png;
 mod virtualize;
 pub use virtualize::virtual_list;
 mod runtime;
+#[cfg(feature = "inspect")]
+pub use runtime::inspect;
 mod rotate;
 mod scroll;
 pub mod token;

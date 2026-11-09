@@ -342,6 +342,10 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
     let opaque = is_app.then(|| backing(&app.theme));
     let mut rt = Runtime::new(app.state, app.view, app.theme, size, s)?;
     rt.set_background(opaque);
+    #[cfg(feature = "inspect")]
+    if let Some(path) = std::env::var_os("STILLKIT_LOOK") {
+        rt.watch_theme(std::path::Path::new(&path))?;
+    }
     // Windows' fields type through RichEdit, which uses the system clipboard itself.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     rt.set_clipboard(crate::platform::current::clipboard::System);

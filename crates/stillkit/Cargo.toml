@@ -31,6 +31,8 @@ serde_json = { version = "1", optional = true }
 toml = { version = "0.8", optional = true }
 
 [features]
+# Developer tools are absent from normal binaries.
+inspect = ["serde"]
 serde = ["dep:serde", "dep:serde_json", "dep:toml"]
 golden = ["dep:png"]
 # GPU mode (`platform::Render::Gpu`, docs/ui.md "Render modes"): hardware Direct2D on

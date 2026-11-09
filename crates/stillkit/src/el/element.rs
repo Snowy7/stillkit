@@ -135,13 +135,32 @@ impl Transition {
 pub struct Tx {
     pub(crate) instant: bool,
     pub(crate) mods: Modifiers,
+    #[cfg(feature = "inspect")]
+    pub(crate) preview: Option<(Key, super::inspect::PreviewState)>,
     pub(crate) theme: Option<Theme>,
+    pub(crate) scale: Option<f32>,
+    pub(crate) reduced: Option<bool>,
     pub(crate) reveal: Vec<Key>,
     /// Where focus goes once the view has run: an element by key, or nowhere (`None`).
     pub(crate) focus: Option<Option<Key>>,
 }
 
 impl Tx {
+    /// Previews interaction for a keyed story control without running its handlers.
+    #[cfg(feature = "inspect")]
+    pub fn preview_state(&mut self, key: impl Into<Key>, state: super::inspect::PreviewState) {
+        self.preview = Some((key.into(), state));
+    }
+
+    /// Changes raster density without replacing application state.
+    pub fn set_scale(&mut self, scale: f32) {
+        self.scale = Some(scale);
+    }
+    /// Overrides motion for this runtime.
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.reduced = Some(reduced);
+    }
+
     /// Applies this change with no motion: everything lands on its target at once.
     pub fn instant(&mut self) {
         self.instant = true;
