@@ -924,12 +924,11 @@ impl Surface {
         if native && !self.glass_open.get() { self.open_glass(); }
         // SAFETY: read-only window queries and a show of our own window, without activation.
         unsafe {
-            if !IsWindowVisible(self.hwnd).as_bool()
-                || windows::Win32::UI::WindowsAndMessaging::IsIconic(self.hwnd).as_bool()
+            if (!IsWindowVisible(self.hwnd).as_bool()
+                || windows::Win32::UI::WindowsAndMessaging::IsIconic(self.hwnd).as_bool())
+                && !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, true))
             {
-                if !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, true)) {
-                    let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
-                }
+                let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
             }
         }
         if self.shared.desktop.is_some() {
@@ -1057,8 +1056,8 @@ impl Surface {
 
     /// Hide.
     pub fn hide(&self) {
-        // SAFETY: our own window.
         if !self.backdrop().is_some_and(|b| b.visibility(self.hwnd, false)) {
+            // SAFETY: our own window.
             let _ = unsafe { ShowWindow(self.hwnd, SW_HIDE) };
         }
         self.close_glass();
