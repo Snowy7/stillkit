@@ -169,7 +169,7 @@ fn touching_the_state_runs_no_view() {
     let mut rt = stillkit::el::Runtime::new(vec![1, 2, 3], |s: &Vec<i32>| stillkit::el::text(format!("{}", s.len())), theme, (100, 40), 1.0).unwrap();
     rt.frame(Duration::ZERO);
     let runs = rt.view_runs();
-    let drained: Vec<i32> = rt.touch(|s| std::mem::take(s));
+    let drained: Vec<i32> = rt.touch(std::mem::take);
     rt.frame(Duration::from_millis(16));
     assert_eq!(drained, [1, 2, 3]);
     assert_eq!(rt.view_runs(), runs, "touch never runs the view");

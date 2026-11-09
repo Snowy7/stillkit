@@ -1689,9 +1689,11 @@ fn default_render() -> crate::platform::Render {
     crate::platform::Render::Cpu
 }
 
+/// Native layers by (parent window, name): the child window and where it was last placed.
+type Natives = std::collections::HashMap<(isize, String), (isize, Option<crate::Rect>)>;
+
 thread_local! {
-    /// Native layers by (parent window, name): child windows and where they were last placed.
-    static NATIVES: RefCell<std::collections::HashMap<(isize, String), (isize, Option<crate::Rect>)>> = RefCell::new(std::collections::HashMap::new());
+    static NATIVES: RefCell<Natives> = RefCell::new(Natives::new());
 }
 
 /// A native layer's window procedure: transparent to hit testing, so the pointer reaches the
