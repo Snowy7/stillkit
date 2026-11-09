@@ -274,18 +274,18 @@ impl<S> Runtime<S> {
         None
     }
     pub(super) fn display_link(&self, p: Point) -> Option<(crate::HitId, std::sync::Arc<str>)> {
-        for (i, l) in self.laid.iter().enumerate() {
-            let Some(d) = self.display.get(&l.id) else { continue };
-            let Some(rich) = &d.rich else { continue };
-            let rect = self.poses.get(i)?.rect;
-            if p.x < rect.left || p.x > rect.right || p.y < rect.top || p.y > rect.bottom { continue; }
-            for fragment in &rich.fragments {
-                let r = super::super::rich::bounds(rich, fragment, rect, d.align);
-                if p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
-                    && let Some(url) = &fragment.run.link { return Some((l.hit, url.clone())); }
-            }
-        }
-        None
+        let hovered = self.ix.hover.and_then(|hit| self.index_of_hit(hit))?;
+        let laid = self.laid.get(hovered)?;
+        let display = self.display.get(&laid.id)?;
+        let rich = display.rich.as_ref()?;
+        let rect = self.poses.get(hovered)?.rect;
+        if p.x < rect.left || p.x > rect.right || p.y < rect.top || p.y > rect.bottom { return None; }
+        rich.fragments.iter().find_map(|fragment| {
+            let url = fragment.run.link.as_ref()?;
+            let bounds = super::super::rich::bounds(rich, fragment, rect, display.align);
+            (p.x >= bounds.left && p.x <= bounds.right && p.y >= bounds.top && p.y <= bounds.bottom)
+                .then(|| (laid.hit, url.clone()))
+        })
     }
     pub(super) fn display_pointer(&mut self, event: &Event) {
         if self.display.is_empty() {

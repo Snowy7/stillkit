@@ -184,3 +184,31 @@ fn a_wrapped_link_keeps_one_identity_and_its_complete_label() {
             .all(|h| h.id == links[0].id && &*h.label == "Read all the documentation")
     );
 }
+
+#[test]
+fn a_link_clipped_out_of_its_viewport_does_not_change_the_cursor() {
+    let mut rt = Runtime::new(
+        (),
+        |_| {
+            el::col().child(
+                el::col()
+                    .w(150.0)
+                    .h(50.0)
+                    .absolute(0.0, 30.0)
+                    .scroll(el::Axis::Vertical)
+                    .child(
+                        el::rich_text([Run::new("clipped link").link("app:docs")])
+                            .absolute(0.0, -20.0)
+                            .on_link(|_, _| {}),
+                    ),
+            )
+        },
+        theme(),
+        (200, 100),
+        1.0,
+    )
+    .unwrap();
+    rt.frame(Duration::ZERO);
+    rt.pointer_move(5.0, 15.0);
+    assert_eq!(rt.cursor(), stillkit::Cursor::Arrow);
+}
