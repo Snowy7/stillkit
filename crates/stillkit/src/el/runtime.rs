@@ -287,7 +287,6 @@ pub struct Runtime<S> {
     display: HashMap<u64, selection::Display>,
     documents: HashMap<u64, super::edit::Editor>,
     display_drag: Option<selection::Drag>,
-    link_down: Option<(HitId, Arc<str>)>,
     display_clicks: Option<(Duration, Point, u8)>,
     /// The field with focus, by identity, as last seen.
     typing: Option<u64>,
@@ -402,7 +401,6 @@ impl<S: 'static> Runtime<S> {
             display: HashMap::new(),
             documents: HashMap::new(),
             display_drag: None,
-            link_down: None,
             display_clicks: None,
             typing: None,
             selecting: None,
@@ -606,6 +604,15 @@ impl<S> Runtime<S> {
     fn run_handlers(&mut self) {
         let mut tx = Tx::default();
         for action in std::mem::take(&mut self.queue) {
+            let action = match action {
+                Action::Press(hit) if self.display_link_hit(hit).is_some() => {
+                    let (parent, url) = self.display_link_hit(hit).expect("rich link");
+                    let selected = self.index_of_hit(parent).and_then(|i| self.display.get(&self.laid[i].id)).is_some_and(|d| !d.field.ed.selection().is_empty());
+                    if selected { continue; }
+                    Action::Link(parent, url)
+                }
+                action => action,
+            };
             let hit = match &action {
                 Action::Dismiss(handler) => {
                     handler(&mut self.state);

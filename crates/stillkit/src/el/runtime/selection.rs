@@ -160,7 +160,7 @@ impl<S> Runtime<S> {
         let Some(id) = self
             .ix
             .focus
-            .and_then(|h| self.laid.iter().find(|l| l.hit == h))
+            .and_then(|h| self.index_of_hit(h).map(|i| &self.laid[i]))
             .and_then(|l| self.display.get(&l.id))
             .filter(|d| d.selectable)
             .map(|d| d.doc)
@@ -226,7 +226,7 @@ impl<S> Runtime<S> {
             .enumerate()
             .filter_map(|(i, l)| {
                 let d = self.display.get(&l.id)?;
-                if hit.is_some_and(|h| h != l.hit) {
+                if hit.is_some_and(|h| self.index_of_hit(h) != Some(i)) {
                     return None;
                 }
                 if doc.is_some_and(|id| id != d.doc) {
@@ -261,11 +261,24 @@ impl<S> Runtime<S> {
             .map(|(_, doc, at)| (doc, at))
     }
 
+    pub(super) fn display_link_hit(&self, hit: crate::HitId) -> Option<(crate::HitId, std::sync::Arc<str>)> {
+        for l in &self.laid {
+            let Some(d) = self.display.get(&l.id) else { continue };
+            let Some(rich) = &d.rich else { continue };
+            for (i, fragment) in rich.fragments.iter().enumerate() {
+                if link_id(d.id, i) == hit && let Some(url) = &fragment.run.link {
+                    return Some((l.hit, url.clone()));
+                }
+            }
+        }
+        None
+    }
     pub(super) fn display_link(&self, p: Point) -> Option<(crate::HitId, std::sync::Arc<str>)> {
         for (i, l) in self.laid.iter().enumerate() {
             let Some(d) = self.display.get(&l.id) else { continue };
             let Some(rich) = &d.rich else { continue };
             let rect = self.poses.get(i)?.rect;
+            if p.x < rect.left || p.x > rect.right || p.y < rect.top || p.y > rect.bottom { continue; }
             for fragment in &rich.fragments {
                 let r = fragment.rect.offset(rect.left, rect.top);
                 if p.x >= r.left && p.x <= r.right && p.y >= r.top && p.y <= r.bottom
@@ -280,11 +293,8 @@ impl<S> Runtime<S> {
         }
         match *event {
             Event::Press(p, Button::Left) | Event::DoubleClick(p, Button::Left) => {
-                self.link_down = self.display_link(p.at);
                 if !self.ix.pressed.is_some_and(|hit| {
-                    self.laid
-                        .iter()
-                        .any(|l| l.hit == hit && self.display.get(&l.id).is_some_and(|d| d.selectable))
+                    self.index_of_hit(hit).is_some_and(|i| self.display.get(&self.laid[i].id).is_some_and(|d| d.selectable))
                 }) {
                     self.display_drag = None;
                     return;
@@ -292,7 +302,7 @@ impl<S> Runtime<S> {
                 let pressed = self
                     .ix
                     .pressed
-                    .and_then(|hit| self.laid.iter().find(|l| l.hit == hit))
+                    .and_then(|hit| self.index_of_hit(hit).map(|i| &self.laid[i]))
                     .and_then(|l| self.display.get(&l.id))
                     .map(|d| d.doc);
                 let Some((doc, at)) = self.display_at(p.at, pressed, self.ix.pressed) else {
@@ -355,16 +365,11 @@ impl<S> Runtime<S> {
                 }
                 self.sync_display_ranges();
             }
-            Event::Release(p, Button::Left) => {
-                if self.link_down.take().is_some_and(|down| self.display_link(p.at) == Some(down)) && self.display_drag.as_ref().is_none_or(|drag| self.documents.get(&drag.doc).is_none_or(|ed| ed.selection().is_empty()))
-                    && let Some((hit, url)) = self.display_link(p.at) { self.queue.push(super::Action::Link(hit, url)); }
-                self.display_drag = None;
-            }
             Event::Release(..)
             | Event::Cancelled
             | Event::CaptureLost
             | Event::Leave
-            | Event::Deactivated => { self.display_drag = None; self.link_down = None; },
+            | Event::Deactivated => { self.display_drag = None;  },
             _ => {}
         }
     }
@@ -405,9 +410,11 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
     if let Some(rich) = &d.rich {
         ops.extend(super::super::rich::paint(rich, rect, ink, token::ACCENT.resolve(f.theme), token::FILL.resolve(f.theme)));
         for (i, fragment) in rich.fragments.iter().enumerate().filter(|(_, f)| f.run.link.is_some()) {
-            f.list.hits.push(crate::Hit { id: (d.id as u32).wrapping_add(0x80000000).wrapping_add(i as u32),
-                rect: fragment.rect.offset(rect.left, rect.top), role: crate::Role::Link,
-                label: fragment.run.text.clone(), enabled: true, actionable: false, checked: None });
+            let bounds = fragment.rect.offset(rect.left, rect.top).intersect(rect);
+            if bounds.width() <= 0.0 || bounds.height() <= 0.0 { continue; }
+            f.list.hits.push(crate::Hit { id: link_id(d.id, i),
+                rect: bounds, role: crate::Role::Link,
+                label: fragment.run.text.clone(), enabled: true, actionable: true, checked: None });
         }
     }
     f.push(Op::Clipped {
@@ -415,3 +422,5 @@ pub(super) fn paint(f: &mut Frame, d: &Display, rect: Rect, ink: Rgba) {
         ops: ops.into(),
     });
 }
+
+fn link_id(id: u64, index: usize) -> crate::HitId { (id as u32).wrapping_add(0x80000000).wrapping_add(index as u32) }

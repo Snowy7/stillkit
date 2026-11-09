@@ -347,7 +347,7 @@ impl Measure {
             let width = known.unwrap_or(match available { AvailableSpace::Definite(w) => w, AvailableSpace::MinContent => 1.0, AvailableSpace::MaxContent => f32::MAX });
             let layout = super::rich::layout(text, &self.runs, &self.style, self.line, self.scale, width);
             let w = layout.shape.lines.iter().flat_map(|l| l.stops.iter().map(|s| s.1)).fold(0.0, f32::max);
-            return (w.ceil(), layout.shape.height());
+            return (w.ceil(), layout.shape.line * layout.shape.lines.len().min(self.wrap.unwrap_or(1)).max(1) as f32);
         }
         let (w, _) = text.measure(&self.text, &self.style);
         let Some(lines) = self.wrap else {
