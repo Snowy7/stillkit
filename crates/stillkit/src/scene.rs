@@ -527,6 +527,25 @@ impl DisplayList {
         list
     }
 
+    /// The list drawn `k` times as large from its origin (one transform around every op, so
+    /// text and paths render sharp at the new size), its hit items scaled with it.
+    pub fn scaled(&self, k: f32) -> Self {
+        let transform = crate::Transform([k, 0., 0., k, 0., 0.]);
+        let mut list = self.clone();
+        if (k - 1.0).abs() < f32::EPSILON {
+            return list;
+        }
+        list.ops = vec![Op::Transformed { transform, ops: std::mem::take(&mut list.ops).into() }];
+        for hit in &mut list.hits {
+            if hit.shape.is_some() { hit.transform(transform); }
+            else {
+                let r = hit.rect;
+                hit.rect = Rect::new(r.left * k, r.top * k, r.width() * k, r.height() * k);
+            }
+        }
+        list
+    }
+
     /// The topmost hit item under `p`.
     pub fn hit_at(&self, p: Point) -> Option<&Hit> {
         self.hits.iter().rev().find(|h| h.contains(p))
