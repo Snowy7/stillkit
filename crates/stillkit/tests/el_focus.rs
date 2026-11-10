@@ -334,3 +334,26 @@ fn a_field_inside_a_focus_within_box_can_leave_the_ring_to_it() {
         assert_eq!(ring_shown(&rt, field), !quiet, "quiet {quiet}: the field's own ring");
     }
 }
+
+fn skipped(_: &S) -> El<S> {
+    row().child(button("handle").skip_tab()).child(button("field")).child(button("next"))
+}
+
+#[test]
+fn a_skipped_element_takes_the_pointer_but_not_a_tab_stop() {
+    let mut rt = runtime(skipped);
+    rt.frame(FRAME);
+    let focused = |rt: &Runtime<S>| rt.tree().into_iter().find(|n| n.focused).and_then(|n| n.key).map(|k| k.to_string());
+    rt.tab(false);
+    assert_eq!(focused(&rt).as_deref(), Some("field"), "Tab passes the handle");
+    rt.tab(false);
+    rt.tab(false);
+    assert_eq!(focused(&rt).as_deref(), Some("field"), "and wraps past it");
+    let handle = rt.find("handle").unwrap();
+    rt.pointer_move(handle.center().x, handle.center().y);
+    rt.frame(FRAME);
+    rt.pointer_down(handle.center().x, handle.center().y);
+    rt.pointer_up(handle.center().x, handle.center().y);
+    rt.frame(FRAME);
+    assert_eq!(rt.state().pressed, ["handle"], "still pressed by the pointer");
+}
