@@ -733,6 +733,24 @@ impl Surface {
         self.window.zoom(None);
     }
 
+    /// Whether the window fills its screen in its own full-screen space.
+    pub fn is_fullscreen(&self) -> bool {
+        self.window
+            .styleMask()
+            .contains(NSWindowStyleMask::FullScreen)
+    }
+
+    /// Enter or leave full screen: the system's own space for the window, as the green
+    /// button gives it (an app window opts in first).
+    pub fn toggle_fullscreen(&self) {
+        let behavior = self.window.collectionBehavior();
+        if !behavior.contains(NSWindowCollectionBehavior::FullScreenPrimary) {
+            self.window
+                .setCollectionBehavior(behavior | NSWindowCollectionBehavior::FullScreenPrimary);
+        }
+        self.window.toggleFullScreen(None);
+    }
+
     /// The title area's parts, in client pixels (see [`Chrome`]). Later entries win.
     pub fn set_chrome(&self, parts: &[(crate::Rect, Chrome)]) {
         let mut chrome = self.view.ivars().chrome.borrow_mut();

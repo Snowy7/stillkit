@@ -41,6 +41,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SC_MINIMIZE, SM_CXPADDEDBORDER, SM_CYFRAME, SW_MAXIMIZE, SW_RESTORE, SW_SHOWMAXIMIZED,
     SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SendMessageW, SetCursor, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE,
+    GWL_STYLE, GetWindowLongW, GetWindowPlacement, HWND_TOP, SWP_NOOWNERZORDER, SetWindowLongW,
+    SetWindowPlacement, WINDOWPLACEMENT,
     WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
     WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
     WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
@@ -117,6 +119,8 @@ pub(crate) struct AppShared {
     /// The caption button pressed (an `HT*` code), until it's released.
     pressed: Cell<u32>,
     square: Cell<Option<bool>>,
+    /// Where the window was before full screen, while it is full screen.
+    windowed: Cell<Option<WINDOWPLACEMENT>>,
 }
 
 impl AppShared {
@@ -137,6 +141,7 @@ impl AppShared {
             sizing: Cell::new(false),
             pressed: Cell::new(0),
             square: Cell::new(None),
+            windowed: Cell::new(None),
         }
     }
 }
@@ -728,6 +733,71 @@ impl Surface {
     /// Toggle maximize.
     pub fn toggle_maximize(&self) {
         toggle_maximize(self.hwnd());
+    }
+
+    /// Whether the window covers its monitor, frameless (see [`toggle_fullscreen`]).
+    ///
+    /// [`toggle_fullscreen`]: Self::toggle_fullscreen
+    pub fn is_fullscreen(&self) -> bool {
+        self.app().windowed.get().is_some()
+    }
+
+    /// Enter or leave full screen: the frame styles go and the window covers the monitor
+    /// it is on; leaving puts back the styles and the placement it had (maximized or not).
+    pub fn toggle_fullscreen(&self) {
+        let hwnd = self.hwnd();
+        let app = self.app();
+        // SAFETY: style, placement and position calls on our own window, with valid
+        // out-pointers sized for them.
+        unsafe {
+            let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+            match app.windowed.take() {
+                None => {
+                    let mut placement = WINDOWPLACEMENT {
+                        length: std::mem::size_of::<WINDOWPLACEMENT>() as u32,
+                        ..Default::default()
+                    };
+                    let mut monitor = MONITORINFO {
+                        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                        ..Default::default()
+                    };
+                    if GetWindowPlacement(hwnd, &mut placement).is_err()
+                        || !GetMonitorInfoW(
+                            MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                            &mut monitor,
+                        )
+                        .as_bool()
+                    {
+                        return;
+                    }
+                    app.windowed.set(Some(placement));
+                    SetWindowLongW(hwnd, GWL_STYLE, (style & !WS_OVERLAPPEDWINDOW.0) as i32);
+                    let r = monitor.rcMonitor;
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOP),
+                        r.left,
+                        r.top,
+                        r.right - r.left,
+                        r.bottom - r.top,
+                        SWP_NOOWNERZORDER | SWP_FRAMECHANGED,
+                    );
+                }
+                Some(placement) => {
+                    SetWindowLongW(hwnd, GWL_STYLE, (style | WS_OVERLAPPEDWINDOW.0) as i32);
+                    let _ = SetWindowPlacement(hwnd, &placement);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED,
+                    );
+                }
+            }
+        }
     }
 
     /// The title area's parts, in client pixels (see [`Chrome`]). Later entries win.
