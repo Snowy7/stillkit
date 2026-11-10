@@ -152,6 +152,8 @@ struct Native {
     callback: bool,
     chrome: Vec<(crate::Rect, super::app_window::Chrome)>,
     maximized: bool,
+    /// The compositor shows it full screen (its last configure said so).
+    fullscreen: bool,
     size: (u32, u32),
 }
 impl Drop for Native {
@@ -493,6 +495,7 @@ impl Surface {
                     callback: false,
                     chrome: Vec::new(),
                     maximized: false,
+                    fullscreen: false,
                     size: (0, 0),
                 },
             );
@@ -1042,6 +1045,40 @@ impl Surface {
             log::warn!("maximize: {e:#}");
         }
     }
+    /// Whether the compositor shows it maximized.
+    pub fn is_maximized(&self) -> bool {
+        runtime(|r| Ok(r.state.windows.get(&self.id).is_some_and(|n| n.maximized)))
+            .unwrap_or(false)
+    }
+    /// Whether it is mapped (shown and configured), as [`hide`](Self::hide) leaves it not.
+    pub fn is_visible(&self) -> bool {
+        runtime(|r| Ok(r.state.windows.get(&self.id).is_some_and(|n| n.configured)))
+            .unwrap_or(false)
+    }
+    /// Whether the compositor shows it full screen.
+    pub fn is_fullscreen(&self) -> bool {
+        runtime(|r| Ok(r.state.windows.get(&self.id).is_some_and(|n| n.fullscreen)))
+            .unwrap_or(false)
+    }
+    /// Ask the compositor to show it full screen on its output, or to stop (failures are
+    /// logged, as for [`minimize`](Self::minimize)).
+    pub fn toggle_fullscreen(&self) {
+        let done = runtime(|r| {
+            let n = r.state.windows.get(&self.id).context("surface released")?;
+            if let Shell::Top(_, t) = &n.shell {
+                if n.fullscreen {
+                    t.unset_fullscreen();
+                } else {
+                    t.set_fullscreen(None);
+                }
+            }
+            r.conn.flush()?;
+            Ok(())
+        });
+        if let Err(e) = done {
+            log::warn!("fullscreen: {e:#}");
+        }
+    }
     /// Starts compositor-managed dragging after a real pointer press.
     pub fn start_move(&self) -> Result<()> {
         runtime(|r| {
@@ -1209,11 +1246,16 @@ impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceId> for State {
                         .push_back((*id, Event::Resized(width as u32 * s, height as u32 * s)));
                 }
                 if let Some(n) = a.windows.get_mut(id) {
-                    n.maximized = states
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .any(|v| u32::from_ne_bytes(*v) == 1);
+                    // xdg_toplevel states: 1 maximized, 2 fullscreen.
+                    let has = |state: u32| {
+                        states
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .any(|v| u32::from_ne_bytes(*v) == state)
+                    };
+                    n.maximized = has(1);
+                    n.fullscreen = has(2);
                 }
                 let active = states
                     .as_chunks::<4>()
