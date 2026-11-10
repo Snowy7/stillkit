@@ -42,7 +42,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_SHOWNORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
     SendMessageW, SetCursor, SetForegroundWindow, SetWindowPos, ShowWindow, WM_CLOSE,
     GWL_STYLE, GetWindowLongW, GetWindowPlacement, HWND_TOP, SWP_NOOWNERZORDER, SetWindowLongW,
-    SetWindowPlacement, WINDOWPLACEMENT,
+    SetWindowPlacement, WINDOWPLACEMENT, GetWindowRect,
     WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_GETMINMAXINFO,
     WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
     WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_PAINT, WM_SETCURSOR, WM_SETICON, WM_SETTINGCHANGE, WM_SIZE,
@@ -710,6 +710,15 @@ impl Surface {
     /// Device pixels per design pixel (the window's DPI / 96).
     pub fn scale(&self) -> f32 {
         scale_of(self.hwnd())
+    }
+
+    /// Where the window is now, in screen pixels as [`place`](Self::place) takes it
+    /// (`x, y, width, height`): after the person moved or resized it.
+    pub fn placed(&self) -> Option<(i32, i32, i32, i32)> {
+        let mut r = RECT::default();
+        // SAFETY: our own window and a valid out-pointer.
+        unsafe { GetWindowRect(self.hwnd(), &mut r) }.ok()?;
+        Some((r.left, r.top, r.right - r.left, r.bottom - r.top))
     }
 
     /// Whether maximized.

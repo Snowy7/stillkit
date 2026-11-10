@@ -1055,6 +1055,10 @@ impl Surface {
         runtime(|r| Ok(r.state.windows.get(&self.id).is_some_and(|n| n.configured)))
             .unwrap_or(false)
     }
+    /// Where the window is on the screen: Wayland never tells a client, so `None`.
+    pub fn placed(&self) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
     /// Whether the compositor shows it full screen.
     pub fn is_fullscreen(&self) -> bool {
         runtime(|r| Ok(r.state.windows.get(&self.id).is_some_and(|n| n.fullscreen)))

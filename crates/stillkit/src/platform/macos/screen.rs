@@ -56,7 +56,7 @@ pub(super) fn frame_at(at: (i32, i32), size: (f64, f64)) -> NSRect {
 }
 
 /// An AppKit rectangle (global points) as device-pixel edges: left, top, right, bottom.
-fn edges(r: NSRect) -> crate::menu::Edges {
+pub(super) fn edges(r: NSRect) -> crate::menu::Edges {
     let (l, b) = to_px(r.origin);
     let (rt, t) = to_px(NSPoint::new(r.origin.x + r.size.width, r.origin.y + r.size.height));
     (l, t, rt, b)
