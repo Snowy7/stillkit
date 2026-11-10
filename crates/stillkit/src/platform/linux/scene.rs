@@ -39,18 +39,38 @@ pub(super) fn draw_ops(
     scene_transform: Affine,
     image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_cpu::ImageSource,
 ) -> Result<()> {
+    #[cfg(feature = "gpu")]
+    let prepared = if NATIVE_FILTERS {
+        crate::blur::prepare_native(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?
+    } else {
+        crate::blur::prepare(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?
+    };
+    #[cfg(not(feature = "gpu"))]
+    let prepared = crate::blur::prepare(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
+    let ops = prepared.as_ref();
     let mut clips = 0;
     for op in ops {
         match op {
+            Op::Blurred { sigma, ops } => {
+                use vello_cpu::filter_effects::{Filter, FilterFunction};
+                ctx.push_filter_layer(Filter::from_function(FilterFunction::Blur {
+                    radius: *sigma,
+                }));
+                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
+                ctx.pop_layer();
+            }
+            Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
             Op::Transformed { transform, ops } => {
                 let saved = scene_transform;
                 ctx.set_transform(saved * Affine::new(transform.0.map(f64::from)));
-                let result = draw_ops(ctx,res,text,ops,saved * Affine::new(transform.0.map(f64::from)),image_source);
+                let result = draw_ops(ctx,res,text,ops,saved * Affine::new(transform.0.map(f64::from)),image_source,
+                );
                 ctx.set_transform(saved);
                 result?;
             }
             Op::Hole { rect: r } => {
-                ctx.set_blend_mode(vello_cpu::peniko::BlendMode::new(vello_cpu::peniko::Mix::Normal, vello_cpu::peniko::Compose::Copy));
+                ctx.set_blend_mode(vello_cpu::peniko::BlendMode::new(vello_cpu::peniko::Mix::Normal, vello_cpu::peniko::Compose::Copy,
+                ));
                 paint(ctx, Rgba::TRANSPARENT);
                 ctx.fill_path(&rounded(*r, 0.));
                 // Nothing else changes the blend mode: back to source-over.
@@ -80,19 +100,24 @@ pub(super) fn draw_ops(
                 draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
                 ctx.pop_layer();
             }
-            Op::Gradient { rect: r, radius, width, gradient } => {
-                use vello_cpu::peniko::{Gradient, ColorStop};
-                let stops: Vec<_> = gradient.stops.iter().map(|s| ColorStop { offset: s.offset, color: vello_cpu::color::AlphaColor::<vello_cpu::color::Srgb>::new([s.color.r, s.color.g, s.color.b, s.color.a]).into() }).collect();
+            Op::Gradient { rect: r, radius, width, gradient,
+            } => {
+                use vello_cpu::peniko::{ColorStop, Gradient};
+                let stops: Vec<_> = gradient.stops.iter().map(|s| ColorStop { offset: s.offset, color: vello_cpu::color::AlphaColor::<vello_cpu::color::Srgb>::new([s.color.r, s.color.g, s.color.b, s.color.a,
+                        ]).into(),
+                    }).collect();
                 let g = if gradient.angle.is_some() {
                     let (a,b) = gradient.line(*r);
                     Gradient::new_linear((a.x as f64, a.y as f64), (b.x as f64, b.y as f64))
                 } else {
                     let c = r.center();
-                    Gradient::new_radial((c.x as f64, c.y as f64), ((r.width() * r.width() + r.height() * r.height()).sqrt() * 0.5).max(0.001))
+                    Gradient::new_radial((c.x as f64, c.y as f64), ((r.width() * r.width() + r.height() * r.height()).sqrt() * 0.5).max(0.001),
+                    )
                 }.with_stops(stops.as_slice());
                 ctx.set_paint(g);
                 let p = rounded(*r, *radius);
-                if *width > 0.0 { ctx.set_stroke(Stroke::new(*width as f64).with_caps(Cap::Round).with_join(Join::Round)); ctx.stroke_path(&p); }
+                if *width > 0.0 { ctx.set_stroke(Stroke::new(*width as f64).with_caps(Cap::Round).with_join(Join::Round),
+                    ); ctx.stroke_path(&p); }
                 else { ctx.fill_path(&p); }
             }
             Op::Fill {
@@ -331,7 +356,8 @@ pub(super) fn draw_ops(
                 }
             }
             Op::TextField { rect, field, .. } => {
-                draw_ops(ctx, res, text, &[field.op(*rect)], scene_transform, image_source)?;
+                draw_ops(ctx, res, text, &[field.op(*rect)], scene_transform, image_source,
+                )?;
             }
         }
     }

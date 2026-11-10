@@ -17,6 +17,24 @@ pub type HitId = u32;
 /// One paint operation, in the surface's device pixels, drawn in list order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Op {
+    /// Filters an isolated completed subtree.
+    Blurred {
+        /// Gaussian standard deviation in device pixels, capped at 64.
+        sigma: f32,
+        /// Subtree paint.
+        ops: Arc<[Op]>,
+    },
+    /// Filters preceding paint in the same surface through a rounded mask.
+    BackdropBlur {
+        /// Panel bounds.
+        rect: Rect,
+        /// Corner radius.
+        radius: f32,
+        /// Gaussian standard deviation in device pixels, capped at 64.
+        sigma: f32,
+        /// Strength, including inherited opacity.
+        opacity: f32,
+    },
     /// Draws a subtree in an affine coordinate system, including clips and text.
     Transformed {
         /// Local coordinates to the enclosing coordinate system.
@@ -227,6 +245,8 @@ impl Op {
     /// variant, so a new op never breaks them.
     pub fn translate(&mut self, dx: f32, dy: f32) {
         match self {
+            Op::Blurred { ops, .. } => { for op in Arc::make_mut(ops) { op.translate(dx, dy); } }
+            Op::BackdropBlur { rect, .. } => *rect = rect.offset(dx, dy),
             Op::Transformed { transform, .. } => *transform = crate::Transform::new(Point::new(0.,0.),0.,(1.,1.),(dx,dy)).compose(*transform),
             Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
                 *rect = rect.offset(dx, dy);
@@ -278,6 +298,8 @@ impl Op {
         };
         match self {
             Op::Transformed { transform, .. } => *transform = crate::Transform::new(Point::new(0.,0.),0.,(by,by),(0.,0.)).compose(*transform),
+            Op::Blurred { sigma, ops } => { *sigma *= by; for op in Arc::make_mut(ops) { op.scale(by); } }
+            Op::BackdropBlur { rect: r, radius, sigma, .. } => { rect(r); *radius *= by; *sigma *= by; }
             Op::Image { rect: r, .. } | Op::Clip { rect: r } | Op::Hole { rect: r } | Op::TextField { rect: r, .. } => rect(r),
             Op::RoundedImage { rect: r, radius, .. } | Op::Fill { rect: r, radius, .. } => {
                 rect(r);
@@ -343,6 +365,8 @@ impl Op {
     /// Every pixel this operation may touch, antialiasing included.
     pub fn bounds(&self) -> Rect {
         match self {
+            Self::Blurred { sigma, ops } => ops.iter().map(Op::bounds).reduce(Rect::union).unwrap_or_default().inflate(crate::blur::reach(*sigma)),
+            Self::BackdropBlur { rect, .. } => *rect,
             Self::Transformed { transform, ops } => ops.iter().map(Op::bounds).reduce(|a,b|a.union(b)).map(|r|transform.bounds(r).inflate(1.0)).unwrap_or_default(),
             Self::Gradient { rect, width, .. } | Self::Continuous { rect, width, .. } => rect.inflate(width * 0.5 + 1.0),
             Self::Clipped { rect, .. } => *rect,
@@ -519,6 +543,8 @@ impl DisplayList {
     pub fn damage_regions(&self, old: &DisplayList) -> Vec<Rect> {
         let mut regions = Vec::new();
         collect_damage(&old.ops, &self.ops, None, &mut regions);
+        backdrop_damage(&self.ops, &mut regions);
+        backdrop_damage(&old.ops, &mut regions);
         let mut merged: Vec<Rect> = Vec::new();
         for mut rect in regions {
             while let Some(index) = merged
@@ -569,6 +595,12 @@ fn collect_damage(old: &[Op], new: &[Op], clip: Option<Rect>, out: &mut Vec<Rect
             (Some(a), Some(b)) if a == b => {
                 i += 1;
                 j += 1;
+            }
+            (Some(Op::Blurred {sigma:a,ops:before}), Some(Op::Blurred {sigma:b,ops:after})) if a == b => {
+                let mut inner=Vec::new();
+                collect_damage(before,after,None,&mut inner);
+                for rect in inner {push(out,clip,rect.inflate(crate::blur::reach(*a)));}
+                i+=1; j+=1;
             }
             (
                 Some(Op::Clipped {
@@ -705,9 +737,41 @@ fn intersection(a: Rect, b: Rect) -> Rect {
     }
 }
 
+// A filter reads beyond its output. Damage propagates through later backdrop filters.
+fn backdrop_damage(ops: &[Op], regions: &mut Vec<Rect>) {
+    for op in ops {
+        match op {
+            Op::BackdropBlur { rect, sigma, .. } => {
+                let input = rect.inflate(crate::blur::reach(*sigma));
+                let affected: Vec<_> = regions.iter().filter(|r| r.intersects(&input))
+                    .map(|r| r.inflate(crate::blur::reach(*sigma)).intersect(*rect))
+                    .filter(|r| !r.is_empty()).collect();
+                regions.extend(affected);
+            }
+            Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
+                let mut inner=regions.clone();
+                let before=inner.len();
+                backdrop_damage(ops,&mut inner);
+                regions.extend(inner[before..].iter().map(|r|r.intersect(*rect)).filter(|r|!r.is_empty()));
+            }
+            Op::Transformed { transform, ops } => {
+                if let Some(inverse)=transform.inverse() {
+                    let mut inner:Vec<_>=regions.iter().map(|r|inverse.bounds(*r)).collect();
+                    let before=inner.len();
+                    backdrop_damage(ops,&mut inner);
+                    regions.extend(inner[before..].iter().map(|r|transform.bounds(*r)));
+                }
+            }
+            _=>{}
+        }
+    }
+}
+
 fn damage_ops(old: &[Op], new: &[Op]) -> Option<Rect> {
     let mut regions = Vec::new();
     collect_damage(old, new, None, &mut regions);
+    backdrop_damage(new, &mut regions);
+    backdrop_damage(old, &mut regions);
     regions.into_iter().reduce(Rect::union)
 }
 

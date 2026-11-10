@@ -103,10 +103,12 @@ fn rounded_groups_clip_composed_pictures_and_translate_without_losing_the_mask()
             rect: Rect::new(4.0, 4.0, 24.0, 28.0),
             radius: 8.0,
             ops: vec![
-                Op::Fill { rect: Rect::new(0.0, 0.0, 40.0, 40.0), radius: 0.0, color: Rgba::rgb8([255, 0, 0], 1.0) },
+                Op::Fill { rect: Rect::new(0.0, 0.0, 40.0, 40.0), radius: 0.0, color: Rgba::rgb8([255, 0, 0], 1.0),
+                },
                 Op::Clipped { rect: Rect::new(4.0, 4.0, 24.0, 14.0), ops: vec![
-                    Op::Fill { rect: Rect::new(0.0, 0.0, 40.0, 40.0), radius: 0.0, color: Rgba::rgb8([0, 0, 255], 1.0) },
-                ].into() },
+                    Op::Fill { rect: Rect::new(0.0, 0.0, 40.0, 40.0), radius: 0.0, color: Rgba::rgb8([0, 0, 255], 1.0),
+                    }].into(),
+                },
             ].into(),
         }],
         ..Default::default()
@@ -303,7 +305,7 @@ pub struct Ui {
     params: IDWriteRenderingParams,
 }
 
-pub use crate::bitmap::{TextQuality, TextMode};
+pub use crate::bitmap::{TextMode, TextQuality};
 impl TextQuality {
     fn params(self, text: &Text) -> Result<IDWriteRenderingParams> {
         let mode: DWRITE_RENDERING_MODE1 = match self.mode {
@@ -513,6 +515,8 @@ pub struct Canvas {
 /// [`Canvas`], or the hardware device context of a GPU surface (`gpu`). One drawing code for
 /// both, so the two modes draw the same picture.
 pub(crate) struct Painter {
+    #[cfg(feature = "gpu")]
+    pub(crate) native_filters: bool,
     pub(crate) target: ID2D1RenderTarget,
     brush: ID2D1SolidColorBrush,
     images: RefCell<HashMap<usize, (Arc<Image>, ID2D1Bitmap)>>,
@@ -557,13 +561,16 @@ impl Painter {
                 None,
             )?;
             Ok(Self {
+                #[cfg(feature = "gpu")]
+                native_filters: false,
                 target,
                 brush,
                 images: RefCell::new(HashMap::new()),
                 arcs: RefCell::new(HashMap::new()),
                 continuous: RefCell::new(HashMap::new()),
                 icons: RefCell::new(HashMap::new()),
-                shadows: RefCell::new(crate::shadow::Cache::new(crate::shadow::Cache::<ID2D1Bitmap>::BUDGET)),
+                shadows: RefCell::new(crate::shadow::Cache::new(crate::shadow::Cache::<ID2D1Bitmap>::BUDGET,
+                )),
                 round,
                 #[cfg(feature = "gpu")]
                 base: std::cell::Cell::new((0.0, 0.0)),
@@ -577,7 +584,8 @@ impl Painter {
             for op in ops {
                 match op {
                     Op::Image { image, .. } | Op::RoundedImage { image, .. } => { live.insert(Arc::as_ptr(image) as usize); }
-                    Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
+                    Op::Blurred { ops, .. }
+                    | Op::Transformed { ops, .. } | Op::Clipped { ops, .. } | Op::RoundedClipped { ops, .. } => used_images(ops, live),
                     _ => {}
                 }
             }
@@ -763,6 +771,21 @@ impl Painter {
     /// Runs between BeginDraw/EndDraw. Marker clips are scoped to this slice, including
     /// inside a retained clipped group, so an unmatched Unclip cannot pop a caller's clip.
     unsafe fn ops(&self, text: &mut Text, ops: &[Op], damage: Rect) {
+        #[cfg(feature = "gpu")]
+        let native = self.native_filters;
+        #[cfg(not(feature = "gpu"))]
+        let native = false;
+        #[cfg(feature = "gpu")]
+        let prepared = if native {
+            crate::blur::prepare_native(text, ops, damage)
+        } else {
+            crate::blur::prepare(text, ops, damage)
+        };
+        #[cfg(not(feature = "gpu"))]
+        let prepared = crate::blur::prepare(text, ops, damage);
+        let _ = native;
+        let Ok(prepared) = prepared else { return };
+        let ops = prepared.as_ref();
         // D2D axis clips expand rotated rectangles to their bounding boxes. Preserve
         // marker clips as geometry scopes when an affine turn is active.
         // SAFETY: the caller owns the active draw scope; recursive scopes balance their layers.
@@ -779,7 +802,8 @@ impl Painter {
                         if depth==0 {break;}
                         end+=1;
                     }
-                    let group=Op::RoundedClipped{rect:*rect,radius:0.0,ops:ops[i+1..end].to_vec().into()};
+                    let group=Op::RoundedClipped{rect:*rect,radius:0.0,ops:ops[i+1..end].to_vec().into(),
+                        };
                     self.op(text,&group,damage);
                     i=(end+1).min(ops.len());
                 } else {
@@ -822,11 +846,21 @@ impl Painter {
         // SAFETY: per this function's contract.
         unsafe {
             match op {
+                #[cfg(feature = "gpu")]
+                Op::Blurred { sigma, ops } => {
+                    if let Err(error) = self.native_blur(text, ops, *sigma, damage) {
+                        eprintln!("subtree blur: {error:#}");
+                    }
+                }
+                #[cfg(not(feature = "gpu"))]
+                Op::Blurred { .. } => unreachable!("filters resolved before drawing"),
+                Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
                 Op::Transformed { transform, ops } => {
                     let mut saved = windows_numerics::Matrix3x2::identity();
                     t.GetTransform(&mut saved);
                     let [a,b,c,d,x,y] = transform.0;
-                    let local = windows_numerics::Matrix3x2 { M11:a,M12:b,M21:c,M22:d,M31:x,M32:y };
+                    let local = windows_numerics::Matrix3x2 { M11:a,M12:b,M21:c,M22:d,M31:x,M32:y,
+                    };
                     t.SetTransform(&(local * saved));
                     if let Some(inverse) = transform.inverse() { self.ops(text,ops,inverse.bounds(damage).inflate(1.0)); }
                     t.SetTransform(&saved);
@@ -851,7 +885,8 @@ impl Painter {
                     let Ok(factory) = t.GetFactory() else { return };
                     let Ok(mask) = factory.CreateRoundedRectangleGeometry(&D2D1_ROUNDED_RECT {
                         rect: d2d(*rect), radiusX: *radius, radiusY: *radius,
-                    }) else { return };
+                    }) else { return;
+                    };
                     let geometry = mask.cast().ok();
                     let mut parameters = D2D1_LAYER_PARAMETERS {
                         contentBounds: d2d(op.bounds().intersect(damage)),
@@ -923,7 +958,9 @@ impl Painter {
                     let mut xf=windows_numerics::Matrix3x2::identity();
                     t.GetTransform(&mut xf);
                     if xf.M12 != 0.0 || xf.M21 != 0.0 {
-                        self.op(text,&Op::RoundedClipped {rect:*rect,radius:0.0,ops:ops.clone()},damage);
+                        self.op(text,&Op::RoundedClipped {rect:*rect,radius:0.0,ops:ops.clone(),
+                            },damage,
+                        );
                         return;
                     }
                     t.PushAxisAlignedClip(&d2d(*rect), D2D1_ANTIALIAS_MODE_ALIASED);
@@ -1068,24 +1105,32 @@ impl Painter {
                         log::error!("text field: {e:#}");
                     }
                 }
-                Op::Gradient { rect, radius, width, gradient } => {
-                    use windows::Win32::Graphics::Direct2D::*;
+                Op::Gradient { rect, radius, width, gradient,
+                } => {
                     use windows::Win32::Graphics::Direct2D::Common::D2D1_GRADIENT_STOP;
-                    let stops: Vec<_> = gradient.stops.iter().map(|s| D2D1_GRADIENT_STOP { position: s.offset, color: color(s.color) }).collect();
+                    use windows::Win32::Graphics::Direct2D::*;
+                    let stops: Vec<_> = gradient.stops.iter().map(|s| D2D1_GRADIENT_STOP { position: s.offset, color: color(s.color),
+                        }).collect();
                     let result = (|| -> Result<ID2D1Brush> {
-                        let stops = t.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP)?;
+                        let stops = t.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP,
+                        )?;
                         let point = |p: crate::Point| Vector2 { X: p.x, Y: p.y };
                         Ok(if gradient.angle.is_some() {
                             let (a,b) = gradient.line(*rect);
-                            t.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: point(a), endPoint: point(b) }, None, &stops)?.cast()?
+                            t.CreateLinearGradientBrush(&D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: point(a), endPoint: point(b),
+                                }, None, &stops,
+                            )?.cast()?
                         } else {
                             let r = ((rect.width() * rect.width() + rect.height() * rect.height()).sqrt() * 0.5).max(0.001);
-                            t.CreateRadialGradientBrush(&D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES { center: point(rect.center()), gradientOriginOffset: Vector2::default(), radiusX: r, radiusY: r }, None, &stops)?.cast()?
+                            t.CreateRadialGradientBrush(&D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES { center: point(rect.center()), gradientOriginOffset: Vector2::default(), radiusX: r, radiusY: r,
+                                }, None, &stops,
+                            )?.cast()?
                         })
                     })();
                     match result {
                         Ok(brush) => {
-                            let r = D2D1_ROUNDED_RECT { rect: d2d(*rect), radiusX: *radius, radiusY: *radius };
+                            let r = D2D1_ROUNDED_RECT { rect: d2d(*rect), radiusX: *radius, radiusY: *radius,
+                            };
                             if *width > 0.0 { t.DrawRoundedRectangle(&r, &brush, *width, None); }
                             else { t.FillRoundedRectangle(&r, &brush); }
                         }
@@ -1321,7 +1366,8 @@ impl Painter {
         // SAFETY: `alpha` holds width × height bytes, one row of `width` bytes after another.
         unsafe {
             self.target
-                .CreateBitmap(size, Some(mask.alpha.as_ptr().cast()), mask.width, &properties)
+                .CreateBitmap(size, Some(mask.alpha.as_ptr().cast()), mask.width, &properties,
+                )
                 .ok()
         }
     }
@@ -1427,7 +1473,8 @@ impl Painter {
                 M22: scale,
                 M31: rect.left,
                 M32: rect.top,
-            } * saved));
+            } * saved),
+            );
             if icon.filled() {
                 t.FillGeometry(&*geometry, &self.brush, None);
             }
@@ -1707,7 +1754,8 @@ mod tests {
     }
 
     fn soft(rect: Rect, color: Rgba) -> Op {
-        Op::SoftShadow { rect, radius: 12.0, blur: 24.0, offset: (0.0, 8.0), spread: 0.0, color }
+        Op::SoftShadow { rect, radius: 12.0, blur: 24.0, offset: (0.0, 8.0), spread: 0.0, color,
+        }
     }
 
     #[test]
@@ -1843,10 +1891,12 @@ mod tests {
 fn canvas_releases_pictures_that_left_the_display_list() {
     let mut ui = Ui::new().unwrap();
     let canvas = Canvas::new(&ui, 8, 8).unwrap();
-    let image = Arc::new(Image { width: 8, height: 8, pixels: vec![255; 8 * 8 * 4] });
+    let image = Arc::new(Image { width: 8, height: 8, pixels: vec![255; 8 * 8 * 4],
+    });
     let old = Arc::downgrade(&image);
     let mut list = DisplayList::default();
-    list.ops.push(Op::RoundedImage { rect: Rect::new(0.0,0.0,8.0,8.0), image, opacity:1.0, source:None, radius:1.0 });
+    list.ops.push(Op::RoundedImage { rect: Rect::new(0.0,0.0,8.0,8.0), image, opacity:1.0, source:None, radius:1.0,
+    });
     canvas.draw(&mut ui.text, &list, PixelRect::full(8,8)).unwrap();
     drop(list);
     assert!(old.upgrade().is_some(), "canvas retained its live bitmap");
@@ -1917,11 +1967,16 @@ mod gradient_cost {
                 let rect = Rect::new(0.0,0.0,w as f32,h as f32);
                 let red = Rgba::new(1.0,0.2,0.1,1.0);
                 let blue = Rgba::new(0.1,0.2,1.0,1.0);
-                let op = if kind == 0 { Op::Fill { rect, radius: 12.0, color: red } } else {
+                let op = if kind == 0 { Op::Fill { rect, radius: 12.0, color: red,
+                    } } else {
                     Op::Gradient { rect, radius: 12.0, width: 0.0, gradient: crate::paint::Gradient::new(&[
-                        crate::paint::GradientStop { offset: 0.0, color: red },
-                        crate::paint::GradientStop { offset: 1.0, color: blue },
-                    ], (kind == 1).then_some(0.5)) }
+                        crate::paint::GradientStop { offset: 0.0, color: red,
+                                },
+                        crate::paint::GradientStop { offset: 1.0, color: blue,
+                                },
+                    ], (kind == 1).then_some(0.5),
+                        ),
+                    }
                 };
                 let list = DisplayList { ops: vec![op], ..Default::default() };
                 let mut samples = Vec::new();
@@ -1933,6 +1988,79 @@ mod gradient_cost {
                 samples.sort_by(f64::total_cmp);
                 println!("{w}x{h} kind={kind} median={:.4}ms p95={:.4}ms",samples[100],samples[190]);
             }
+        }
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl Painter {
+    // A compatible GPU bitmap keeps the filter input isolated from the surface's clips.
+    unsafe fn native_blur(
+        &self,
+        text: &mut Text,
+        ops: &[Op],
+        sigma: f32,
+        damage: Rect,
+    ) -> Result<()> {
+        use windows::Win32::Graphics::Direct2D::Common::*;
+        use windows::Win32::Graphics::Direct2D::*;
+        // SAFETY: owned COM objects, used synchronously inside this painter's draw scope.
+        unsafe {
+            let dc: ID2D1DeviceContext = self.target.cast()?;
+            let bounds = ops
+                .iter()
+                .map(Op::bounds)
+                .reduce(Rect::union)
+                .unwrap_or_default()
+                .inflate(crate::blur::reach(sigma));
+            let r = bounds.intersect(damage).inflate(crate::blur::reach(sigma));
+            let r = Rect {
+                left: r.left.floor(),
+                top: r.top.floor(),
+                right: r.right.ceil(),
+                bottom: r.bottom.ceil(),
+            };
+            if r.is_empty() {
+                return Ok(());
+            }
+            let size = D2D_SIZE_U {
+                width: r.width() as u32,
+                height: r.height() as u32,
+            };
+            let target = self.target.CreateCompatibleRenderTarget(
+                None,
+                Some(&size),
+                None,
+                D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
+            )?;
+            let painter = Painter::new(
+                target.cast()?,
+                &self.target.GetFactory()?,
+                &self.target.GetTextRenderingParams()?,
+            )?;
+            target.BeginDraw();
+            target.Clear(Some(&color(Rgba::TRANSPARENT)));
+            target.SetTransform(&windows_numerics::Matrix3x2::translation(-r.left, -r.top));
+            painter.ops(text, ops, r);
+            target.EndDraw(None, None)?;
+            let effect = dc.CreateEffect(&CLSID_D2D1GaussianBlur)?;
+            effect.SetValue(
+                D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION.0 as u32,
+                D2D1_PROPERTY_TYPE_FLOAT,
+                &sigma.clamp(0.0, 64.0).to_ne_bytes(),
+            )?;
+            effect.SetInput(0, &target.GetBitmap()?, true);
+            dc.DrawImage(
+                &effect.GetOutput()?,
+                Some(&Vector2 {
+                    X: r.left,
+                    Y: r.top,
+                }),
+                Some(&d2d(Rect::new(0.0, 0.0, r.width(), r.height()))),
+                D2D1_INTERPOLATION_MODE_LINEAR,
+                D2D1_COMPOSITE_MODE_SOURCE_OVER,
+            );
+            Ok(())
         }
     }
 }

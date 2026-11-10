@@ -6,6 +6,8 @@ use anyhow::{Result, ensure};
 use std::cell::RefCell;
 use vello_cpu::{Pixmap, RenderContext, Resources, kurbo::Affine};
 mod scene {
+    #[cfg(feature = "gpu")]
+    const NATIVE_FILTERS: bool = false;
     type Scene = vello_cpu::RenderContext;
     type Resources = vello_cpu::Resources;
     include!("scene.rs");
@@ -112,6 +114,7 @@ impl Canvas {
         if area.width == 0 || area.height == 0 {
             return Ok(());
         }
+        let prepared = crate::blur::prepare(text, &list.ops, area.to_rect())?;
         // Rasterize a damage-sized target, rather than a full bitmap under a scissor.
         let mut ctx = RenderContext::new(area.width as u16, area.height as u16);
         ctx.set_transform(Affine::translate((-(area.x as f64), -(area.y as f64))));
@@ -119,7 +122,7 @@ impl Canvas {
             &mut ctx,
             &mut s.resources,
             text,
-            &list.ops,
+            &prepared,
             Affine::translate((-(area.x as f64), -(area.y as f64))),
             &mut |_, pix| vello_cpu::ImageSource::Pixmap(pix),
         )?;

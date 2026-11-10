@@ -51,6 +51,7 @@ pub mod reveal;
 mod scene;
 pub mod paint;
 mod shadow;
+mod blur;
 mod bitmap;
 mod text_style;
 pub mod scroll;

@@ -23,7 +23,8 @@ fn rounded(r: Rect, radius: f32) -> BezPath {
 }
 
 fn paint(ctx: &mut Scene, c: Rgba) {
-    ctx.set_paint(vello_hybrid::color::AlphaColor::<vello_hybrid::color::Srgb>::new([c.r, c.g, c.b, c.a]));
+    ctx.set_paint(vello_hybrid::color::AlphaColor::<vello_hybrid::color::Srgb>::new([c.r, c.g, c.b, c.a]),
+    );
 }
 
 /// Fills (`width == 0`) or strokes; round caps and joins only for icons, as on the CPU.
@@ -107,7 +108,8 @@ fn line(ctx: &mut Scene, line: &CTLine, origin: (f64, f64)) {
             let count = run.glyph_count().max(0) as usize;
             let mut glyphs = vec![0u16; count];
             let mut positions = vec![CGPoint::new(0.0, 0.0); count];
-            let all = CFRange { location: 0, length: 0 };
+            let all = CFRange { location: 0, length: 0,
+            };
             if count > 0 {
                 run.glyphs(all, NonNull::new_unchecked(glyphs.as_mut_ptr()));
                 run.positions(all, NonNull::new_unchecked(positions.as_mut_ptr()));
@@ -130,18 +132,32 @@ pub(super) fn draw_ops(
     scene_transform: Affine,
     image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_hybrid::ImageSource,
 ) -> Result<()> {
+    let prepared =
+        crate::blur::prepare_native(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
+    let ops = prepared.as_ref();
     let mut clips = 0;
     for op in ops {
         match op {
+            Op::Blurred { sigma, ops } => {
+                use vello_hybrid::filter_effects::{Filter, FilterFunction};
+                ctx.push_filter_layer(Filter::from_function(FilterFunction::Blur {
+                    radius: *sigma,
+                }));
+                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
+                ctx.pop_layer();
+            }
+            Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
             Op::Transformed { transform, ops } => {
                 let saved = scene_transform;
                 ctx.set_transform(saved * Affine::new(transform.0.map(f64::from)));
-                let result = draw_ops(ctx,res,text,ops,saved * Affine::new(transform.0.map(f64::from)),image_source);
+                let result = draw_ops(ctx,res,text,ops,saved * Affine::new(transform.0.map(f64::from)),image_source,
+                );
                 ctx.set_transform(saved);
                 result?;
             }
             Op::Hole { rect: r } => {
-                ctx.set_blend_mode(vello_hybrid::peniko::BlendMode::new(vello_hybrid::peniko::Mix::Normal, vello_hybrid::peniko::Compose::Copy));
+                ctx.set_blend_mode(vello_hybrid::peniko::BlendMode::new(vello_hybrid::peniko::Mix::Normal, vello_hybrid::peniko::Compose::Copy,
+                ));
                 paint(ctx, Rgba::TRANSPARENT);
                 ctx.fill_path(&rounded(*r, 0.));
                 // Nothing else changes the blend mode: back to source-over.
@@ -162,29 +178,37 @@ pub(super) fn draw_ops(
                 draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
                 ctx.pop_layer();
             }
-            Op::RoundedClipped { rect: r, radius, ops } => {
+            Op::RoundedClipped { rect: r, radius, ops,
+            } => {
                 ctx.push_clip_layer(&rounded(*r, *radius));
                 draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
                 ctx.pop_layer();
             }
-            Op::Gradient { rect: r, radius, width, gradient } => {
-                use vello_hybrid::peniko::{Gradient, ColorStop};
-                let stops: Vec<_> = gradient.stops.iter().map(|s| ColorStop { offset: s.offset, color: vello_hybrid::color::AlphaColor::<vello_hybrid::color::Srgb>::new([s.color.r, s.color.g, s.color.b, s.color.a]).into() }).collect();
+            Op::Gradient { rect: r, radius, width, gradient,
+            } => {
+                use vello_hybrid::peniko::{ColorStop, Gradient};
+                let stops: Vec<_> = gradient.stops.iter().map(|s| ColorStop { offset: s.offset, color: vello_hybrid::color::AlphaColor::<vello_hybrid::color::Srgb>::new([s.color.r, s.color.g, s.color.b, s.color.a,
+                        ]).into(),
+                    }).collect();
                 let g = if gradient.angle.is_some() {
                     let (a,b) = gradient.line(*r);
                     Gradient::new_linear((a.x as f64, a.y as f64), (b.x as f64, b.y as f64))
                 } else {
                     let c = r.center();
-                    Gradient::new_radial((c.x as f64, c.y as f64), ((r.width() * r.width() + r.height() * r.height()).sqrt() * 0.5).max(0.001))
+                    Gradient::new_radial((c.x as f64, c.y as f64), ((r.width() * r.width() + r.height() * r.height()).sqrt() * 0.5).max(0.001),
+                    )
                 }.with_stops(stops.as_slice());
                 ctx.set_paint(g);
                 let p = rounded(*r, *radius);
                 if *width > 0.0 { ctx.set_stroke(Stroke::new(*width as f64)); ctx.stroke_path(&p); }
                 else { ctx.fill_path(&p); }
             }
-            Op::Fill { rect: r, radius, color } => path(ctx, &rounded(*r, *radius), 0., *color, false),
-            Op::Stroke { rect: r, radius, width, color } => path(ctx, &rounded(*r, *radius), *width, *color, false),
-            Op::Continuous { rect: r, radius, smoothing, width, color } => {
+            Op::Fill { rect: r, radius, color,
+            } => path(ctx, &rounded(*r, *radius), 0., *color, false),
+            Op::Stroke { rect: r, radius, width, color,
+            } => path(ctx, &rounded(*r, *radius), *width, *color, false),
+            Op::Continuous { rect: r, radius, smoothing, width, color,
+            } => {
                 let mut p = BezPath::new();
                 for (i, v) in crate::geom::continuous::outline(*r, *radius, *smoothing).iter().enumerate() {
                     if i == 0 {
@@ -196,13 +220,15 @@ pub(super) fn draw_ops(
                 p.close_path();
                 path(ctx, &p, *width, *color, false);
             }
-            Op::Line { from, to, width, color } => {
+            Op::Line { from, to, width, color,
+            } => {
                 let mut p = BezPath::new();
                 p.move_to((from.x as f64, from.y as f64));
                 p.line_to((to.x as f64, to.y as f64));
                 path(ctx, &p, *width, *color, false);
             }
-            Op::Arc { center, radius, start, sweep, width, color } => {
+            Op::Arc { center, radius, start, sweep, width, color,
+            } => {
                 // Kurbo's angles run from three o'clock, clockwise in y-down space.
                 let arc = kurbo::Arc::new(
                     (center.x as f64, center.y as f64),
@@ -213,7 +239,8 @@ pub(super) fn draw_ops(
                 );
                 path(ctx, &arc.to_path(0.05), *width, *color, false);
             }
-            Op::Icon { rect: r, icon, weight, color } => {
+            Op::Icon { rect: r, icon, weight, color,
+            } => {
                 let p = Affine::translate((r.left as f64, r.top as f64))
                     * Affine::scale_non_uniform(r.width() as f64 / 24., r.height() as f64 / 24.)
                     * icon_path(*icon);
@@ -222,11 +249,13 @@ pub(super) fn draw_ops(
                 }
                 path(ctx, &p, *weight, *color, true);
             }
-            Op::Text { rect: r, text: label, style, color } | Op::Emphasis { rect: r, text: label, style, color, .. } => {
+            Op::Text { rect: r, text: label, style, color,
+            } | Op::Emphasis { rect: r, text: label, style, color, .. } => {
                 if label.chars().count() == 1
                     && let Some(icon) = label.chars().next().and_then(crate::icons::from_system_glyph)
                 {
-                    let icon = Op::Icon { rect: Rect::new(r.left, r.top, style.size, style.size), icon, weight: (style.size / 12.).max(1.), color: *color };
+                    let icon = Op::Icon { rect: Rect::new(r.left, r.top, style.size, style.size), icon, weight: (style.size / 12.).max(1.), color: *color,
+                    };
                     draw_ops(ctx, res, text, &[icon], scene_transform, image_source)?;
                     continue;
                 }
@@ -234,7 +263,9 @@ pub(super) fn draw_ops(
                 let layout = text.shape(label, style, italic);
                 paint(ctx, *color);
                 for (i, (ct, _)) in layout.lines.iter().enumerate() {
-                    line(ctx, ct, (r.left as f64, r.top as f64 + layout.ascent + i as f64 * layout.line_height));
+                    line(ctx, ct, (r.left as f64, r.top as f64 + layout.ascent + i as f64 * layout.line_height,
+                        ),
+                    );
                 }
                 if matches!(op, Op::Emphasis { strike: true, .. }) {
                     let y = (r.top + style.size * 0.65) as f64;
@@ -244,17 +275,20 @@ pub(super) fn draw_ops(
                     path(ctx, &p, 1., *color, false);
                 }
             }
-            Op::Image { rect: r, image, opacity, source } | Op::RoundedImage { rect: r, image, opacity, source, .. } => {
+            Op::Image { rect: r, image, opacity, source,
+            } | Op::RoundedImage { rect: r, image, opacity, source, .. } => {
                 ensure!(image.width <= u16::MAX as u32 && image.height <= u16::MAX as u32, "image too large");
                 let mut pix = Pixmap::new(image.width as u16, image.height as u16);
                 for (d, p) in pix.data_mut().iter_mut().zip(image.pixels.as_chunks::<4>().0.iter()) {
                     *d = vello_hybrid::color::PremulRgba8::from_u8_array([p[2], p[1], p[0], p[3]]);
                 }
                 let src = source.unwrap_or(Rect::new(0., 0., image.width as f32, image.height as f32));
-                ctx.set_paint(vello_hybrid::Image { image: image_source(res, Arc::new(pix)), sampler: Default::default() });
+                ctx.set_paint(vello_hybrid::Image { image: image_source(res, Arc::new(pix)), sampler: Default::default(),
+                });
                 ctx.set_paint_transform(
                     Affine::translate((r.left as f64, r.top as f64))
-                        * Affine::scale_non_uniform((r.width() / src.width()) as f64, (r.height() / src.height()) as f64)
+                        * Affine::scale_non_uniform((r.width() / src.width()) as f64, (r.height() / src.height()) as f64,
+                        )
                         * Affine::translate((-src.left as f64, -src.top as f64)),
                 );
                 ctx.push_opacity_layer(*opacity);
@@ -263,14 +297,17 @@ pub(super) fn draw_ops(
                 ctx.pop_layer();
                 ctx.reset_paint_transform();
             }
-            Op::Shadow { rect: r, radius, spread, drop, color } => {
+            Op::Shadow { rect: r, radius, spread, drop, color,
+            } => {
                 let steps = (*spread / 2.).floor() as i32;
                 for i in 0..steps {
                     let grow = (i * 2) as f32;
-                    path(ctx, &rounded(r.inflate(grow).offset(0., *drop), radius + grow), 0., color.with_alpha(color.a * (1. - i as f32 / steps as f32)), false);
+                    path(ctx, &rounded(r.inflate(grow).offset(0., *drop), radius + grow), 0., color.with_alpha(color.a * (1. - i as f32 / steps as f32)), false,
+                    );
                 }
             }
-            Op::SoftShadow { rect: r, radius, blur, offset, spread, color } => {
+            Op::SoftShadow { rect: r, radius, blur, offset, spread, color,
+            } => {
                 // As on Linux: Vello's exact blurred rounded rectangle.
                 let (shape, radius) = crate::shadow::shape(*r, *radius, *offset, *spread);
                 let radius = radius.min(shape.width() / 2.).min(shape.height() / 2.);
@@ -284,7 +321,8 @@ pub(super) fn draw_ops(
                     }
                 }
             }
-            Op::TextField { rect, field, .. } => draw_ops(ctx, res, text, &[field.op(*rect)], scene_transform, image_source)?,
+            Op::TextField { rect, field, .. } => draw_ops(ctx, res, text, &[field.op(*rect)], scene_transform, image_source,
+            )?,
         }
     }
     for _ in 0..clips {
@@ -317,7 +355,8 @@ fn icon_path(icon: crate::icons::Icon) -> BezPath {
                 path.curve_to(point(a), point(b), at);
             }
             Seg::Close => path.close_path(),
-            Seg::Arc { to, rx, ry, rotation, large, sweep } => {
+            Seg::Arc { to, rx, ry, rotation, large, sweep,
+            } => {
                 let to = point(to);
                 let svg = kurbo::SvgArc {
                     from: at,
