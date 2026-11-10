@@ -2104,7 +2104,16 @@ impl<S> Runtime<S> {
     /// subtree out there (an absolute element), present it each frame, and send that
     /// window's input through the ordinary entry points offset by `region`'s origin.
     pub fn present_region(&mut self, surface: &mut Surface, origin: (i32, i32), region: Rect) -> Result<bool> {
-        let (list, size) = self.region_list(region);
+        let scale = self.scale;
+        self.present_region_at(surface, origin, region, scale)
+    }
+
+    /// [`present_region`](Self::present_region) for a window at another backing `scale` than
+    /// the runtime's (one on a monitor of a different scale): the region drawn at that scale,
+    /// sharp. That window's pointer is then in its own device pixels: divide by its scale,
+    /// multiply by the runtime's, before offsetting it by the region's origin.
+    pub fn present_region_at(&mut self, surface: &mut Surface, origin: (i32, i32), region: Rect, scale: f32) -> Result<bool> {
+        let (list, size) = self.region_list(region, scale);
         surface.present(&mut self.ui, origin, size, list)
     }
 
@@ -2120,18 +2129,24 @@ impl<S> Runtime<S> {
     /// [`present_region`](Self::present_region) headless: the region's pixels, as a portal
     /// window would show them.
     pub fn snap_region(&mut self, region: Rect) -> Result<Image> {
-        let (list, size) = self.region_list(region);
+        let scale = self.scale;
+        self.snap_region_at(region, scale)
+    }
+
+    /// [`present_region_at`](Self::present_region_at) headless.
+    pub fn snap_region_at(&mut self, region: Rect, scale: f32) -> Result<Image> {
+        let (list, size) = self.region_list(region, scale);
         render(&mut self.ui, &list, size.0, size.1)
     }
 
-    /// The frame's list moved so `region`'s corner is the origin, and the region's size,
-    /// both in device pixels.
-    fn region_list(&self, region: Rect) -> (DisplayList, (u32, u32)) {
+    /// The frame's list moved so `region`'s corner is the origin and drawn at `scale`, and
+    /// the region's size at that scale, both in device pixels.
+    fn region_list(&self, region: Rect, scale: f32) -> (DisplayList, (u32, u32)) {
         let s = self.scale;
-        let list = self.list.translated(-region.left * s, -region.top * s);
+        let list = self.list.translated(-region.left * s, -region.top * s).scaled(scale / s);
         let size = (
-            (region.width() * s).round().max(1.0) as u32,
-            (region.height() * s).round().max(1.0) as u32,
+            (region.width() * scale).round().max(1.0) as u32,
+            (region.height() * scale).round().max(1.0) as u32,
         );
         (list, size)
     }

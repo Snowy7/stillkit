@@ -80,3 +80,14 @@ fn a_menu_from_inside_a_portal_fits_the_portal_not_the_main_window() {
         "{menu:?} inside {region:?}"
     );
 }
+
+#[test]
+fn a_portal_on_a_monitor_of_another_scale_draws_at_that_scale() {
+    let mut rt = Runtime::new(Portal { pressed: false }, view, Theme::new(Style::Liquid, Scheme::Dark, SYSTEM_BLUE), (200, 100), 1.0).unwrap();
+    rt.frame(FRAME);
+    let region = Rect::new(1000.0, 0.0, 120.0, 80.0);
+    let image = rt.snap_region_at(region, 2.0).unwrap();
+    assert_eq!((image.width, image.height), (240, 160), "the window's own pixels");
+    let [b, _, r, _] = image.pixel(230, 150);
+    assert!(r > 200 && b < 50, "the square fills it to the far corner at 2x");
+}
