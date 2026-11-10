@@ -745,6 +745,8 @@ pub(crate) struct Sem {
     pub checked: Option<bool>,
     pub disabled: bool,
     pub focusable: bool,
+    /// Pointer input only: never a Tab stop ([`El::skip_tab`]).
+    pub skip_tab: bool,
     pub range: Option<Range>,
     pub description: Option<Arc<str>>,
     /// The value read as text ("40%", "Medium").
@@ -1317,6 +1319,14 @@ impl<S> El<S> {
     /// Takes keyboard focus even without a handler.
     pub fn focusable(mut self) -> Self {
         self.sem.focusable = true;
+        self
+    }
+
+    /// Takes the pointer but is no Tab stop: a drag handle or a hover affordance whose action
+    /// the keyboard reaches another way (a field's scrub label beside the field itself). A
+    /// press may still focus it.
+    pub fn skip_tab(mut self) -> Self {
+        self.sem.skip_tab = true;
         self
     }
 
