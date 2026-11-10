@@ -332,6 +332,12 @@ impl<S> Runtime<S> {
         let inset = |r: Rect| Rect::new(r.left + margin, r.top + margin, r.width() - 2.0 * margin, r.height() - 2.0 * margin);
         let at: HashMap<u64, usize> = laid.iter().enumerate().map(|(i, l)| (l.id, i)).collect();
         let screen = self.screen.filter(|_| self.root.scrolls().is_none());
+        // A portal's overlays fit its window, not the main one (device pixels).
+        let portals: Vec<Rect> = self
+            .portals
+            .iter()
+            .map(|p| Rect::new(p.left * s, p.top * s, p.width() * s, p.height() * s))
+            .collect();
         let live: HashSet<u64> = self.layers.iter().map(|l| l.id).collect();
         self.orphans.retain(|id| live.contains(id));
         self.anchors.retain(|id, _| live.contains(id));
@@ -372,10 +378,16 @@ impl<S> Runtime<S> {
                     gap,
                 })
             };
-            let inside = if anchor.is_some() { inset(window) } else { window };
+            let portal = anchor.and_then(|a| {
+                let p = Point::new(a.left, a.top);
+                portals.iter().copied().find(|r| r.contains(p))
+            });
+            let bounds = portal.unwrap_or(window);
+            let inside = if anchor.is_some() { inset(bounds) } else { bounds };
             let mut to = spot(inside);
             // Squeezed onto its anchor (or bigger than the window): it goes to the screen.
-            if let (Some(screen), true, Some(a)) = (screen, layer.kind.escapes(), anchor) {
+            // (Not from a portal: its window is where it shows.)
+            if let (Some(screen), true, Some(a), None) = (screen, layer.kind.escapes(), anchor, portal) {
                 let placed = Rect::new(to.x, to.y, r.width(), r.height());
                 let covers = if a.is_empty() {
                     // A point: covered when strictly inside (a menu opens with a corner on it).

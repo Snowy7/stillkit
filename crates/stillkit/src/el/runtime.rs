@@ -258,6 +258,8 @@ pub struct Runtime<S> {
     // ---- Overlays (`layer`) ------------------------------------------------------------
     /// Open overlays in paint order; their entries are the root's last children.
     layers: Vec<Layer<S>>,
+    /// Regions shown in portal windows (`set_portals`), in design pixels.
+    portals: Vec<Rect>,
     /// Where the entries start among the root's children.
     entries: usize,
     /// Tooltip triggers of the last view run, by identity.
@@ -384,6 +386,7 @@ impl<S: 'static> Runtime<S> {
             paints: 0,
             changes: Vec::new(),
             layers: Vec::new(),
+            portals: Vec::new(),
             entries: 0,
             tips: Vec::new(),
             tip: Tip::default(),
@@ -2093,6 +2096,44 @@ impl<S> Runtime<S> {
     /// The latest frame drawn headless, through the same software target as a surface.
     pub fn snap(&mut self) -> Result<Image> {
         render(&mut self.ui, &self.list, self.size.0, self.size.1)
+    }
+
+    /// Presents the part of the view inside `region` (design pixels; it may lie beyond
+    /// the window's own size) into `surface`: a portal, another native window showing one
+    /// subtree of this runtime and its state, such as a panel torn out of its dock. Lay the
+    /// subtree out there (an absolute element), present it each frame, and send that
+    /// window's input through the ordinary entry points offset by `region`'s origin.
+    pub fn present_region(&mut self, surface: &mut Surface, origin: (i32, i32), region: Rect) -> Result<bool> {
+        let (list, size) = self.region_list(region);
+        surface.present(&mut self.ui, origin, size, list)
+    }
+
+    /// The portals' regions (design pixels), so an overlay opened from inside one (a menu,
+    /// a tooltip) fits that window rather than the main one. Set them as they change.
+    pub fn set_portals(&mut self, regions: &[Rect]) {
+        if self.portals != regions {
+            self.portals = regions.to_vec();
+            self.stale_layout = true;
+        }
+    }
+
+    /// [`present_region`](Self::present_region) headless: the region's pixels, as a portal
+    /// window would show them.
+    pub fn snap_region(&mut self, region: Rect) -> Result<Image> {
+        let (list, size) = self.region_list(region);
+        render(&mut self.ui, &list, size.0, size.1)
+    }
+
+    /// The frame's list moved so `region`'s corner is the origin, and the region's size,
+    /// both in device pixels.
+    fn region_list(&self, region: Rect) -> (DisplayList, (u32, u32)) {
+        let s = self.scale;
+        let list = self.list.translated(-region.left * s, -region.top * s);
+        let size = (
+            (region.width() * s).round().max(1.0) as u32,
+            (region.height() * s).round().max(1.0) as u32,
+        );
+        (list, size)
     }
 }
 

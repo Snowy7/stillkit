@@ -702,6 +702,13 @@ impl Surface {
         self.window.setFrame_display(super::screen::frame_at((x, y), (w.max(1) as f64 / s, h.max(1) as f64 / s)), false);
     }
 
+    /// Where the window is now, in screen pixels as [`place`](Self::place) takes it
+    /// (`x, y, width, height`): after the person moved or resized it.
+    pub fn placed(&self) -> Option<(i32, i32, i32, i32)> {
+        let (l, t, r, b) = super::screen::edges(self.window.frame());
+        Some((l, t, r - l, b - t))
+    }
+
     /// The content's size in pixels.
     pub fn client_size(&self) -> (u32, u32) {
         self.view.client_size()
