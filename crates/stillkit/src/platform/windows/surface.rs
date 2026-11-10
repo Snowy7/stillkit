@@ -22,7 +22,7 @@ use windows::Win32::Foundation::{
 use windows::Win32::Graphics::Gdi::{
     AC_SRC_ALPHA, AC_SRC_OVER, BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION,
     CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, HBITMAP, HDC,
-    HGDIOBJ, ScreenToClient, SelectObject,
+    ClientToScreen, HGDIOBJ, ScreenToClient, SelectObject,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
@@ -190,8 +190,6 @@ pub(crate) struct Shared {
     /// Where a left click activates a never-activated window ([`Surface::set_click_activates`]).
     activates: RefCell<Vec<crate::geom::Rect>>,
     field: RefCell<Option<crate::TextField>>,
-    /// The window's top-left on screen, for pointer events.
-    origin: Cell<(i32, i32)>,
     a11y: RefCell<Option<A11y>>,
     semantics: RefCell<Vec<(HitId, crate::Semantics)>>,
     /// A GPU surface's drawn bounds (surface px), for `WM_NCHITTEST`: without a layered bitmap
@@ -459,7 +457,6 @@ impl Surface {
             restacking: Cell::new(false),
             activates: RefCell::new(Vec::new()),
             field: RefCell::new(None),
-            origin: Cell::new((0, 0)),
             semantics: RefCell::default(),
             a11y: RefCell::new(Some(if deferred {
                 A11y::deferred(hwnd, role, name.into())
@@ -833,7 +830,6 @@ impl Surface {
             // SAFETY: our own window.
             unsafe { SetWindowPos(self.hwnd, None, origin.0, origin.1, size.0 as i32, size.1 as i32, flags)? };
             self.origin = origin;
-            self.shared.origin.set(origin);
         }
         self.size = size;
         if let Some(glass) = glass
@@ -886,7 +882,6 @@ impl Surface {
             SetWindowPos(self.hwnd, None, origin.0, origin.1, size.0 as i32, size.1 as i32, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE)?
         };
         self.origin = origin;
-        self.shared.origin.set(origin);
         let glass = self.gpu.as_ref().and_then(|g| g.borrow().glass.clone());
         if let Some(glass) = glass {
             if let Ok(mut g) = glass.try_borrow_mut() {
@@ -1249,7 +1244,6 @@ impl Surface {
             .ok()
             .context("UpdateLayeredWindowIndirect")?;
         self.origin = origin;
-        self.shared.origin.set(origin);
         Ok(())
     }
 
@@ -1346,10 +1340,39 @@ fn register_class() -> Result<()> {
     Ok(())
 }
 
-fn pointer(shared: &Shared, lparam: LPARAM) -> Pointer {
-    let x = i32::from(lparam.0 as i16);
-    let y = i32::from((lparam.0 >> 16) as i16);
-    let (ox, oy) = shared.origin.get();
+/// A mouse message's packed point, sign-extended as `GET_X_LPARAM`/`GET_Y_LPARAM` do:
+/// monitors left of or above the primary one have negative coordinates.
+fn lparam_point(lparam: LPARAM) -> (i32, i32) {
+    (i32::from(lparam.0 as i16), i32::from((lparam.0 >> 16) as i16))
+}
+
+/// Where the client area's top-left is on the screen, asked of the system each time: an
+/// app window moves (the person drags it, to another monitor) without `Surface` knowing.
+fn client_origin(hwnd: HWND) -> (i32, i32) {
+    let mut p = POINT::default();
+    // SAFETY: our own window and a writable local point.
+    let _ = unsafe { ClientToScreen(hwnd, &mut p) };
+    (p.x, p.y)
+}
+
+/// Screen point `screen` in a client area whose top-left is at `origin` on the screen.
+fn to_client(screen: (i32, i32), origin: (i32, i32)) -> Point {
+    Point::new((screen.0 - origin.0) as f32, (screen.1 - origin.1) as f32)
+}
+
+/// A GPU window's `WM_NCHITTEST`: whether screen point `screen` lands on what its last
+/// frame drew (`solid`, client px) in a client area at `origin`; elsewhere clicks pass
+/// through to the windows below.
+#[cfg(any(feature = "gpu", test))]
+fn solid_hit(solid: &[crate::geom::Rect], screen: (i32, i32), origin: (i32, i32)) -> bool {
+    let at = to_client(screen, origin);
+    solid.iter().any(|r| r.contains(at))
+}
+
+/// A client-coordinate mouse message's pointer, with its screen point.
+fn pointer(hwnd: HWND, lparam: LPARAM) -> Pointer {
+    let (x, y) = lparam_point(lparam);
+    let (ox, oy) = client_origin(hwnd);
     Pointer {
         at: Point::new(x as f32, y as f32),
         screen: (ox + x, oy + y),
@@ -1516,21 +1539,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
             return result;
         }
     }
-    let button = |button| (pointer(shared, lparam), button);
+    let button = |button| (pointer(hwnd, lparam), button);
     #[cfg(feature = "gpu")]
     match msg {
         // A GPU window has no layered bitmap to hit-test by alpha: what its last frame drew is
         // ours, the rest lets clicks through to the windows of this thread below.
         windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST => {
             if let Some(solid) = shared.solid.borrow().as_ref() {
-                let (ox, oy) = shared.origin.get();
-                let at = Point::new(
-                    (i32::from(lparam.0 as i16) - ox) as f32,
-                    (i32::from((lparam.0 >> 16) as i16) - oy) as f32,
-                );
                 const HTTRANSPARENT: isize = -1;
                 const HTCLIENT: isize = 1;
-                return LRESULT(if solid.iter().any(|r| r.contains(at)) { HTCLIENT } else { HTTRANSPARENT });
+                let hit = solid_hit(solid, lparam_point(lparam), client_origin(hwnd));
+                return LRESULT(if hit { HTCLIENT } else { HTTRANSPARENT });
             }
         }
         super::gpu_glass::WM_GLASS_FRAME => {
@@ -1545,11 +1564,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         WM_MOUSEACTIVATE if !shared.activate => {
             // SAFETY: reads the position of the message being handled.
             let at = unsafe { windows::Win32::UI::WindowsAndMessaging::GetMessagePos() };
-            let (origin_x, origin_y) = shared.origin.get();
-            let at = Point::new(
-                (i32::from(at as i16) - origin_x) as f32,
-                (i32::from((at >> 16) as i16) - origin_y) as f32,
-            );
+            let at = to_client(lparam_point(LPARAM(at as i32 as isize)), client_origin(hwnd));
             let activates = shared.activates.borrow().iter().any(|r| r.contains(at));
             return LRESULT(if activates {
                 MA_ACTIVATE
@@ -1570,14 +1585,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     dwHoverTime: 0,
                 });
             }
-            push(id, Event::Move(pointer(shared, lparam)));
+            push(id, Event::Move(pointer(hwnd, lparam)));
         }
         WM_MOUSELEAVE => push(id, Event::Leave),
         windows::Win32::UI::WindowsAndMessaging::WM_DROPFILES => {
             // SAFETY: the HDROP this message carries, read then released once.
             let Some((at, paths)) = (unsafe { dropped_files(wparam.0 as *mut _) }) else { return LRESULT(0) };
             set_dropped_files(paths);
-            let (ox, oy) = shared.origin.get();
+            let (ox, oy) = client_origin(hwnd);
             push(id, Event::FilesDropped(Pointer { at: Point::new(at.x as f32, at.y as f32), screen: (ox + at.x, oy + at.y) }));
         }
         WM_CAPTURECHANGED => push(id, Event::CaptureLost),
@@ -1895,5 +1910,34 @@ mod tests {
         let (at, read) = unsafe { super::dropped_files(drop) }.expect("shell32's drop functions");
         assert_eq!((at.x, at.y), (12, 34));
         assert_eq!(read, paths.map(std::path::PathBuf::from));
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    /// Packs a mouse message's point as Windows does: two 16-bit words.
+    fn packed(x: i16, y: i16) -> LPARAM {
+        LPARAM(((y as u16 as isize) << 16) | x as u16 as isize)
+    }
+
+    #[test]
+    fn points_left_of_and_above_the_primary_monitor_read_negative() {
+        assert_eq!(lparam_point(packed(-1900, 50)), (-1900, 50));
+        assert_eq!(lparam_point(packed(-5, -3)), (-5, -3));
+        assert_eq!(lparam_point(packed(2500, 1400)), (2500, 1400));
+    }
+
+    #[test]
+    fn a_window_on_a_monitor_left_of_the_primary_takes_clicks_on_what_it_drew() {
+        // A window at (-1920, 0): its toolbar drawn along the top of its client area.
+        let origin = (-1920, 0);
+        let toolbar = [crate::geom::Rect::new(0.0, 0.0, 1920.0, 40.0)];
+        assert!(solid_hit(&toolbar, (-1800, 20), origin), "the toolbar under the pointer");
+        assert_eq!(to_client((-1800, 20), origin), Point::new(120.0, 20.0));
+        assert!(!solid_hit(&toolbar, (-1800, 200), origin), "below it passes through");
+        // The old cached origin, never moved from (0, 0), sent the same click through.
+        assert!(!solid_hit(&toolbar, (-1800, 20), (0, 0)));
     }
 }
