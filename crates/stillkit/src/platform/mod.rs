@@ -163,6 +163,14 @@ pub enum NativeHandle {
     Metal(*mut std::ffi::c_void),
     /// A child `HWND` (Windows) covering the placed rect: a swapchain for its client area.
     Hwnd(isize),
+    /// A Wayland subsurface (Linux): `wl_display *` and `wl_surface *` for a
+    /// `VK_KHR_wayland_surface` swapchain sized to the placed rect's device size.
+    Wayland {
+        /// The connection's `wl_display *`.
+        display: *mut std::ffi::c_void,
+        /// The layer's `wl_surface *`.
+        surface: *mut std::ffi::c_void,
+    },
 }
 
 /// How tall an app window's title area is where the system draws the window controls
