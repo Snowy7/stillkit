@@ -1734,7 +1734,12 @@ impl Surface {
             let layer = &n.layers[name];
             let surface = layer.surface.id().as_ptr().cast::<std::ffi::c_void>();
             anyhow::ensure!(!display.is_null() && !surface.is_null(), "Wayland native pointers");
-            r.conn.flush()?;
+            // A full socket (a compositor that stalls or stops reading) keeps the requests
+            // queued for the next flush; only a broken connection is an error.
+            match r.conn.flush() {
+                Err(wayland_client::backend::WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                other => other?,
+            }
             Ok(crate::NativeHandle::Wayland { display, surface })
         })
     }
