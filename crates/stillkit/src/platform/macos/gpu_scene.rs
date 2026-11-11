@@ -124,6 +124,15 @@ fn line(ctx: &mut Scene, line: &CTLine, origin: (f64, f64)) {
     }
 }
 
+/// Native-layer holes ([`Op::holes`]) still ahead while a list draws, and how many are
+/// behind. Paint drawn before a hole is clipped out of it (an even-odd clip layer) instead
+/// of being erased: the GPU renderer has no destructive blend.
+struct Holes {
+    rects: Vec<Rect>,
+    passed: usize,
+}
+
+/// Draws `ops` (prepared here) into `ctx`.
 pub(super) fn draw_ops(
     ctx: &mut Scene,
     res: &mut Resources,
@@ -135,34 +144,83 @@ pub(super) fn draw_ops(
     let prepared =
         crate::blur::prepare_native(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
     let ops = prepared.as_ref();
+    let mut holes = Holes { rects: Op::holes(ops), passed: 0 };
+    draw_prepared(ctx, res, text, ops, scene_transform, image_source, &mut holes, true)
+}
+
+/// Prepares `ops` (a nested group) and draws them.
+#[allow(clippy::too_many_arguments)]
+fn draw(
+    ctx: &mut Scene,
+    res: &mut Resources,
+    text: &mut Text,
+    ops: &[Op],
+    scene_transform: Affine,
+    image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_hybrid::ImageSource,
+    holes: &mut Holes,
+    cut: bool,
+) -> Result<()> {
+    let prepared =
+        crate::blur::prepare_native(text, ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0))?;
+    let ops = prepared.as_ref();
+    draw_prepared(ctx, res, text, ops, scene_transform, image_source, holes, cut)
+}
+
+/// Draws prepared `ops`; `cut` clips paint out of the holes ahead (off inside transformed
+/// groups, whose clip paths would be in local coordinates, and for an op already clipped).
+#[allow(clippy::too_many_arguments)]
+fn draw_prepared(
+    ctx: &mut Scene,
+    res: &mut Resources,
+    text: &mut Text,
+    ops: &[Op],
+    scene_transform: Affine,
+    image_source: &mut impl FnMut(&mut Resources, Arc<Pixmap>) -> vello_hybrid::ImageSource,
+    holes: &mut Holes,
+    cut: bool,
+) -> Result<()> {
     let mut clips = 0;
     for op in ops {
+        if cut && op.is_paint() {
+            let bounds = op.bounds();
+            let ahead: Vec<Rect> = holes.rects[holes.passed.min(holes.rects.len())..]
+                .iter()
+                .filter(|h| !h.is_empty() && h.intersects(&bounds))
+                .copied()
+                .collect();
+            if !ahead.is_empty() {
+                // Everything this op may touch, less the holes ahead (even-odd).
+                let mut cutout = rect(bounds.inflate(2.0)).to_path(0.05);
+                for hole in ahead {
+                    cutout.extend(rect(hole).to_path(0.05));
+                }
+                ctx.set_fill_rule(vello_hybrid::peniko::Fill::EvenOdd);
+                ctx.push_clip_layer(&cutout);
+                ctx.set_fill_rule(vello_hybrid::peniko::Fill::NonZero);
+                let drawn = draw(ctx, res, text, std::slice::from_ref(op), scene_transform, image_source, holes, false);
+                ctx.pop_layer();
+                drawn?;
+                continue;
+            }
+        }
         match op {
             Op::Blurred { sigma, ops } => {
                 use vello_hybrid::filter_effects::{Filter, FilterFunction};
                 ctx.push_filter_layer(Filter::from_function(FilterFunction::Blur {
                     radius: *sigma,
                 }));
-                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
+                draw(ctx, res, text, ops, scene_transform, image_source, holes, cut)?;
                 ctx.pop_layer();
             }
             Op::BackdropBlur { .. } => unreachable!("filters resolved before drawing"),
             Op::Transformed { transform, ops } => {
                 let saved = scene_transform;
                 ctx.set_transform(saved * Affine::new(transform.0.map(f64::from)));
-                let result = draw_ops(ctx,res,text,ops,saved * Affine::new(transform.0.map(f64::from)),image_source,
-                );
+                let result = draw(ctx, res, text, ops, saved * Affine::new(transform.0.map(f64::from)), image_source, holes, false);
                 ctx.set_transform(saved);
                 result?;
             }
-            Op::Hole { rect: r } => {
-                ctx.set_blend_mode(vello_hybrid::peniko::BlendMode::new(vello_hybrid::peniko::Mix::Normal, vello_hybrid::peniko::Compose::Copy,
-                ));
-                paint(ctx, Rgba::TRANSPARENT);
-                ctx.fill_path(&rounded(*r, 0.));
-                // Nothing else changes the blend mode: back to source-over.
-                ctx.set_blend_mode(Default::default());
-            }
+            Op::Hole { .. } => holes.passed += 1,
             Op::Clip { rect: r } => {
                 ctx.push_clip_layer(&rounded(*r, 0.));
                 clips += 1;
@@ -175,13 +233,13 @@ pub(super) fn draw_ops(
             }
             Op::Clipped { rect: r, ops } => {
                 ctx.push_clip_layer(&rounded(*r, 0.));
-                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
+                draw(ctx, res, text, ops, scene_transform, image_source, holes, cut)?;
                 ctx.pop_layer();
             }
             Op::RoundedClipped { rect: r, radius, ops,
             } => {
                 ctx.push_clip_layer(&rounded(*r, *radius));
-                draw_ops(ctx, res, text, ops, scene_transform, image_source)?;
+                draw(ctx, res, text, ops, scene_transform, image_source, holes, cut)?;
                 ctx.pop_layer();
             }
             Op::Gradient { rect: r, radius, width, gradient,
@@ -256,7 +314,7 @@ pub(super) fn draw_ops(
                 {
                     let icon = Op::Icon { rect: Rect::new(r.left, r.top, style.size, style.size), icon, weight: (style.size / 12.).max(1.), color: *color,
                     };
-                    draw_ops(ctx, res, text, &[icon], scene_transform, image_source)?;
+                    draw(ctx, res, text, &[icon], scene_transform, image_source, holes, false)?;
                     continue;
                 }
                 let italic = matches!(op, Op::Emphasis { italic: true, .. });
@@ -321,8 +379,7 @@ pub(super) fn draw_ops(
                     }
                 }
             }
-            Op::TextField { rect, field, .. } => draw_ops(ctx, res, text, &[field.op(*rect)], scene_transform, image_source,
-            )?,
+            Op::TextField { rect, field, .. } => draw(ctx, res, text, &[field.op(*rect)], scene_transform, image_source, holes, false)?,
         }
     }
     for _ in 0..clips {
