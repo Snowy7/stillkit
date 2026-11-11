@@ -111,7 +111,7 @@ use wayland_client::{
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
     protocol::{
         wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_region,
-        wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
+        wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_subcompositor, wl_subsurface, wl_surface,
     },
 };
 pub use wayland_protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
@@ -155,9 +155,51 @@ struct Native {
     /// The compositor shows it full screen (its last configure said so).
     fullscreen: bool,
     size: (u32, u32),
+    /// Native layers by name (`Surface::native_layer`).
+    layers: HashMap<String, Layer>,
+    /// The app said its backing is opaque (`set_background`): the opaque region is the
+    /// whole surface less the placed native layers.
+    opaque: bool,
+}
+/// Declares `n`'s opaque region: everything but its placed native layers when its backing is
+/// opaque (a layer shows through the hole above it), else none.
+fn declare_opaque(n: &Native, compositor: Option<&wl_compositor::WlCompositor>, q: &QueueHandle<State>) {
+    let Some(compositor) = compositor.filter(|_| n.opaque) else {
+        n.surface.set_opaque_region(None);
+        return;
+    };
+    let region = compositor.create_region(q, ());
+    region.add(0, 0, i32::MAX, i32::MAX);
+    let scale = n.scale.max(1) as f32;
+    for r in n.layers.values().filter_map(|l| l.rect) {
+        region.subtract(
+            (r.left / scale).floor() as i32,
+            (r.top / scale).floor() as i32,
+            (r.width() / scale).ceil() as i32 + 1,
+            (r.height() / scale).ceil() as i32 + 1,
+        );
+    }
+    n.surface.set_opaque_region(Some(&region));
+    region.destroy();
+}
+/// A native layer: a subsurface below its window's surface, where the host presents with
+/// its own device. It shows through the window's transparent holes.
+struct Layer {
+    surface: wl_surface::WlSurface,
+    sub: wl_subsurface::WlSubsurface,
+    /// The device-px rect it was last placed at.
+    rect: Option<crate::Rect>,
+}
+impl Drop for Layer {
+    fn drop(&mut self) {
+        self.sub.destroy();
+        self.surface.destroy();
+    }
 }
 impl Drop for Native {
     fn drop(&mut self) {
+        // Subsurfaces go before the surface they hang from.
+        self.layers.clear();
         #[cfg(feature = "gpu")]
         drop(self.gpu.take());
         match &self.shell {
@@ -176,6 +218,7 @@ impl Drop for Native {
 }
 pub(crate) struct State {
     compositor: Option<wl_compositor::WlCompositor>,
+    subcompositor: Option<wl_subcompositor::WlSubcompositor>,
     shm: Option<wl_shm::WlShm>,
     wm: Option<xdg_wm_base::XdgWmBase>,
     layer: Option<layer_shell::ZwlrLayerShellV1>,
@@ -215,6 +258,7 @@ fn runtime<T>(f: impl FnOnce(&mut Runtime) -> Result<T>) -> Result<T> {
             conn.display().get_registry(&queue.handle(), ());
             let mut state = State {
                 compositor: None,
+                subcompositor: None,
                 shm: None,
                 wm: None,
                 layer: None,
@@ -497,6 +541,8 @@ impl Surface {
                     maximized: false,
                     fullscreen: false,
                     size: (0, 0),
+                    layers: HashMap::new(),
+                    opaque: false,
                 },
             );
             while !r.state.windows[&id].configured {
@@ -781,20 +827,10 @@ impl Surface {
     /// Marks an opaque app backing for the compositor; pixels come from the display list.
     pub fn set_background(&self, color: crate::Rgba) {
         let _ = runtime(|r| {
-            let n = &r.state.windows[&self.id];
-            if color.a >= 1.0 {
-                let region = r
-                    .state
-                    .compositor
-                    .as_ref()
-                    .context("wl_compositor unavailable")?
-                    .create_region(&r.queue.handle(), ());
-                region.add(0, 0, i32::MAX, i32::MAX);
-                n.surface.set_opaque_region(Some(&region));
-                region.destroy();
-            } else {
-                n.surface.set_opaque_region(None);
-            }
+            let q = r.queue.handle();
+            let n = r.state.windows.get_mut(&self.id).context("surface released")?;
+            n.opaque = color.a >= 1.0;
+            declare_opaque(n, r.state.compositor.as_ref(), &q);
             Ok(())
         });
     }
@@ -1157,6 +1193,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
             match interface.as_str() {
                 "wl_compositor" => a.compositor = Some(r.bind(name, version.min(6), q, ())),
                 "wl_shm" => a.shm = Some(r.bind(name, 1, q, ())),
+                "wl_subcompositor" => a.subcompositor = Some(r.bind(name, 1, q, ())),
                 "xdg_wm_base" => a.wm = Some(r.bind(name, version.min(6), q, ())),
                 "zwlr_layer_shell_v1" => a.layer = Some(r.bind(name, version.min(4), q, ())),
                 "wl_seat" => a.seat = Some(r.bind(name, version.min(8), q, ())),
@@ -1647,18 +1684,105 @@ wayland_client::delegate_noop!(State: ignore layer_shell::ZwlrLayerShellV1);
 
 wayland_client::delegate_noop!(State: ignore wl_region::WlRegion);
 
+wayland_client::delegate_noop!(State: ignore wl_subcompositor::WlSubcompositor);
+wayland_client::delegate_noop!(State: ignore wl_subsurface::WlSubsurface);
+impl Dispatch<wl_surface::WlSurface, ()> for State {
+    /// A native layer's surface: its enter/leave and preferred-scale events change nothing
+    /// (the window's own surface decides the scale).
+    fn event(_: &mut Self, _: &wl_surface::WlSurface, _: wl_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
 impl Surface {
-    /// Native layers aren't available here yet (on Wayland they will be subsurfaces below the
-    /// surface's buffer): this fails, and a [`crate::el::native`] element stays a transparent hole.
+    /// The native layer `name`, made on first use: a Wayland subsurface below the surface's
+    /// own, where the host presents with its own GPU device (a Vulkan swapchain through
+    /// `VK_KHR_wayland_surface` on the returned display and surface). It is desynchronized, so
+    /// the host's presents show without the window committing, and takes no input, so the
+    /// pointer stays the window's. It shows where the content is transparent
+    /// ([`crate::Op::Hole`], drawn by [`crate::el::native`]) once placed. The surface must render
+    /// on the GPU ([`Render::Gpu`](crate::platform::Render::Gpu), the `gpu` feature), whose
+    /// connection is the C library's; without it this fails.
     pub fn native_layer(&self, name: &str) -> anyhow::Result<crate::NativeHandle> {
-        anyhow::bail!("native layer {name}: not available on this platform yet")
+        #[cfg(not(feature = "gpu"))]
+        {
+            anyhow::bail!("native layer {name}: Wayland native layers need stillkit's `gpu` feature")
+        }
+        #[cfg(feature = "gpu")]
+        runtime(|r| {
+            anyhow::ensure!(
+                self.mode == crate::platform::Render::Gpu,
+                "native layers need a GPU surface (Render::Gpu)"
+            );
+            let display = r.conn.backend().display_ptr().cast::<std::ffi::c_void>();
+            let q = r.queue.handle();
+            let (compositor, subcompositor) = match (&r.state.compositor, &r.state.subcompositor) {
+                (Some(c), Some(s)) => (c.clone(), s.clone()),
+                (_, None) => anyhow::bail!("the compositor has no wl_subcompositor"),
+                _ => anyhow::bail!("no wl_compositor"),
+            };
+            let n = r.state.windows.get_mut(&self.id).context("surface released")?;
+            if !n.layers.contains_key(name) {
+                let surface = compositor.create_surface(&q, ());
+                let sub = subcompositor.get_subsurface(&surface, &n.surface, &q, ());
+                sub.set_desync();
+                sub.place_below(&n.surface);
+                let empty = compositor.create_region(&q, ());
+                surface.set_input_region(Some(&empty));
+                empty.destroy();
+                surface.commit();
+                n.layers.insert(name.to_owned(), Layer { surface, sub, rect: None });
+            }
+            let layer = &n.layers[name];
+            let surface = layer.surface.id().as_ptr().cast::<std::ffi::c_void>();
+            anyhow::ensure!(!display.is_null() && !surface.is_null(), "Wayland native pointers");
+            r.conn.flush()?;
+            Ok(crate::NativeHandle::Wayland { display, surface })
+        })
     }
 
-    /// Nothing to place (see [`native_layer`](Self::native_layer)).
-    pub fn place_native_layer(&self, _: &str, _: Option<crate::Rect>) {}
+    /// Shows native layer `name` at `rect` (device px from the surface's top-left), or hides it
+    /// (`None`: its buffer is detached, so the host presents again once it shows). Unchanged
+    /// rects cost nothing; unknown names are ignored. The position applies with the window's
+    /// next commit, which this makes.
+    pub fn place_native_layer(&self, name: &str, rect: Option<crate::Rect>) {
+        let _ = runtime(|r| {
+            let Some(n) = r.state.windows.get_mut(&self.id) else { return Ok(()) };
+            let scale = n.scale.max(1) as f32;
+            let Some(layer) = n.layers.get_mut(name) else { return Ok(()) };
+            if layer.rect == rect {
+                return Ok(());
+            }
+            layer.rect = rect;
+            match rect {
+                Some(r) => {
+                    layer.sub.set_position((r.left / scale).round() as i32, (r.top / scale).round() as i32);
+                    layer.surface.set_buffer_scale(scale as i32);
+                }
+                None => {
+                    layer.surface.attach(None, 0, 0);
+                    layer.surface.commit();
+                }
+            }
+            declare_opaque(n, r.state.compositor.as_ref(), &r.queue.handle());
+            // A subsurface's position is the parent's state: commit it.
+            n.surface.commit();
+            r.conn.flush()?;
+            Ok(())
+        });
+    }
 
-    /// Nothing to release (see [`native_layer`](Self::native_layer)).
-    pub fn release_native_layer(&self, _: &str) {}
+    /// Removes native layer `name`; its handle is invalid afterwards (retire the host's
+    /// swapchain first).
+    pub fn release_native_layer(&self, name: &str) {
+        let _ = runtime(|r| {
+            if let Some(n) = r.state.windows.get_mut(&self.id) {
+                n.layers.remove(name);
+                declare_opaque(n, r.state.compositor.as_ref(), &r.queue.handle());
+                n.surface.commit();
+            }
+            r.conn.flush()?;
+            Ok(())
+        });
+    }
 }
 
 thread_local! {
