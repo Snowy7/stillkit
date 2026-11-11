@@ -545,8 +545,32 @@ impl Surface {
                     opaque: false,
                 },
             );
+            // The first configure: bounded, so a compositor that never answers is an error,
+            // not a hang.
+            let deadline = Instant::now() + CONFIGURE_WAIT;
             while !r.state.windows[&id].configured {
-                r.queue.blocking_dispatch(&mut r.state)?;
+                r.queue.dispatch_pending(&mut r.state)?;
+                if r.state.windows[&id].configured {
+                    break;
+                }
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    bail!("the Wayland compositor did not configure the window within {CONFIGURE_WAIT:?}");
+                }
+                r.conn.flush()?;
+                let Some(guard) = r.queue.prepare_read() else { continue };
+                let mut fd = libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                // SAFETY: one initialized pollfd, bounded timeout.
+                let ready = unsafe { libc::poll(&mut fd, 1, left.as_millis().max(1) as i32) } > 0;
+                if ready && fd.revents & libc::POLLIN != 0 {
+                    match guard.read() {
+                        Ok(_) => {}
+                        Err(wayland_client::backend::WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                } else {
+                    drop(guard);
+                }
             }
             Ok(Self {
                 id,
@@ -1690,6 +1714,27 @@ impl Dispatch<wl_surface::WlSurface, ()> for State {
     /// A native layer's surface: its enter/leave and preferred-scale events change nothing
     /// (the window's own surface decides the scale).
     fn event(_: &mut Self, _: &wl_surface::WlSurface, _: wl_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+/// How long a new window waits for the compositor's first configure.
+const CONFIGURE_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether this session can host native layers ([`Surface::native_layer`]): it connects to
+/// the Wayland compositor (on first use) and checks it offers `wl_subcompositor`, and that
+/// stillkit was built with `gpu`. The error says what is missing, for a host deciding before
+/// it opens anything whether its views can show here.
+pub fn native_layer_support() -> Result<()> {
+    if !cfg!(feature = "gpu") {
+        bail!("stillkit was built without its `gpu` feature");
+    }
+    runtime(|r| {
+        anyhow::ensure!(
+            r.state.subcompositor.is_some(),
+            "the Wayland compositor offers no wl_subcompositor"
+        );
+        Ok(())
+    })
+    .context("no Wayland session to show native layers in")
 }
 
 impl Surface {

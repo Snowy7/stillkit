@@ -362,6 +362,50 @@ impl Op {
         }
     }
 
+    /// Native-layer holes in `ops` ([`Op::Hole`]), in drawing order, as device rects cut to
+    /// the clips around them: what a renderer that can't erase paint (a GPU one without
+    /// destructive blends) clips out of the paint drawn before each hole instead.
+    pub fn holes(ops: &[Op]) -> Vec<Rect> {
+        fn walk(ops: &[Op], clip: Rect, map: Option<crate::Transform>, out: &mut Vec<Rect>) {
+            for op in ops {
+                match op {
+                    Op::Hole { rect } => {
+                        let rect = map.map_or(*rect, |t| t.bounds(*rect));
+                        out.push(rect.intersect(clip));
+                    }
+                    Op::Clipped { rect, ops } | Op::RoundedClipped { rect, ops, .. } => {
+                        let rect = map.map_or(*rect, |t| t.bounds(*rect));
+                        walk(ops, clip.intersect(rect), map, out);
+                    }
+                    Op::Transformed { transform, ops } => {
+                        let map = Some(map.map_or(*transform, |m| m.compose(*transform)));
+                        walk(ops, clip, map, out);
+                    }
+                    Op::Blurred { ops, .. } => walk(ops, clip, map, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(ops, Rect::new(-32768.0, -32768.0, 65536.0, 65536.0), None, &mut out);
+        out
+    }
+
+    /// Whether this op draws paint itself, rather than grouping ops, clipping or cutting.
+    pub fn is_paint(&self) -> bool {
+        !matches!(
+            self,
+            Op::Blurred { .. }
+                | Op::BackdropBlur { .. }
+                | Op::Transformed { .. }
+                | Op::Clipped { .. }
+                | Op::RoundedClipped { .. }
+                | Op::Hole { .. }
+                | Op::Clip { .. }
+                | Op::Unclip
+        )
+    }
+
     /// Every pixel this operation may touch, antialiasing included.
     pub fn bounds(&self) -> Rect {
         match self {
