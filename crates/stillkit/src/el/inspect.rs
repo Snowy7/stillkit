@@ -144,6 +144,10 @@ impl Inspector {
                 self.captured = true;
                 Event::Press(shift(p), b)
             }
+            Event::DoubleClick(p, b) if p.at.x >= left => {
+                self.captured = true;
+                Event::DoubleClick(shift(p), b)
+            }
             Event::Release(p, b) if self.captured || p.at.x >= left => {
                 self.captured = false;
                 Event::Release(shift(p), b)

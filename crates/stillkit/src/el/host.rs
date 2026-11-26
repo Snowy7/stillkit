@@ -388,7 +388,7 @@ fn window<S: 'static, V: Fn(&S) -> El<S> + 'static>(app: App<S, V>, args: &Args)
                 continue;
             }
             #[cfg(any(windows, target_os = "macos"))]
-            if let Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) = event {
+            if let Event::Move(p) | Event::Press(p, _) | Event::DoubleClick(p, _) | Event::Release(p, _) = event {
                 client = (p.screen.0 - p.at.x as i32, p.screen.1 - p.at.y as i32);
             }
             if let Event::Move(_) | Event::Press(..) | Event::Release(..) | Event::DoubleClick(..) | Event::Wheel(..) = event {

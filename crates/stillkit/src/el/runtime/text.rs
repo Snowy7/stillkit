@@ -357,7 +357,7 @@ impl<S> Runtime<S> {
     pub(super) fn field_pointer(&mut self, event: &crate::Event, focused: bool) -> bool {
         use crate::{Button, Event};
         match *event {
-            Event::Press(p, Button::Left) => {
+            Event::Press(p, Button::Left) | Event::DoubleClick(p, Button::Left) => {
                 let Some(hit) = self.ix.pressed else { return false };
                 let Some((id, i)) = self.field_of_hit(hit) else { return false };
                 let at=self.list.hits.iter().find(|h|h.id==hit).map_or(p.at,|h|h.unmap(p.at));
@@ -376,15 +376,19 @@ impl<S> Runtime<S> {
                 let scroll_y = self.scrolls.get(&id).map_or(0.0, |v| v.offset(self.anim.t));
                 let s = self.scale;
                 let Some(f) = self.fields.get_mut(&id) else { return false };
-                let clicks = match f.clicks {
-                    Some((at, last, n))
-                        if now.saturating_sub(at) <= MULTI_CLICK
-                            && (last.x - p.at.x).abs() <= 4.0 * s
-                            && (last.y - p.at.y).abs() <= 4.0 * s =>
-                    {
-                        n % 3 + 1
+                let clicks = if matches!(event, Event::DoubleClick(..)) {
+                    2
+                } else {
+                    match f.clicks {
+                        Some((at, last, n))
+                            if now.saturating_sub(at) <= MULTI_CLICK
+                                && (last.x - p.at.x).abs() <= 4.0 * s
+                                && (last.y - p.at.y).abs() <= 4.0 * s =>
+                        {
+                            n % 3 + 1
+                        }
+                        _ => 1,
                     }
-                    _ => 1,
                 };
                 f.clicks = Some((now, p.at, clicks));
                 let at = f.hit(at, scroll_y);

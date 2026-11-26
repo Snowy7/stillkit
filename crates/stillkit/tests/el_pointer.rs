@@ -92,8 +92,13 @@ fn a_double_click_counts_two() {
     let mut rt = rt();
     let r = rt.find("scrub").unwrap();
     rt.update(|s| s.value = 7.0);
+    let at = stillkit::Pointer { at: r.center(), screen: (0, 0) };
     rt.pointer_move(r.center().x, r.center().y);
-    rt.handle(&stillkit::Event::DoubleClick(stillkit::Pointer { at: r.center(), screen: (0, 0) }, stillkit::Button::Left));
+    rt.handle(&stillkit::Event::Press(at, stillkit::Button::Left));
+    rt.handle(&stillkit::Event::Release(at, stillkit::Button::Left));
+    rt.frame(FRAME);
+    rt.handle(&stillkit::Event::DoubleClick(at, stillkit::Button::Left));
+    rt.handle(&stillkit::Event::Release(at, stillkit::Button::Left));
     rt.frame(FRAME);
     assert_eq!(rt.state().value, 0.0);
 }

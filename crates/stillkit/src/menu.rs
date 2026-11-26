@@ -959,7 +959,7 @@ impl<C: Clone> Menu<C> {
                 }
                 None
             }
-            Event::Press(p, _) => {
+            Event::Press(p, _) | Event::DoubleClick(p, _) => {
                 let (panel, target) = self.under(p.screen)?;
                 if self.panels[panel].interaction.is_some() {
                     self.panels[panel].input.pressed = target.map(|id| id as HitId);

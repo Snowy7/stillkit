@@ -1617,7 +1617,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         }
         WM_LBUTTONDBLCLK | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK => {
             let (p, b) = button(button_of(msg));
-            push(id, Event::Press(p, b));
             push(id, Event::DoubleClick(p, b));
         }
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {

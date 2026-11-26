@@ -1118,7 +1118,7 @@ impl<S> Runtime<S> {
 
     fn input(&mut self, event: &Event) {
         match *event {
-            Event::Press(..) | Event::Key(_) | Event::Activated => self.active = true,
+            Event::Press(..) | Event::DoubleClick(..) | Event::Key(_) | Event::Activated => self.active = true,
             Event::Deactivated => self.active = false,
             _ => {}
         }
@@ -1141,7 +1141,9 @@ impl<S> Runtime<S> {
                 }
                 return self.wheel(p.at, delta);
             }
-            Event::Move(p) | Event::Press(p, _) | Event::Release(p, _) => self.pointer = Some(p),
+            Event::Move(p) | Event::Press(p, _) | Event::DoubleClick(p, _) | Event::Release(p, _) => {
+                self.pointer = Some(p);
+            }
             Event::Leave => self.pointer = None,
             _ => {}
         }
@@ -1158,14 +1160,23 @@ impl<S> Runtime<S> {
         self.pointer_input(event);
         self.display_pointer(event);
         if !self.fields.is_empty()
-            && matches!(event, Event::Press(..) | Event::Move(_) | Event::Release(..) | Event::CaptureLost | Event::Cancelled | Event::Leave)
+            && matches!(
+                event,
+                Event::Press(..)
+                    | Event::DoubleClick(..)
+                    | Event::Move(_)
+                    | Event::Release(..)
+                    | Event::CaptureLost
+                    | Event::Cancelled
+                    | Event::Leave
+            )
         {
             let typing = self.typing;
             self.sync_focus();
             self.field_pointer(event, self.typing != typing);
         }
         match *event {
-            Event::Press(p, Button::Left) => {
+            Event::Press(p, Button::Left) | Event::DoubleClick(p, Button::Left) => {
                 self.dragging = self
                     .ix
                     .pressed
@@ -1353,7 +1364,14 @@ impl<S> Runtime<S> {
         match *event {
             Event::Press(p, button) | Event::DoubleClick(p, button) if self.capture.is_none() => {
                 let clicks = if matches!(event, Event::DoubleClick(..)) { 2 } else { 1 };
-                let Some(hit) = self.ix.hover.filter(|&h| self.takes_pointer(h)) else { return };
+                let under = self
+                    .pointing
+                    .as_ref()
+                    .unwrap_or(&self.list)
+                    .hit_at(p.at)
+                    .filter(|h| h.actionable)
+                    .map(|h| h.id);
+                let Some(hit) = under.or(self.ix.hover).filter(|&h| self.takes_pointer(h)) else { return };
                 self.capture = Some(Capture { hit, button, origin: p.at, last: p.at });
                 self.push_pointer(hit, Phase::Down, button, p.at, p.at, p.at, clicks);
             }
